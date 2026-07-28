@@ -549,6 +549,19 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   chk(al && near(al.x, 5) && near(al.y, 2), 'aligns to post X and Y');
   chk(snapAlign({x:20, y:20}, null) === null, 'nothing to align to');
   state.polys = wasPolys;
+  // moving and resizing buildings snap their edges/corners to other building edges
+  const wasBuilds = state.builds, wasObjectSnap = state.snapBld;
+  state.builds = [{x:0.3,y:0.4,w:2,h:2}, {x:4,y:5,w:2,h:2}];
+  state.snapBld = true;
+  let bs = snapObjectAxes({x:2.15,y:5}, [0,2], [0,2], 1);
+  chk(near(bs.x, 2.3) && near(bs.y, 5), 'building edge snaps to building edge');
+  bs = snapObjectAxes({x:2.15,y:2.25}, [0], [0], 1);
+  chk(near(bs.x, 2.3) && near(bs.y, 2.4), 'building handle snaps to building corner');
+  state.snapBld = false;
+  bs = snapObjectAxes({x:2.15,y:2.25}, [0], [0], 1);
+  chk(near(bs.x, 2.15) && near(bs.y, 2.25), 'object snap toggle disables building snap');
+  state.builds = wasBuilds;
+  state.snapBld = wasObjectSnap;
   state.snapGrid = wasGrid;
   m = calcMaterials([sq()], railMat);
   chk(m.rails === 60 && m.palings === 0, 'rail style materials');
@@ -733,6 +746,29 @@ function snapGridPt(w){
   if (!state.snapGrid) return { x:w.x, y:w.y };
   const g = gridStep();
   return { x: Math.round(w.x/g)*g, y: Math.round(w.y/g)*g };
+}
+
+// Snap one or more moving X/Y axes to fence posts or the edges of other buildings.
+// Object targets win within the screen-space tolerance; the grid remains the fallback.
+function snapObjectAxes(w, xOffsets, yOffsets, skipBld){
+  const base = snapGridPt(w);
+  if (!state.snapBld) return base;
+  const xs = [], ys = [];
+  for (const pl of state.polys) for (const q of pl.pts){ xs.push(q.x); ys.push(q.y); }
+  state.builds.forEach((b, i) => {
+    if (i === skipBld) return;
+    xs.push(b.x, b.x+b.w); ys.push(b.y, b.y+b.h);
+  });
+  const nearest = (v, offsets, targets, fallback) => {
+    let out = fallback, bd = HIT.edge / view.s;
+    for (const off of offsets) for (const target of targets){
+      const d = Math.abs(target - (v + off));
+      if (d < bd){ bd = d; out = target - off; }
+    }
+    return out;
+  };
+  return { x:nearest(w.x, xOffsets, xs, base.x),
+           y:nearest(w.y, yOffsets, ys, base.y) };
 }
 
 // What is under screen point (sx,sy)? Priority: points > resize handles > segments > buildings.
@@ -1451,13 +1487,14 @@ cv.addEventListener('pointermove', e => {
   if (drag.t === 'pt'){ movePoint(drag.p, drag.i, w); }
   if (drag.t === 'bld'){
     const b = state.builds[drag.i];
-    const p = snapGridPt({ x: w.x-drag.ox, y: w.y-drag.oy });
+    const p = snapObjectAxes({ x:w.x-drag.ox, y:w.y-drag.oy },
+                             [0,b.w], [0,b.h], drag.i);
     b.x = p.x; b.y = p.y;
   }
   if (drag.t === 'hdl'){                      // resize from the dragged corner, opposite corner anchored
     const b = state.builds[drag.i];
     const opp = [[b.x+b.w,b.y+b.h],[b.x,b.y+b.h],[b.x,b.y],[b.x+b.w,b.y]][drag.k];
-    const c = snapGridPt(w);
+    const c = snapObjectAxes(w, [0], [0], drag.i);
     b.x = Math.min(c.x, opp[0]); b.w = Math.max(MIN_BLD, Math.abs(c.x-opp[0]));
     b.y = Math.min(c.y, opp[1]); b.h = Math.max(MIN_BLD, Math.abs(c.y-opp[1]));
   }
