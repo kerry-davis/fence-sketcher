@@ -1182,7 +1182,7 @@ function build3(){
         if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
         if (!pl.closed && i === pl.pts.length-2 && k === segmentPosts.length-1 && !ends.end) return;
         const key = q.x.toFixed(3)+','+q.y.toFixed(3), old = posts.get(key);
-        if (!old || H > old.H) posts.set(key, { q, H });     // shared post uses the taller fence
+        if (!old || H > old.H) posts.set(key, { q, H, ang }); // shared post uses taller fence's angle
       });
       if (a.gateAfter) continue;               // a gate is an opening — no infill
       if (mat.style === 'rail'){
@@ -1198,8 +1198,8 @@ function build3(){
       }
     }
   });
-  for (const { q, H } of posts.values())
-    pushBox(F, q.x, H/2, q.y, POST_SIDE/2, H/2, POST_SIDE/2, 0, WOOD.post);
+  for (const { q, H, ang } of posts.values())
+    pushBox(F, q.x, H/2, q.y, POST_SIDE/2, H/2, POST_SIDE/2, ang, WOOD.post);
   return F;
 }
 
