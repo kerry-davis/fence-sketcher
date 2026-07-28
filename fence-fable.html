@@ -600,9 +600,9 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   chk(ry.length===3 && near(ry[0],0.2) && near(ry[2],1.1), '3D rail heights');
   const rm = segmentSideMid({x:0,y:0}, {x:10,y:0}, 0.0725);
   chk(near(rm.x,5) && near(rm.y,0.0725), '3D rails sit against one post face');
-  const rb = insetRailBay({x:0,y:0}, {x:2,y:0}, 0.05, 0.05);
-  chk(near(rb.a.x,0.05) && near(rb.b.x,1.95) && near(rb.len,1.9),
-      '3D rail bay stops at both post faces');
+  const rb = railBayBounds({x:0,y:0}, {x:2,y:0}, 0.05, 0.05);
+  chk(near(rb.a.x,-0.05) && near(rb.b.x,2.05) && near(rb.len,2.1),
+      '3D outer rail bay is flush with both post ends');
   // a box is 5 quads (no underside) with outward normals
   const F3 = []; pushBox(F3, 0,1,0, 0.5,1,0.25, 0, [1,2,3]);
   chk(F3.length===5 && F3.every(f => f.p.length===4), '3D box faces');
@@ -1154,12 +1154,13 @@ function segmentSideMid(a, b, off){
   const L = segLen(a,b) || 1, ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
   return { x:(a.x+b.x)/2-uy*off, y:(a.y+b.y)/2+ux*off };
 }
-// Shorten one rail bay so it terminates at the facing sides of its two posts.
-function insetRailBay(a, b, startInset, endInset){
+// Extend an outer rail bay to the outside face of an end post. Interior bays use zero
+// overhang, so adjacent rails meet continuously at each intermediate post's centre.
+function railBayBounds(a, b, startOverhang, endOverhang){
   const L = segLen(a,b) || 1, ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
-  const p = { x:a.x+ux*startInset, y:a.y+uy*startInset };
-  const q = { x:b.x-ux*endInset, y:b.y-uy*endInset };
-  return { a:p, b:q, len:Math.max(0, L-startInset-endInset) };
+  const p = { x:a.x-ux*startOverhang, y:a.y-uy*startOverhang };
+  const q = { x:b.x+ux*endOverhang, y:b.y+uy*endOverhang };
+  return { a:p, b:q, len:L+startOverhang+endOverhang };
 }
 // Box -> 5 quads (the underside is never seen). Each face carries its outward
 // normal, so shading and back-face culling don't depend on vertex winding.
@@ -1199,10 +1200,11 @@ function build3(){
       if (a.gateAfter) continue;               // a gate is an opening — no infill
       if (mat.style === 'rail'){
         for (let k = 0; k < segmentPosts.length-1; k++){
-          const bay = insetRailBay(segmentPosts[k], segmentPosts[k+1],
-                                   hasPost(k) ? POST_SIDE/2 : 0,
-                                   hasPost(k+1) ? POST_SIDE/2 : 0);
-          if (bay.len < 1e-6) continue;
+          const runStart = !pl.closed && i === 0 && k === 0;
+          const runEnd = !pl.closed && i === pl.pts.length-2 && k === segmentPosts.length-2;
+          const bay = railBayBounds(segmentPosts[k], segmentPosts[k+1],
+                                    runStart && hasPost(k) ? POST_SIDE/2 : 0,
+                                    runEnd && hasPost(k+1) ? POST_SIDE/2 : 0);
           const mid = segmentSideMid(bay.a, bay.b, POST_SIDE/2 + RAIL_T/2);
           for (const ry of railYs(mat)){
             if (ry + mat.railW/2 > H + 1e-6) break;
