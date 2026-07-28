@@ -589,9 +589,17 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   let pa = postsAlong({x:0,y:0}, {x:10,y:0}, 1.5, false);
   chk(pa.length===8 && near(pa[0].x,0) && near(pa[7].x,10), '3D posts along a run');
   chk(postsAlong({x:0,y:0},{x:10,y:0},1.5,true).length===2, '3D gate = one bay, two posts');
+  let ep = postEndFlags([{pts:[{x:0,y:0},{x:2,y:0}],closed:false}], 0, {ends:1});
+  chk(!ep.start && ep.end, '3D one-end override keeps the far end');
+  ep = postEndFlags(joined, 1, {ends:'auto'});
+  chk(!ep.start && ep.end, '3D auto end posts omit an earlier shared post');
+  ep = postEndFlags(joined, 1, {ends:2});
+  chk(ep.start && ep.end, '3D both-ends override keeps both ends');
   // 3 rails, 100 mm deep, 350 mm gaps, 150 mm off the ground -> centres 200/650/1100 mm
   const ry = railYs({rails:3, railW:0.1, railGap:0.35, botOff:0.15});
   chk(ry.length===3 && near(ry[0],0.2) && near(ry[2],1.1), '3D rail heights');
+  const rm = segmentSideMid({x:0,y:0}, {x:10,y:0}, 0.0725);
+  chk(near(rm.x,5) && near(rm.y,0.0725), '3D rails sit against one post face');
   // a box is 5 quads (no underside) with outward normals
   const F3 = []; pushBox(F3, 0,1,0, 0.5,1,0.25, 0, [1,2,3]);
   chk(F3.length===5 && F3.every(f => f.p.length===4), '3D box faces');
@@ -943,7 +951,7 @@ function paint(){ if (!raf) raf = requestAnimationFrame(doPaint); }
 function doPaint(){
   raf = 0;
   ctx.clearRect(0,0,cw,ch);
-  if (mode3d){ paint3d(); return; }
+  if (mode3d){ fdel.style.display = 'none'; paint3d(); return; }
 
   // --- grid: 1 square = 1 unit, coarsened (×2, ×5, ×10…) when zoomed out ---
   let step = gridStep(); const ladder = [2, 2.5, 2]; let li = 0;
@@ -1120,12 +1128,28 @@ function postsAlong(a, b, spacing, gate){
   for (let k = 0; k <= n; k++) out.push({ x: a.x+(b.x-a.x)*k/n, y: a.y+(b.y-a.y)*k/n });
   return out;
 }
+// Which ends of an open run get a post in 3D. "One end" keeps the far end; Auto omits
+// an end already represented by an earlier fence, matching calcMaterials/sharedEnds.
+function postEndFlags(polys, idx, mat){
+  const pl = polys[idx];
+  if (pl.closed) return { start:true, end:true };
+  const e = endsOf(mat);
+  if (e !== 'auto'){ const n = +e; return { start:n === 2, end:n >= 1 }; }
+  const shared = q => polys.slice(0,idx).some(prev =>
+    prev.pts.some(r => Math.hypot(r.x-q.x, r.y-q.y) < 1e-4));
+  return { start:!shared(pl.pts[0]), end:!shared(pl.pts[pl.pts.length-1]) };
+}
 // Rail centre heights, bottom up — the layout derivedRails/derivedGap describe.
 function railYs(mat){
   const d = mat.railW + mat.railGap, ys = [];
   for (let k = 0; k < Math.max(1, mat.rails|0); k++)
     ys.push((mat.botOff||0) + k*d + mat.railW/2);
   return ys;
+}
+// Midpoint offset to the left side of a directed segment in plan coordinates.
+function segmentSideMid(a, b, off){
+  const L = segLen(a,b) || 1, ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
+  return { x:(a.x+b.x)/2-uy*off, y:(a.y+b.y)/2+ux*off };
 }
 // Box -> 5 quads (the underside is never seen). Each face carries its outward
 // normal, so shading and back-face culling don't depend on vertex winding.
@@ -1144,21 +1168,28 @@ function build3(){
   const F = [], posts = new Map();             // keyed by position: shared posts drawn once
   for (const b of state.builds)
     pushBox(F, b.x+b.w/2, BLD_H/2, b.y+b.h/2, b.w/2, BLD_H/2, b.h/2, 0, WOOD.bld);
-  state.polys.forEach(pl => {
+  state.polys.forEach((pl, p) => {
     if (pl.pts.length < 2) return;
     const mat = pl.mat || state.mat;
     const H = Math.max(0.2, mat.height), sp = Math.max(0.1, mat.spacing);
+    const ends = postEndFlags(state.polys, p, mat);
     for (const [i,a,b] of segsOf(pl)){
       const L = segLen(a,b);
       if (L < 1e-6) continue;
       const ang = Math.atan2(b.y-a.y, b.x-a.x), ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
-      for (const q of postsAlong(a, b, sp, a.gateAfter))
-        posts.set(q.x.toFixed(3)+','+q.y.toFixed(3), { q, H });
+      const segmentPosts = postsAlong(a, b, sp, a.gateAfter);
+      segmentPosts.forEach((q, k) => {
+        if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
+        if (!pl.closed && i === pl.pts.length-2 && k === segmentPosts.length-1 && !ends.end) return;
+        const key = q.x.toFixed(3)+','+q.y.toFixed(3), old = posts.get(key);
+        if (!old || H > old.H) posts.set(key, { q, H });     // shared post uses the taller fence
+      });
       if (a.gateAfter) continue;               // a gate is an opening — no infill
       if (mat.style === 'rail'){
+        const mid = segmentSideMid(a, b, POST_SIDE/2 + RAIL_T/2);
         for (const ry of railYs(mat)){
           if (ry + mat.railW/2 > H + 1e-6) break;
-          pushBox(F, a.x+ux*L/2, ry, a.y+uy*L/2, L/2, mat.railW/2, RAIL_T/2, ang, WOOD.rail);
+          pushBox(F, mid.x, ry, mid.y, L/2, mat.railW/2, RAIL_T/2, ang, WOOD.rail);
         }
       } else if (mat.paling > 0.001){
         const pitch = mat.paling + mat.gap;
