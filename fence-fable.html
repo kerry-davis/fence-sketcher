@@ -548,9 +548,15 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   al = snapAlign({x:5.1, y:2.05}, null);
   chk(al && near(al.x, 5) && near(al.y, 2), 'aligns to post X and Y');
   chk(snapAlign({x:20, y:20}, null) === null, 'nothing to align to');
-  state.polys = wasPolys;
-  // moving and resizing buildings snap their edges/corners to other building edges
+  // diagonal alignment: project onto the ray from the anchor through a neighbouring corner
+  state.polys = [];
   const wasBuilds = state.builds, wasObjectSnap = state.snapBld;
+  state.builds = [{x:4,y:3,w:2,h:2}];
+  let ray = snapObjectRay({x:2,y:1.55}, anchor, null);
+  chk(ray && near(4*ray.y - 3*ray.x, 0) && ray.ref.x===4 && ray.ref.y===3,
+      'aligns through a neighbouring corner');
+  chk(snapObjectRay({x:2,y:4}, anchor, null) === null, 'far from neighbour ray = no alignment');
+  // moving and resizing buildings snap their edges/corners to other building edges
   state.builds = [{x:0.3,y:0.4,w:2,h:2}, {x:4,y:5,w:2,h:2}];
   state.snapBld = true;
   let bs = snapObjectAxes({x:2.15,y:5}, [0,2], [0,2], 1);
@@ -562,6 +568,7 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   chk(near(bs.x, 2.15) && near(bs.y, 2.25), 'object snap toggle disables building snap');
   state.builds = wasBuilds;
   state.snapBld = wasObjectSnap;
+  state.polys = wasPolys;
   state.snapGrid = wasGrid;
   m = calcMaterials([sq()], railMat);
   chk(m.rails === 60 && m.palings === 0, 'rail style materials');
@@ -689,9 +696,37 @@ function snapAlign(w, skip){
   return { x: ax ? ax.x : g.x, y: ay ? ay.y : g.y, ax, ay };
 }
 
+// Project onto the ray from the drawing anchor through a neighbouring post or building
+// corner. This extends object alignment to arbitrary angles, not just matching X or Y.
+function snapObjectRay(w, anchor, skip){
+  if (!anchor) return null;
+  let best = null, bd = ANGLE_TOL / view.s;
+  const consider = q => {
+    const dx = q.x-anchor.x, dy = q.y-anchor.y, L = Math.hypot(dx,dy);
+    if (L < 1e-6) return;
+    const ux = dx/L, uy = dy/L;
+    const wx = w.x-anchor.x, wy = w.y-anchor.y;
+    const along = wx*ux + wy*uy;
+    if (along <= 0) return;
+    const off = Math.abs(wx*uy - wy*ux);
+    if (off < bd){
+      bd = off;
+      best = { x:anchor.x+ux*along, y:anchor.y+uy*along, angled:true, ref:q };
+    }
+  };
+  state.polys.forEach((pl, p) => pl.pts.forEach((q, i) => {
+    if (skip && skip.p === p && skip.i === i) return;
+    consider(q);
+  }));
+  for (const b of state.builds)
+    for (const [x,y] of [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]])
+      consider({x,y});
+  return best;
+}
+
 // Snap a world point for fence drawing. Priority: existing fence points & building corners
-// (nearest wins), then fence lines & building edges, then 45° alignment off the anchor,
-// then X/Y alignment with any existing post, then the grid.
+// (nearest wins), then diagonal alignment through a neighbouring corner, fence lines &
+// building edges, 45° alignment off the anchor, X/Y alignment, then the grid.
 // skip = {p,i} point to ignore (the one being dragged / drawn from).
 function snapFence(w, skip, anchor, prevDir){
   guides = null;
@@ -708,6 +743,8 @@ function snapFence(w, skip, anchor, prevDir){
         if (d < bd){ bd = d; best = { x: cx, y: cy }; }
       }
     if (best) return best;
+    const ray = snapObjectRay(w, anchor, skip);
+    if (ray){ guides = { ray:ray.ref, anchor }; return ray; }
     let bed = HIT.edge / view.s;
     state.polys.forEach((pl, p) => {
       for (const [i, a, b2] of segsOf(pl)){
@@ -983,6 +1020,13 @@ function doPaint(){
 
   // dashed guides back to whatever post/corner the point lined up with
   const gd = (hover && hover.guides) || ((drag && drag.t === 'pt') ? guides : null);
+  if (gd && gd.ray){
+    const A = W2S(gd.anchor), R = W2S(gd.ray);
+    ctx.setLineDash([4,4]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(R.x,R.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = ACCENT; ctx.fillRect(R.x-3, R.y-3, 6, 6);
+  }
   if (gd) for (const ref of [gd.ax, gd.ay]){
     if (!ref) continue;
     const A = W2S(ref), B = W2S(gd);
