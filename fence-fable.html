@@ -1199,17 +1199,13 @@ function build3(){
       });
       if (a.gateAfter) continue;               // a gate is an opening — no infill
       if (mat.style === 'rail'){
-        for (let k = 0; k < segmentPosts.length-1; k++){
-          const runStart = !pl.closed && i === 0 && k === 0;
-          const runEnd = !pl.closed && i === pl.pts.length-2 && k === segmentPosts.length-2;
-          const bay = railBayBounds(segmentPosts[k], segmentPosts[k+1],
-                                    runStart && hasPost(k) ? POST_SIDE/2 : 0,
-                                    runEnd && hasPost(k+1) ? POST_SIDE/2 : 0);
-          const mid = segmentSideMid(bay.a, bay.b, POST_SIDE/2 + RAIL_T/2);
-          for (const ry of railYs(mat)){
-            if (ry + mat.railW/2 > H + 1e-6) break;
-            pushBox(F, mid.x, ry, mid.y, bay.len/2, mat.railW/2, RAIL_T/2, ang, WOOD.rail);
-          }
+        const runStart = !pl.closed && i === 0 && hasPost(0);
+        const runEnd = !pl.closed && i === pl.pts.length-2 && hasPost(segmentPosts.length-1);
+        const rail = railBayBounds(a, b, runStart ? POST_SIDE/2 : 0, runEnd ? POST_SIDE/2 : 0);
+        const mid = segmentSideMid(rail.a, rail.b, POST_SIDE/2 + RAIL_T/2);
+        for (const ry of railYs(mat)){
+          if (ry + mat.railW/2 > H + 1e-6) break;
+          pushBox(F, mid.x, ry, mid.y, rail.len/2, mat.railW/2, RAIL_T/2, ang, WOOD.rail);
         }
       } else if (mat.paling > 0.001){
         const pitch = mat.paling + mat.gap;
