@@ -607,6 +607,9 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   const F3 = []; pushBox(F3, 0,1,0, 0.5,1,0.25, 0, [1,2,3]);
   chk(F3.length===5 && F3.every(f => f.p.length===4), '3D box faces');
   chk(near(F3[0].n[0],1) && near(F3[4].n[1],1), '3D box normals point out');
+  const joinedRail = []; pushBox(joinedRail, 0,1,0, 0.5,1,0.25, 0, [1,2,3],
+                                 {start:false,end:false});
+  chk(joinedRail.length===3, '3D joined rail omits hidden butt faces');
   const rot = []; pushBox(rot, 0,0,0, 1,1,1, Math.PI/2, [0,0,0]);
   chk(near(rot[0].n[0],0) && near(rot[0].n[2],1), '3D rotated normal follows the segment');
   // near-plane clip: a quad straddling the camera keeps only what is in front
@@ -1165,12 +1168,14 @@ function railBayBounds(a, b, startOverhang, endOverhang){
 // Box -> 5 quads (the underside is never seen). Each face carries its outward
 // normal, so shading and back-face culling don't depend on vertex winding.
 // ang rotates about the vertical axis; plan (x,y) maps to world (x,z), y is up.
-function pushBox(F, cx,cy,cz, hx,hy,hz, ang, col){
+function pushBox(F, cx,cy,cz, hx,hy,hz, ang, col, caps = null){
   const ca = Math.cos(ang), sa = Math.sin(ang);
   const P = (i,j,k) => [cx + i*hx*ca - k*hz*sa, cy + j*hy, cz + i*hx*sa + k*hz*ca];
   const N = (i,k) => [i*ca - k*sa, 0, i*sa + k*ca];
-  F.push({ p:[P(1,-1,-1),P(1,-1,1),P(1,1,1),P(1,1,-1)],     n:N(1,0),  col });
-  F.push({ p:[P(-1,-1,-1),P(-1,-1,1),P(-1,1,1),P(-1,1,-1)], n:N(-1,0), col });
+  if (!caps || caps.end)
+    F.push({ p:[P(1,-1,-1),P(1,-1,1),P(1,1,1),P(1,1,-1)],     n:N(1,0),  col });
+  if (!caps || caps.start)
+    F.push({ p:[P(-1,-1,-1),P(-1,-1,1),P(-1,1,1),P(-1,1,-1)], n:N(-1,0), col });
   F.push({ p:[P(-1,-1,1),P(1,-1,1),P(1,1,1),P(-1,1,1)],     n:N(0,1),  col });
   F.push({ p:[P(-1,-1,-1),P(1,-1,-1),P(1,1,-1),P(-1,1,-1)], n:N(0,-1), col });
   F.push({ p:[P(-1,1,-1),P(1,1,-1),P(1,1,1),P(-1,1,1)],     n:[0,1,0], col });
@@ -1199,13 +1204,18 @@ function build3(){
       });
       if (a.gateAfter) continue;               // a gate is an opening — no infill
       if (mat.style === 'rail'){
-        const runStart = !pl.closed && i === 0 && hasPost(0);
-        const runEnd = !pl.closed && i === pl.pts.length-2 && hasPost(segmentPosts.length-1);
-        const rail = railBayBounds(a, b, runStart ? POST_SIDE/2 : 0, runEnd ? POST_SIDE/2 : 0);
-        const mid = segmentSideMid(rail.a, rail.b, POST_SIDE/2 + RAIL_T/2);
-        for (const ry of railYs(mat)){
-          if (ry + mat.railW/2 > H + 1e-6) break;
-          pushBox(F, mid.x, ry, mid.y, rail.len/2, mat.railW/2, RAIL_T/2, ang, WOOD.rail);
+        for (let k = 0; k < segmentPosts.length-1; k++){
+          const first = k === 0, last = k === segmentPosts.length-2;
+          const runStart = !pl.closed && i === 0 && first && hasPost(k);
+          const runEnd = !pl.closed && i === pl.pts.length-2 && last && hasPost(k+1);
+          const rail = railBayBounds(segmentPosts[k], segmentPosts[k+1],
+                                     runStart ? POST_SIDE/2 : 0, runEnd ? POST_SIDE/2 : 0);
+          const mid = segmentSideMid(rail.a, rail.b, POST_SIDE/2 + RAIL_T/2);
+          for (const ry of railYs(mat)){
+            if (ry + mat.railW/2 > H + 1e-6) break;
+            pushBox(F, mid.x, ry, mid.y, rail.len/2, mat.railW/2, RAIL_T/2, ang, WOOD.rail,
+                    {start:first,end:last});
+          }
         }
       } else if (mat.paling > 0.001){
         const pitch = mat.paling + mat.gap;
