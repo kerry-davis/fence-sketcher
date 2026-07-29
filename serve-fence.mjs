@@ -4,6 +4,7 @@
 //   GET  /backups          -> [{name, mtime}] newest first
 //   GET  /backups/<name>   -> backup JSON
 //   PUT  /backups/<name>   -> save backup (body must be JSON, <= 2 MB; same name overwrites)
+//   POST /backups/<name>   -> create backup; fails if the name already exists
 //   DELETE /backups/<name> -> remove backup
 //   PATCH  /backups/<name> -> rename; body {"name":"new-name"}
 import http from 'node:http';
@@ -45,13 +46,15 @@ http.createServer((req, res) => {
       req.on('data', d => { body += d; if (body.length > 2e6) req.destroy(); });
       req.on('end', () => {
         try { JSON.parse(body); } catch { return send(400, '{"err":"not json"}'); }
+        if (req.method === 'POST' && fs.existsSync(file)) return send(409, '{"err":"exists"}');
         fs.writeFileSync(file, body);
         send(200, '{"ok":true}');
       });
       return;
     }
     if (req.method === 'DELETE') {
-      if (fs.existsSync(file)) fs.unlinkSync(file);
+      if (!fs.existsSync(file)) return send(404, '{"err":"not found"}');
+      fs.unlinkSync(file);
       return send(200, '{"ok":true}');
     }
     if (req.method === 'PATCH') {
@@ -62,6 +65,8 @@ http.createServer((req, res) => {
         try { to = JSON.parse(body).name; } catch { return send(400, '{"err":"bad body"}'); }
         if (!/^[a-zA-Z0-9._-]{1,64}$/.test(to || '')) return send(400, '{"err":"bad name"}');
         if (!fs.existsSync(file)) return send(404, '{"err":"not found"}');
+        if (to !== m[1] && fs.existsSync(path.join(BK, to + '.json')))
+          return send(409, '{"err":"exists"}');
         fs.renameSync(file, path.join(BK, to + '.json'));
         send(200, '{"ok":true}');
       });

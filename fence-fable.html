@@ -119,6 +119,25 @@
   #perFence .row.cur{color:var(--accent);font-weight:600}
   #perFence .row.excluded{opacity:.75}
   .note{color:var(--muted);font-size:12px;margin:6px 0 0}
+  .srOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+          clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  #bkSec .fileRow{margin-top:8px}
+  #bkSec .fileRow select{min-width:0}
+  #bkSec .iconBtn{width:44px;padding:0;flex:none}
+  #bkStatus[data-kind="error"], #bkDialogError{color:#b91c1c}
+  #bkStatus[data-kind="success"]{color:var(--accent)}
+  dialog{width:min(420px,calc(100vw - 28px));padding:0;color:var(--ink);background:var(--card);
+         border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 60px #0006}
+  dialog::backdrop{background:#0009}
+  .dialogBody{padding:18px}
+  .dialogBody h2{font-size:18px;margin:0 0 8px}
+  .dialogBody>p{margin:0 0 14px;color:var(--muted)}
+  .dialogBody label{display:block;font-size:13px;font-weight:600}
+  .dialogBody input{width:100%;margin-top:5px;padding:10px;font:inherit;color:var(--ink);
+                    background:var(--card);border:1px solid var(--line);border-radius:8px}
+  .dialogBody .fieldHint{font-size:12px;margin:5px 0 0}
+  #bkDialogError{min-height:18px;font-size:12px;margin:5px 0 0}
+  .dialogActions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 
   button{white-space:nowrap}
   /* 3D view: the plan-only overlays have nothing to say */
@@ -265,22 +284,44 @@
     </section>
 
     <section id="bkSec" style="display:none">
-      <h2>Backups on server</h2>
+      <h2>Saved drawings</h2>
       <div class="row">
         <button id="bkSave" class="primary" style="flex:1">💾 Save</button>
-        <button id="bkSaveAs" title="Save as a new backup">＋ New</button>
+        <button id="bkSaveAs" title="Save as a new drawing">＋ Save as…</button>
       </div>
-      <p class="note" id="bkCur"></p>
-      <div class="row" style="margin-top:8px">
-        <select id="bkList"></select>
-        <button id="bkLoad">Restore</button>
-        <button id="bkRen" title="Rename backup">✏️</button>
-        <button id="bkDel" class="danger" title="Delete backup">🗑</button>
+      <p class="note" id="bkCur" aria-live="polite"></p>
+      <div class="row fileRow">
+        <label class="srOnly" for="bkList">Saved drawing</label>
+        <select id="bkList" aria-label="Saved drawing"></select>
+        <button id="bkLoad">Open</button>
+        <button id="bkRen" class="iconBtn" title="Rename saved drawing"
+                aria-label="Rename saved drawing">✏️</button>
+        <button id="bkDel" class="danger iconBtn" title="Delete saved drawing"
+                aria-label="Delete saved drawing">🗑</button>
       </div>
-      <p class="note">Stored on the NUC — restore from any of your devices.</p>
+      <p class="note" id="bkStatus" role="status" aria-live="polite"></p>
+      <p class="note">Saved on gbot and available to your Tailscale devices.</p>
     </section>
   </aside>
 </main>
+
+<dialog id="bkDialog" aria-labelledby="bkDialogTitle">
+  <form id="bkDialogForm">
+    <div class="dialogBody">
+      <h2 id="bkDialogTitle"></h2>
+      <p id="bkDialogText"></p>
+      <label id="bkNameWrap" for="bkName">Drawing name
+        <input id="bkName" maxlength="64" autocomplete="off" spellcheck="false">
+      </label>
+      <p class="fieldHint" id="bkNameHint">Use letters, numbers, dots, hyphens, or underscores.</p>
+      <p id="bkDialogError" role="alert"></p>
+      <div class="dialogActions">
+        <button type="button" id="bkDialogCancel">Cancel</button>
+        <button type="submit" id="bkDialogConfirm" class="primary"></button>
+      </div>
+    </div>
+  </form>
+</dialog>
 
 <script>
 'use strict';
@@ -2726,84 +2767,208 @@ function syncControls(){   // push state back into the toolbar/panel widgets aft
 }
 
 /* ---- named backups on the fence server (see ~/fence/serve-fence.mjs) ----
-   Document model: the app tracks the "current" backup. Save overwrites it with
-   no prompts; New starts a fresh timestamped one; Restore/Delete keep it in sync. */
+   Document model: the app tracks the "current" backup. Save overwrites it;
+   Save as, Open, Rename, and Delete use confirmed dialog workflows. */
 const BK_KEY = 'fenceFable.backupName';
+const BK_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 let bkCurrent = '';
+let bkItems = [], bkDialogAction = null, bkBusy = false;
 try { bkCurrent = localStorage.getItem(BK_KEY) || ''; } catch(e) {}
 
 function setBkCurrent(name){
   bkCurrent = name;
   try { localStorage.setItem(BK_KEY, name); } catch(e) {}
-  $('bkCur').textContent = name ? `Current: ${name}` : 'Save creates your first backup.';
+  $('bkCur').textContent = name ? `Current file: ${name}` : 'No current server file.';
+  $('bkSave').textContent = name ? '💾 Save' : '💾 Save as…';
 }
 function bkAutoName(){
   const d = new Date(), p = n => String(n).padStart(2,'0');
   return `fence-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
-async function refreshBackups(){
+const bkSelected = () => $('bkList').value;
+const bkPath = name => 'backups/' + encodeURIComponent(name);
+function setBkStatus(message, kind=''){
+  $('bkStatus').textContent = message;
+  $('bkStatus').dataset.kind = kind;
+}
+function syncBkActions(){
+  const hasSelection = !!bkSelected();
+  $('bkList').disabled = bkBusy || !bkItems.length;
+  $('bkSave').disabled = bkBusy;
+  $('bkSaveAs').disabled = bkBusy;
+  for (const id of ['bkLoad','bkRen','bkDel']) $(id).disabled = bkBusy || !hasSelection;
+  $('bkSec').setAttribute('aria-busy', String(bkBusy));
+}
+function setBkBusy(busy){
+  bkBusy = busy;
+  syncBkActions();
+}
+async function bkRequest(path, options, fallback){
+  let r;
+  try { r = await fetch(path, options); }
+  catch(e) { throw new Error('Could not reach the gbot file server.'); }
+  let body = {};
+  try { body = await r.json(); } catch(e) {}
+  if (!r.ok){
+    const messages = { exists:'A drawing with that name already exists.',
+                       'not found':'That saved drawing no longer exists.',
+                       'bad name':'Use a valid drawing name.' };
+    throw new Error(messages[body.err] || fallback);
+  }
+  return body;
+}
+async function refreshBackups(preferred=''){
+  const wasVisible = $('bkSec').style.display !== 'none';
   try {
-    const r = await fetch('backups');
-    if (!r.ok) throw 0;
-    const list = await r.json();
+    const list = await bkRequest('backups', {}, 'Could not load saved drawings.');
+    bkItems = list;
     $('bkSec').style.display = '';
     $('bkList').innerHTML = list.length
       ? list.map(b => `<option value="${b.name}">${b.name}</option>`).join('')
-      : '<option value="">(no backups yet)</option>';
-    if (list.some(b => b.name === bkCurrent)) $('bkList').value = bkCurrent;
-    setBkCurrent(bkCurrent);          // render the "Current:" line
-  } catch(e) { /* no server behind us (e.g. opened as a local file) — section stays hidden */ }
+      : '<option value="">No saved drawings</option>';
+    if (bkCurrent && !list.some(b => b.name === bkCurrent)) setBkCurrent('');
+    const selected = preferred || bkCurrent;
+    if (selected && list.some(b => b.name === selected)) $('bkList').value = selected;
+    setBkCurrent(bkCurrent);
+    syncBkActions();
+  } catch(e) {
+    if (wasVisible) setBkStatus(e.message, 'error');
+    else $('bkSec').style.display = 'none'; // local file without the optional server
+  }
 }
-async function saveBackup(name){
+function uniqueBkName(){
+  const base = bkAutoName();
+  let name = base, n = 2;
+  while (bkItems.some(b => b.name === name)) name = base + '-' + n++;
+  return name;
+}
+function validateBkName(name, original=''){
+  if (!name) return 'Enter a name.';
+  if (!BK_NAME_RE.test(name)) return 'Start with a letter or number; then use letters, numbers, dots, hyphens, or underscores.';
+  if (name === original) return 'Enter a different name.';
+  if (bkItems.some(b => b.name === name)) return 'A drawing with that name already exists.';
+  return '';
+}
+function syncBkDialog(){
+  if (!bkDialogAction) return;
+  const needsName = bkDialogAction.type === 'create' || bkDialogAction.type === 'rename';
+  const error = needsName ? validateBkName($('bkName').value.trim(), bkDialogAction.name || '') : '';
+  $('bkDialogError').textContent = error;
+  $('bkDialogConfirm').disabled = bkBusy || !!error;
+}
+function openBkDialog(type, name=''){
+  const config = {
+    create: ['Save as new drawing','Choose a name before creating this saved copy.','Save drawing'],
+    rename: ['Rename saved drawing',`Choose a new name for “${name}”.`,'Rename'],
+    open:   ['Open saved drawing?',`Open “${name}” and replace the drawing currently on the canvas? You can Undo this change.`,'Open'],
+    delete: ['Delete saved drawing?',`Permanently delete “${name}” from gbot? This cannot be undone.`,'Delete'],
+  }[type];
+  bkDialogAction = {type, name};
+  $('bkDialogTitle').textContent = config[0];
+  $('bkDialogText').textContent = config[1];
+  $('bkDialogConfirm').textContent = config[2];
+  $('bkDialogConfirm').className = type === 'delete' ? 'danger' : 'primary';
+  const needsName = type === 'create' || type === 'rename';
+  $('bkNameWrap').style.display = $('bkNameHint').style.display = needsName ? '' : 'none';
+  $('bkName').value = type === 'create' ? uniqueBkName() : name;
+  $('bkDialogError').textContent = '';
+  syncBkDialog();
+  $('bkDialog').showModal();
+  if (needsName) requestAnimationFrame(() => { $('bkName').focus(); $('bkName').select(); });
+  else requestAnimationFrame(() => $('bkDialogConfirm').focus());
+}
+function setBkDialogBusy(busy){
+  $('bkDialogCancel').disabled = busy;
+  $('bkName').disabled = busy;
+  syncBkDialog();
+}
+function closeBkDialog(){
+  if ($('bkDialog').open) $('bkDialog').close();
+  bkDialogAction = null;
+}
+async function saveBackup(name, create=false){
+  setBkBusy(true); setBkDialogBusy(true);
+  setBkStatus(create ? 'Creating saved drawing…' : 'Saving…');
   try {
-    const r = await fetch('backups/' + name, { method:'PUT', body: JSON.stringify(statePayload()) });
-    if (!r.ok) throw 0;
+    await bkRequest(bkPath(name), {
+      method:create ? 'POST' : 'PUT',
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify(statePayload())
+    }, 'Could not save the drawing.');
     setBkCurrent(name);
-    $('bkSave').textContent = '✓ Saved';
-    setTimeout(() => $('bkSave').textContent = '💾 Save', 1500);
-    refreshBackups();
-  } catch(e) { alert('Save failed — is the fence server running?'); }
+    await refreshBackups(name);
+    closeBkDialog();
+    setBkStatus(create ? `Created “${name}”.` : `Saved “${name}”.`, 'success');
+  } catch(e) {
+    if ($('bkDialog').open) $('bkDialogError').textContent = e.message;
+    else setBkStatus(e.message, 'error');
+  } finally {
+    setBkBusy(false); setBkDialogBusy(false);
+  }
 }
-$('bkSave').addEventListener('click', () => saveBackup(bkCurrent || bkAutoName()));
-$('bkSaveAs').addEventListener('click', () => saveBackup(bkAutoName()));
-$('bkLoad').addEventListener('click', async () => {
-  const name = $('bkList').value;
-  if (!name) return;
+async function openBackup(name){
+  setBkBusy(true); setBkDialogBusy(true);
   try {
-    const r = await fetch('backups/' + name);
-    if (!r.ok) throw 0;
-    const o = await r.json();
-    pushUndo();                       // restoring is undoable like any other change
+    const o = await bkRequest(bkPath(name), {}, 'Could not open the drawing.');
+    pushUndo();
     applyState(o);
-    sel = null; syncControls(); updateAll();
-    setBkCurrent(name);               // Save now updates the backup you just restored
-  } catch(e) { alert('Restore failed'); }
-});
-$('bkRen').addEventListener('click', async () => {
-  const name = $('bkList').value;
-  if (!name) return;
-  let to = prompt('Rename backup to:', name);
-  if (to == null) return;
-  to = to.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 64);
-  if (!to || to === name) return;
+    sel = null; bsel.clear(); syncControls(); updateAll();
+    setBkCurrent(name);
+    closeBkDialog();
+    setBkStatus(`Opened “${name}”.`, 'success');
+  } catch(e) {
+    $('bkDialogError').textContent = e.message;
+  } finally {
+    setBkBusy(false); setBkDialogBusy(false);
+  }
+}
+async function renameBackup(name, to){
+  setBkBusy(true); setBkDialogBusy(true);
   try {
-    const r = await fetch('backups/' + name, { method:'PATCH', body: JSON.stringify({ name: to }) });
-    if (!r.ok) throw 0;
+    await bkRequest(bkPath(name), {
+      method:'PATCH', headers:{'content-type':'application/json'}, body:JSON.stringify({name:to})
+    }, 'Could not rename the drawing.');
     if (name === bkCurrent) setBkCurrent(to);
-    refreshBackups();
-    $('bkList').value = to;
-  } catch(e) { alert('Rename failed'); }
-});
-$('bkDel').addEventListener('click', async () => {
-  const name = $('bkList').value;
-  if (!name) return;
-  if (!confirm(`Delete backup "${name}" from the server?`)) return;
+    await refreshBackups(to);
+    closeBkDialog();
+    setBkStatus(`Renamed to “${to}”.`, 'success');
+  } catch(e) {
+    $('bkDialogError').textContent = e.message;
+  } finally {
+    setBkBusy(false); setBkDialogBusy(false);
+  }
+}
+async function deleteBackup(name){
+  setBkBusy(true); setBkDialogBusy(true);
   try {
-    const r = await fetch('backups/' + name, { method:'DELETE' });
-    if (!r.ok) throw 0;
+    await bkRequest(bkPath(name), {method:'DELETE'}, 'Could not delete the drawing.');
     if (name === bkCurrent) setBkCurrent('');
-    refreshBackups();
-  } catch(e) { alert('Delete failed'); }
+    closeBkDialog();
+    await refreshBackups();
+    setBkStatus(`Deleted “${name}”.`, 'success');
+  } catch(e) {
+    $('bkDialogError').textContent = e.message;
+  } finally {
+    setBkBusy(false); setBkDialogBusy(false);
+  }
+}
+$('bkSave').addEventListener('click', () =>
+  bkCurrent ? saveBackup(bkCurrent) : openBkDialog('create'));
+$('bkSaveAs').addEventListener('click', () => openBkDialog('create'));
+$('bkLoad').addEventListener('click', () => { if (bkSelected()) openBkDialog('open', bkSelected()); });
+$('bkRen').addEventListener('click', () => { if (bkSelected()) openBkDialog('rename', bkSelected()); });
+$('bkDel').addEventListener('click', () => { if (bkSelected()) openBkDialog('delete', bkSelected()); });
+$('bkList').addEventListener('change', syncBkActions);
+$('bkName').addEventListener('input', syncBkDialog);
+$('bkDialogCancel').addEventListener('click', closeBkDialog);
+$('bkDialogForm').addEventListener('submit', e => {
+  e.preventDefault();
+  if (!bkDialogAction || $('bkDialogConfirm').disabled) return;
+  const {type,name} = bkDialogAction, to = $('bkName').value.trim();
+  if (type === 'create') saveBackup(to, true);
+  if (type === 'rename') renameBackup(name, to);
+  if (type === 'open') openBackup(name);
+  if (type === 'delete') deleteBackup(name);
 });
 $('bTheme').addEventListener('click', () => {
   const t = document.body.classList.contains('dark') ? 'light' : 'dark';
