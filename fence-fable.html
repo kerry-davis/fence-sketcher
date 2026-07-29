@@ -1343,9 +1343,9 @@ function doPaint(){
   ctx.clearRect(0,0,cw,ch);
   if (mode3d){ fdel.style.display = 'none'; paint3d(); return; }
 
-  // --- grid: 1 square = 1 unit, coarsened (×2, ×5, ×10…) when zoomed out ---
+  // --- grid: use the chosen spacing, coarsened only below 2 screen pixels ---
   let step = gridStep(); const ladder = [2, 2.5, 2]; let li = 0;
-  while (step*view.s < 14) step *= ladder[li++ % 3];
+  while (step*view.s < 2) step *= ladder[li++ % 3];
   ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
   ctx.beginPath();
   for (let x = Math.floor(view.x/step)*step; x < view.x + cw/view.s; x += step){
