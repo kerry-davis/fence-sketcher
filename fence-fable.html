@@ -113,9 +113,11 @@
             background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;
             font-size:13px;cursor:pointer}
   label.own input{width:18px;height:18px;accent-color:var(--accent)}
+  #matIncludeWrap.off{background:var(--card);border-color:var(--line)}
   #perFence{border-top:1px solid var(--line);margin-top:8px;padding-top:6px}
   #perFence .row{font-size:13px;color:var(--muted);padding:2px 0}
   #perFence .row.cur{color:var(--accent);font-weight:600}
+  #perFence .row.excluded{opacity:.75}
   .note{color:var(--muted);font-size:12px;margin:6px 0 0}
 
   button{white-space:nowrap}
@@ -223,6 +225,10 @@
 
     <section id="matSec" class="paling">
       <h2>Materials</h2>
+      <label id="matIncludeWrap" class="own" style="display:none">
+        <input type="checkbox" id="matInclude" checked> Include this fence in materials</label>
+      <p class="note" id="matExcludeNote" style="display:none;margin:0 0 8px">
+        Still shown in plan and 3D; excluded from totals and the copied summary.</p>
       <label id="matOwnWrap" class="own" style="display:none">
         <input type="checkbox" id="matOwn"> This fence has its own settings</label>
       <p class="note" id="matWho" style="margin:0 0 8px"></p>
@@ -552,7 +558,8 @@ function sharedEnds(polys, idx){
   let n = 0;
   for (const q of [pl.pts[0], pl.pts[pl.pts.length-1]])
     for (let j = 0; j < idx; j++)
-      if (polys[j].pts.some(r => Math.hypot(r.x-q.x, r.y-q.y) < TOL)){ n++; break; }
+      if (!polys[j].excludeMaterials &&
+          polys[j].pts.some(r => Math.hypot(r.x-q.x, r.y-q.y) < TOL)){ n++; break; }
   return n;
 }
 
@@ -571,6 +578,11 @@ function calcMaterials(polys, defMat){
   polys.forEach((pl, idx) => {
     if (pl.pts.length < 2) return;
     const mat = pl.mat || defMat;
+    if (pl.excludeMaterials){
+      per.push({ i:idx, name:'Fence '+(idx+1), len:0, posts:0, rails:0, palings:0,
+                 panels:0, gates:0, handrail:0, own:!!pl.mat, excluded:true, mat });
+      return;
+    }
     const spacing = Math.max(0.1, mat.spacing);
     let len = 0, pPanels = 0, pPosts = 0, pGates = 0;
     const ss = segsOf(pl);
@@ -624,7 +636,8 @@ function deleteSegment(polys, p, i){
   } else {
     const parts = [pl.pts.slice(0, i+1), pl.pts.slice(i+1)]
       .filter(q => q.length >= 2)
-      .map(q => ({ pts:q, closed:false, done:true }));
+      .map(q => ({ pts:q, closed:false, done:true,
+                   excludeMaterials:pl.excludeMaterials || undefined }));
     polys.splice(p, 1, ...parts);
   }
 }
@@ -701,6 +714,10 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   chk(m.per.length===2 && m.per[1].own && m.per[1].rails===6 && m.per[1].palings===0,
       'per-fence override');
   chk(m.rails === m.per[0].rails + 6 && m.palings === m.per[0].palings, 'totals aggregate');
+  const excluded = sq(); excluded.excludeMaterials = true;
+  m = calcMaterials([sq(), excluded], {style:'paling', spacing:2.4, rails:2, paling:0.1, gap:0.005});
+  chk(m.posts===20 && m.rails===40 && m.palings===381 && m.per[1].excluded,
+      'excluded fence stays in breakdown but not materials');
   // --- post-count audit ---
   const mat15 = {spacing:1.5, rails:3, paling:0, gap:0, style:'rail'};
   // straight 10 m run: 10/1.5 = 6.67 -> 7 panels -> 8 posts (7 panel ends + the start post)
@@ -716,6 +733,9 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   m = calcMaterials([{pts:[{x:0,y:0},{x:10,y:0}], closed:false},
                      {pts:[{x:10,y:0},{x:10,y:10}], closed:false}], mat15);
   chk(m.shared===1 && m.posts===15, 'shared junction post');
+  m = calcMaterials([{pts:[{x:0,y:0},{x:10,y:0}], closed:false, excludeMaterials:true},
+                     {pts:[{x:10,y:0},{x:20,y:0}], closed:false}], mat15);
+  chk(m.shared===0 && m.posts===8, 'excluded run does not suppress an included end post');
   // end posts: the same 10.76 m run at 1.5 m is 8 panels -> 9 posts with both ends,
   // 8 with one end already posted, 7 counting only the posts between panels
   const run = [{pts:[{x:0,y:0},{x:10.76,y:0}], closed:false}];
@@ -1938,10 +1958,10 @@ function updateTotals(){
   const m = calcMaterials(state.polys, state.mat), u = state.unit;
   // per-fence breakdown, once there's more than one line
   const cur = matScope().idx;
-  $('perFence').innerHTML = m.per.length > 1 ? m.per.map(f =>
-    `<div class="row${f.i === cur ? ' cur' : ''}" title="${f.panels} panels · ${f.gates} gates · end posts: ${endsOf(f.mat)}">` +
-    `<span>${f.name}${f.own ? ' ⚙' : ''}${endsOf(f.mat) === 'auto' ? '' : ' ✂'}</span>` +
-    `<span>${fmtLen(f.len, u)} · ${f.posts} posts</span></div>`).join('') : '';
+  $('perFence').innerHTML = (m.per.length > 1 || m.per.some(f => f.excluded)) ? m.per.map(f =>
+    `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${f.excluded ? 'Excluded from materials' : `${f.panels} panels · ${f.gates} gates · end posts: ${endsOf(f.mat)}`}">` +
+    `<span>${f.name}${f.excluded ? '' : (f.own ? ' ⚙' : '') + (endsOf(f.mat) === 'auto' ? '' : ' ✂')}</span>` +
+    `<span>${f.excluded ? 'Not in materials' : `${fmtLen(f.len, u)} · ${f.posts} posts`}</span></div>`).join('') : '';
   $('tLen').textContent = fmtLen(m.fenceLen, u);
   $('tSegs').textContent = m.segCount;
   $('tCorners').textContent = m.corners;
@@ -1976,6 +1996,10 @@ const curMat = () => matScope().mat;
 
 function syncMatInputs(){
   const u = state.unit, sc = matScope(), M = sc.mat;
+  $('matIncludeWrap').style.display = sc.pl ? 'flex' : 'none';
+  $('matInclude').checked = !sc.pl || !sc.pl.excludeMaterials;
+  $('matIncludeWrap').classList.toggle('off', !!(sc.pl && sc.pl.excludeMaterials));
+  $('matExcludeNote').style.display = sc.pl && sc.pl.excludeMaterials ? '' : 'none';
   $('matOwnWrap').style.display = sc.pl ? 'flex' : 'none';
   $('matOwn').checked = sc.own;
   $('matWho').textContent = !sc.pl ? 'Editing the defaults — used by every fence without its own settings.'
@@ -2545,6 +2569,13 @@ $('iEnds').addEventListener('change', e => {
   curMat().ends = e.target.value === 'auto' ? 'auto' : +e.target.value;
   updateAll();
 });
+$('matInclude').addEventListener('change', e => {
+  const sc = matScope();
+  if (!sc.pl) return;
+  pushUndo();
+  sc.pl.excludeMaterials = e.target.checked ? undefined : true;
+  updateAll();
+});
 $('matOwn').addEventListener('change', e => {
   const sc = matScope();
   if (!sc.pl) return;
@@ -2587,8 +2618,9 @@ $('copyBtn').addEventListener('click', () => {
       fmtSmall(M.railW,u) + ' rails'
     : 'posts every ' + fmtLen(M.spacing,u) + ', ' + M.rails + ' rails/panel, palings ' +
       fmtSmall(M.paling,u) + ' + ' + fmtSmall(M.gap,u) + ' gap') + hrDesc(M);
-  if (m.per.some(f => f.own)){            // fences differ — break the list down per fence
+  if (m.per.some(f => f.own || f.excluded)){ // fences differ — break the list down per fence
     for (const f of m.per){
+      if (f.excluded){ L.push(f.name + ' — excluded from materials'); continue; }
       L.push(f.name + ' — ' + fmtLen(f.len,u) + ' (' + desc(f.mat) + ')');
       L.push('  Posts ' + f.posts + ' · Rails ' + f.rails + (f.palings ? ' · Palings ' + f.palings : '') +
              (f.handrail ? ' · Handrail ' + fmtLen(f.handrail,u) : ''));
