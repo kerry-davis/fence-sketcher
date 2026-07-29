@@ -80,6 +80,7 @@
         overflow:hidden;background:var(--card);-webkit-touch-callout:none}
   canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
   canvas.selmode{cursor:default}
+  canvas.labelhit{cursor:pointer}
   #gridcap{position:absolute;left:10px;bottom:8px;font-size:12px;color:var(--muted);
            background:var(--chip);padding:3px 8px;border-radius:6px;pointer-events:none}
   /* floating delete button next to the selected object (works with touch) */
@@ -1129,6 +1130,26 @@ new ResizeObserver(resize).observe(wrap);
 
 const W2S = w => ({ x:(w.x - view.x)*view.s, y:(w.y - view.y)*view.s });
 const S2W = (sx,sy) => ({ x: sx/view.s + view.x, y: sy/view.s + view.y });
+function fenceLabelLayout(pl, p){
+  const ss = segsOf(pl);
+  if (!ss.length) return null;
+  const choices = ss.some(([,a]) => !a.gateAfter) ? ss.filter(([,a]) => !a.gateAfter) : ss;
+  const [i,a,b] = choices.reduce((best, s) =>
+    segLen(s[1],s[2]) > segLen(best[1],best[2]) ? s : best);
+  const A = W2S(a), B = W2S(b), dx = B.x-A.x, dy = B.y-A.y;
+  const d = Math.hypot(dx,dy), nx = d ? -dy/d : 0, ny = d ? dx/d : -1;
+  const mx = (A.x+B.x)/2, my = (A.y+B.y)/2, text = 'F' + (p+1);
+  ctx.save(); ctx.font = '700 11px system-ui';
+  const w = Math.max(28, ctx.measureText(text).width + 14), h = 20, off = 23;
+  ctx.restore();
+  let x = mx+nx*off, y = my+ny*off;
+  if (x-w/2 < 4 || x+w/2 > cw-4 || y-h/2 < 4 || y+h/2 > ch-4){
+    x = mx-nx*off; y = my-ny*off;
+  }
+  x = Math.max(w/2+4, Math.min(cw-w/2-4, x));
+  y = Math.max(h/2+4, Math.min(ch-h/2-4, y));
+  return { p, i, text, x, y, w, h, mx, my };
+}
 function zoomAt(sx, sy, factor){
   const w = S2W(sx, sy);
   view.s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, view.s*factor));
@@ -1325,8 +1346,13 @@ function snapObjectAxes(w, xOffsets, yOffsets, skipBld, skipPoly){
            y:nearest(w.y, yOffsets, ys, base.y) };
 }
 
-// What is under screen point (sx,sy)? Priority: points > resize handles > segments > buildings.
+// What is under screen point (sx,sy)? Labels lead: their 44 px target must beat nearby geometry.
 function pick(sx, sy){
+  for (let p = state.polys.length-1; p >= 0; p--){
+    const tag = fenceLabelLayout(state.polys[p], p);
+    if (tag && Math.abs(sx-tag.x) <= Math.max(44,tag.w)/2 && Math.abs(sy-tag.y) <= 22)
+      return { t:'seg', p, i:tag.i, label:true };
+  }
   for (let p = state.polys.length-1; p >= 0; p--)
     for (let i = state.polys[p].pts.length-1; i >= 0; i--){
       const s = W2S(state.polys[p].pts[i]);
@@ -1567,23 +1593,10 @@ function doPaint(){
       ctx.lineWidth = 2; ctx.strokeStyle = isSel ? ACCENT : C.fence; ctx.stroke();
     });
     // Match the per-fence materials list to the plan with a compact badge.
-    // Prefer the longest real fence segment, so a gate does not become the run's identity.
-    const ss = segsOf(pl);
-    if (ss.length){
-      const choices = ss.some(([,a]) => !a.gateAfter) ? ss.filter(([,a]) => !a.gateAfter) : ss;
-      const [,a,b] = choices.reduce((best, s) =>
-        segLen(s[1],s[2]) > segLen(best[1],best[2]) ? s : best);
-      const A = W2S(a), B = W2S(b), dx = B.x-A.x, dy = B.y-A.y;
-      const d = Math.hypot(dx,dy), nx = d ? -dy/d : 0, ny = d ? dx/d : -1;
-      const mx = (A.x+B.x)/2, my = (A.y+B.y)/2, text = 'F' + (p+1);
+    const tag = fenceLabelLayout(pl, p);
+    if (tag){
+      const {text,x,y,w,h,mx,my} = tag;
       ctx.font = '700 11px system-ui';
-      const w = Math.max(28, ctx.measureText(text).width + 14), h = 20, off = 23;
-      let x = mx+nx*off, y = my+ny*off;
-      if (x-w/2 < 4 || x+w/2 > cw-4 || y-h/2 < 4 || y+h/2 > ch-4){
-        x = mx-nx*off; y = my-ny*off;
-      }
-      x = Math.max(w/2+4, Math.min(cw-w/2-4, x));
-      y = Math.max(h/2+4, Math.min(ch-h/2-4, y));
       ctx.setLineDash([]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(mx,my); ctx.lineTo(x,y); ctx.stroke();
       ctx.beginPath(); ctx.roundRect(x-w/2, y-h/2, w, h, 7);
@@ -2420,6 +2433,7 @@ let lastAdd = { t: 0, x: 0, y: 0 };
 
 cv.addEventListener('contextmenu', e => e.preventDefault());
 cv.addEventListener('pointerdown', e => {
+  cv.classList.remove('labelhit');
   cv.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x:e.offsetX, y:e.offsetY });
   if (mode3d){                                 // drag = orbit, right-drag / 2 fingers = pan+zoom
@@ -2473,6 +2487,12 @@ cv.addEventListener('pointermove', e => {
   }
   // live rubber-band preview of the next segment (mouse only; touch has no hover)
   if (!pointers.size && e.pointerType !== 'touch'){
+    const hit = pick(e.offsetX, e.offsetY);
+    cv.classList.toggle('labelhit', !!(hit && hit.label));
+    if (hit && hit.label){
+      if (hover){ hover = null; paint(); }
+      return;
+    }
     const a = drawAnchor();
     const s = snapFence(S2W(e.offsetX, e.offsetY), a && { p:a.p, i:a.i }, a && a.pt, a && a.dir);
     const nh = { a: a ? a.pt : null, x: s.x, y: s.y, angled: s.angled, guides };
@@ -2576,7 +2596,10 @@ function pointerEnd(e){
 }
 cv.addEventListener('pointerup', pointerEnd);
 cv.addEventListener('pointercancel', pointerEnd);
-cv.addEventListener('pointerleave', () => { if (hover){ hover = null; paint(); } });
+cv.addEventListener('pointerleave', () => {
+  cv.classList.remove('labelhit');
+  if (hover){ hover = null; paint(); }
+});
 
 // Pick drawing a line back up from one of its ends.
 function resumeLine(p, i){
@@ -2595,6 +2618,10 @@ function resumeLine(p, i){
 //   idle + empty    -> clear the selection, or start a new fence if nothing was selected
 function handleClick(hit, sx, sy, multi){
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
+  if (hit && hit.label){
+    if (drawTarget()) endLine();
+    sel = {t:'seg', p:hit.p, i:hit.i}; updateAll(); return;
+  }
   if (multi && hit && hit.t === 'bld' && selectBuilding(hit.i, true)) return;
   const tgt = drawTarget();
 
