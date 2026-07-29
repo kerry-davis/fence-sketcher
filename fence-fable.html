@@ -91,6 +91,9 @@
   #matSec.paling .onlyRail{display:none}
   #matSec.nohr .onlyHR{display:none}
   #selbox{border-color:var(--accent);background:var(--accent-soft)}
+  #selbox.noroof .roofOnly{display:none}
+  #selbox:not(.gableroof) .gableOnly{display:none}
+  #selbox:not(.skillroof) .skillOnly{display:none}
   #selbox label{display:flex;align-items:center;gap:8px;padding:6px 0}
   #selbox input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent)}
   #copyBtn{width:100%}
@@ -263,7 +266,11 @@ const DEF = {                                 // per-unit material defaults
 };
 const DEF_RAILS   = 2;                        // rails per panel
 const DEF_ENDS    = 'auto';                   // end posts per open run: 'auto' | 2 both | 1 one | 0 none
-const DEF_BLD     = { m:[6,4], ft:[20*FT,12*FT] };  // new-building size [w,d] per unit
+// New-building size [width, depth, height] per unit. Height is the 3D (z) dimension —
+// plan drawing ignores it, so a building saved before heights existed falls back to BLD_H.
+const DEF_BLD     = { m:[6,4,3], ft:[20*FT,12*FT,10*FT] };
+const BLD_H       = 3.0;                      // default building height, metres (walls, to the eaves)
+const DEF_PITCH   = 25;                       // default roof pitch, degrees
 const MIN_BLD     = 0.5;                      // smallest building side, metres
 const HIT = { pt:12, seg:9, handle:12, corner:12, edge:10 };  // hit/snap radii in screen px
 const ANGLE_TOL = 14;                         // px: how close to a 45°/90° ray before it locks on
@@ -364,6 +371,116 @@ function derivedRails(mat){
 // The reverse: gap that spreads n rails evenly over the band (outer rails flush with it).
 function derivedGap(mat, n){
   return n >= 2 ? Math.max(0, (railBand(mat) - n*mat.railW) / (n-1)) : mat.railGap;
+}
+
+// A building's wall height (its z dimension, to the eaves), defaulting for saves made
+// before heights existed. A gable roof stands on top of this.
+const bldH = b => b.z > 0 ? b.z : BLD_H;
+
+/* ---- roofs. Two kinds:
+   'gable'    — a ridge down the middle; the two walls it lands on rise into gable
+                triangles, the eaves walls stay at wall height. The ridge runs along
+                the width ('w') or the depth ('d') and spans the other dimension.
+   'skillion' — one single pitch falling from a high side to the opposite one, so only
+                that one wall is taller. b.high names the high side: x0 = left,
+                x1 = right, z0 = top of the plan, z1 = bottom.
+   A gable climbs half its span to the ridge; a single pitch climbs the whole span. */
+const hasRoof   = b => b.roof === 'gable' || b.roof === 'skillion';
+const roofKind  = b => b.roof === 'skillion' ? 'skillion' : 'gable';
+const roofPitch = b => b.pitch > 0 ? b.pitch : DEF_PITCH;
+const ridgeAlong = b => b.ridge === 'w' || b.ridge === 'd' ? b.ridge
+                                                           : (b.w >= b.h ? 'w' : 'd');
+const HIGH_SIDES = ['x0','x1','z0','z1'];
+const highSide  = b => HIGH_SIDES.indexOf(b.high) >= 0 ? b.high : (b.w <= b.h ? 'x0' : 'z0');
+const roofSpan  = b => roofKind(b) === 'skillion'          // the dimension it slopes across
+  ? (highSide(b)[0] === 'x' ? b.w : b.h)
+  : (ridgeAlong(b) === 'w' ? b.h : b.w);
+const roofRise  = b => roofSpan(b) * (roofKind(b) === 'skillion' ? 1 : 0.5)
+                                   * Math.tan(roofPitch(b) * Math.PI/180);
+const roofTop   = b => bldH(b) + roofRise(b);
+
+/* ---- houses. You can't draw an L-shaped house directly, so several buildings can be
+   merged into one: their footprints join into a single mass with no internal walls and
+   one shared height and roof. Merging is explicit — buildings you merge (b.g holds the
+   house id) and nothing else. Overlapping does NOT merge anything, so a deck can sit
+   flush against a house, or inside its footprint, and still be its own thing. */
+const EDGE_SNAP = 0.05;                       // walls closer than this are the same wall
+const TILE      = 1.5;                        // biggest wall/roof panel drawn, metres
+function houseGroups(builds){
+  const byId = new Map(), out = [];
+  builds.forEach((b, i) => {
+    if (b.g == null){ out.push([i]); return; }
+    if (!byId.has(b.g)){ byId.set(b.g, []); out.push(byId.get(b.g)); }
+    byId.get(b.g).push(i);
+  });
+  return out;
+}
+const nextHouseId = builds => 1 + Math.max(0, ...builds.map(b => b.g || 0));
+// Merge j into i's house (or start one), carrying every existing member of both along.
+function joinBuildings(builds, i, j){
+  const gi = builds[i].g, gj = builds[j].g;
+  if (gi != null && gi === gj) return;
+  const id = gi != null ? gi : gj != null ? gj : nextHouseId(builds);
+  builds.forEach(b => { if (b.g != null && (b.g === gi || b.g === gj)) b.g = id; });
+  builds[i].g = id; builds[j].g = id;
+}
+// Take one part back out. A house of one is just a building again.
+function separateBuilding(builds, i){
+  const id = builds[i].g;
+  delete builds[i].g;
+  const rest = builds.filter(b => b.g === id);
+  if (rest.length === 1) delete rest[0].g;
+}
+// Drawings saved before merging existed: infer the houses once, from what overlaps at
+// the same height, so an already-drawn house does not fall apart on load.
+function inferHouses(builds){
+  if (!builds.length || builds.some(b => b.g != null)) return;
+  const touch = (a,b) => Math.abs(bldH(a) - bldH(b)) <= 0.01 &&
+    a.x <= b.x+b.w+0.1 && b.x <= a.x+a.w+0.1 && a.y <= b.y+b.h+0.1 && b.y <= a.y+a.h+0.1;
+  builds.forEach((a, i) => builds.forEach((b, j) => {
+    if (j > i && touch(a,b)) joinBuildings(builds, i, j);
+  }));
+}
+const groupOf = (builds, i) => houseGroups(builds).find(g => g.indexOf(i) >= 0) || [i];
+// The whole house as one rectangle: its bounding footprint, wearing the settings of its
+// first part. Roof maths then works on the house, not on each box.
+function houseBox(builds, g){
+  const own = builds[g[0]];
+  const x0 = Math.min(...g.map(i => builds[i].x)), x1 = Math.max(...g.map(i => builds[i].x+builds[i].w));
+  const y0 = Math.min(...g.map(i => builds[i].y)), y1 = Math.max(...g.map(i => builds[i].y+builds[i].h));
+  return { x:x0, y:y0, w:x1-x0, h:y1-y0,
+           z:bldH(own), roof:own.roof, pitch:own.pitch, ridge:own.ridge, high:own.high };
+}
+// Which plan axis the roof height varies along, and where its high line sits.
+const roofAxis = hb => roofKind(hb) === 'skillion' ? highSide(hb)[0]
+                                                  : (ridgeAlong(hb) === 'w' ? 'z' : 'x');
+// Roof height above ground at a plan point. Flat, single pitch and gable are all just
+// h(u) along one axis — which is exactly why an L-shaped house works: every piece of
+// footprint stays planar, so no two roof surfaces ever have to intersect.
+function roofHeightAt(hb, x, z){
+  const H = bldH(hb);
+  if (!hasRoof(hb)) return H;
+  const axis = roofAxis(hb), lo = axis === 'x' ? hb.x : hb.y;
+  const span = Math.max(1e-9, axis === 'x' ? hb.w : hb.h);
+  const t = ((axis === 'x' ? x : z) - lo) / span;             // 0..1 across the span
+  return H + roofRise(hb) * (roofKind(hb) === 'skillion'
+    ? (highSide(hb)[1] === '0' ? 1-t : t)
+    : 1 - Math.abs(t - 0.5)*2);
+}
+// Split a wall at exact neighbouring structure heights as well as regular TILE intervals.
+// Painter sorting can then put the portion below a deck behind its roof while keeping the
+// portion above it visible; no single wall face straddles that depth-order boundary.
+function wallBands(ha, hb, cuts){
+  const top = Math.max(ha,hb), levels = [0,top, ...cuts.filter(y => y > 0 && y < top)];
+  for (let y = TILE; y < top; y += TILE) levels.push(y);
+  levels.sort((a,b) => a-b);
+  const uniq = levels.filter((y,i) => !i || y-levels[i-1] > 1e-6), out = [];
+  for (let i = 0; i < uniq.length-1; i++){
+    const y0=uniq[i], y1=uniq[i+1];
+    const a0=Math.min(ha,y0), b0=Math.min(hb,y0), a1=Math.min(ha,y1), b1=Math.min(hb,y1);
+    if (a1-a0 > 1e-9 || b1-b0 > 1e-9) out.push({a0,b0,a1,b1});
+  }
+  return out;
 }
 
 // Handrail cross-section, with defaults for saves made before handrails existed.
@@ -676,6 +793,79 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
     const alongNormal = dir[0]*f.n[0] + dir[1]*f.n[1] + dir[2]*f.n[2];
     chk(alongNormal > 0.99, 'cube face ' + f.label + ' looks at its own normal');
   }
+  // building height: an explicit z wins, anything missing or zero falls back
+  chk(bldH({x:0,y:0,w:6,h:4,z:2.4}) === 2.4, 'building uses its own height');
+  chk(bldH({x:0,y:0,w:6,h:4}) === BLD_H && bldH({z:0}) === BLD_H, 'building height falls back');
+  // gable roof: rise is half the SPAN (the dimension the ridge crosses) times the pitch
+  const house = {x:0, y:0, w:12, h:8, z:2.5, roof:'gable', pitch:45};
+  chk(ridgeAlong(house) === 'w', 'ridge follows the longer side by default');
+  chk(near(roofSpan(house), 8) && near(roofRise(house), 4), 'rise = half span at 45°');
+  chk(near(roofTop(house), 6.5), 'ridge sits on top of the walls');
+  chk(near(roofRise({...house, ridge:'d'}), 6), 'turning the ridge changes the span it crosses');
+  chk(near(roofRise({...house, pitch:0}), roofRise({...house, pitch:DEF_PITCH})), 'pitch falls back');
+  chk(!hasRoof({x:0,y:0,w:6,h:4}) && roofRise({w:6,h:4,z:3}) > 0, 'flat by default, still measurable');
+  // single pitch: no ridge, so it climbs the WHOLE span — twice a gable's rise
+  const shed = {x:0, y:0, w:12, h:8, z:2.5, roof:'skillion', pitch:45};
+  chk(highSide(shed) === 'z0', 'single pitch defaults to falling across the shorter side');
+  chk(near(roofSpan(shed), 8) && near(roofRise(shed), 8), 'single pitch climbs its whole span');
+  chk(near(roofTop(shed), 10.5) && near(bldH(shed), 2.5), 'only the high side is lifted');
+  chk(near(roofRise({...shed, high:'x1'}), 12), 'high side picks which dimension it crosses');
+  chk(roofSpan({...shed, high:'x0'}) === roofSpan({...shed, high:'x1'}), 'either end, same span');
+  chk(hasRoof(shed) && roofKind(shed) === 'skillion', 'single pitch is a roof of its own kind');
+  // houses: overlapping or touching buildings merge into one, and settings follow the house
+  const bx = (x,y,w,h,extra) => Object.assign({x,y,w,h,z:2.5}, extra||{});
+  // merging is explicit: overlapping alone never joins anything
+  const over = [bx(0,0,10,6), bx(8,0,6,6)];
+  chk(houseGroups(over).length === 2, 'overlapping buildings are still separate');
+  joinBuildings(over, 0, 1);
+  chk(houseGroups(over).length === 1 && houseGroups(over)[0].length === 2, 'merging joins them');
+  // merging a third carries the existing house along, whatever order you tap in
+  const three = [bx(0,0,6,6), bx(20,0,6,6), bx(40,0,6,6)];
+  joinBuildings(three, 0, 1); joinBuildings(three, 2, 0);
+  chk(houseGroups(three).length === 1, 'a third building joins the same house');
+  chk(new Set(three.map(b => b.g)).size === 1, 'and they all share one id');
+  separateBuilding(three, 1);
+  chk(houseGroups(three).length === 2 && three[1].g == null, 'separating takes one part out');
+  const pair = [bx(0,0,6,6), bx(20,0,6,6)];
+  joinBuildings(pair, 0, 1); separateBuilding(pair, 1);
+  chk(pair.every(b => b.g == null), 'a house of one is just a building again');
+  // a deck may sit flush, or inside the footprint, and stays its own volume
+  const deck = [bx(0,0,10,6), bx(0,6,10,2,{z:0.8})];
+  chk(houseGroups(deck).length === 2, 'a deck against a house is not merged');
+  chk(bldH(houseBox(deck, groupOf(deck,1))) === 0.8, 'and keeps its own height');
+  // drawings saved before merging existed keep the house they used to have
+  const old = [bx(0,0,10,6), bx(8,0,6,6), bx(0,6,10,2,{z:0.8}), bx(40,0,6,6)];
+  inferHouses(old);
+  chk(houseGroups(old).length === 3, 'old drawings infer their houses once');
+  chk(old[0].g === old[1].g && old[2].g == null, 'by overlap at the same height');
+  const already = [bx(0,0,10,6,{g:7}), bx(8,0,6,6)];
+  inferHouses(already);
+  chk(already[1].g == null, 'and never re-infer once a drawing has houses');
+  // A-B and B-C overlap, A and C do not: still one house
+  const chain = [bx(0,0,6,6), bx(5,0,6,6), bx(10,0,6,6)];
+  joinBuildings(chain, 0, 1); joinBuildings(chain, 1, 2);
+  chk(houseGroups(chain)[0].length === 3, 'three merged parts are one house');
+  chk(groupOf(chain, 2).length === 3 && groupOf([bx(0,0,4,4), bx(9,9,4,4)], 1).length === 1,
+      'groupOf finds the house a building belongs to');
+  const hb = houseBox(chain, [0,1,2]);
+  chk(hb.x === 0 && near(hb.w, 16) && near(hb.h, 6), 'house box is the merged footprint');
+  // roof height across a house: eaves at the edges, peak on the ridge, and it uses the
+  // MERGED span — the whole point of joining, since one box alone would be shorter
+  const gh = houseBox([bx(0,0,12,5,{roof:'gable',pitch:45}), bx(0,4,12,5)], [0,1]);
+  chk(near(gh.w, 12) && near(gh.h, 9), 'merged house is wider than it is deep');
+  chk(ridgeAlong(gh) === 'w' && roofAxis(gh) === 'z', 'so its ridge runs along the width');
+  chk(near(roofSpan(gh), 9) && near(roofRise(gh), 4.5), 'gable spans the whole house depth');
+  chk(near(roofHeightAt(gh, 5, gh.y), bldH(gh)), 'eaves at the near edge');
+  chk(near(roofHeightAt(gh, 5, gh.y+gh.h), bldH(gh)), 'eaves at the far edge');
+  chk(near(roofHeightAt(gh, 5, gh.y+gh.h/2), roofTop(gh)), 'peak on the ridge');
+  chk(near(roofHeightAt(gh, 5, gh.y+gh.h/4), bldH(gh)+roofRise(gh)/2), 'and linear between');
+  const sh2 = houseBox([bx(0,0,8,6,{roof:'skillion',pitch:30,high:'x0'})], [0]);
+  chk(near(roofHeightAt(sh2, sh2.x, 3), roofTop(sh2)), 'single pitch: high side is the top');
+  chk(near(roofHeightAt(sh2, sh2.x+sh2.w, 3), bldH(sh2)), 'single pitch: far side is the eaves');
+  chk(near(roofHeightAt(bx(0,0,8,6), 4, 3), 2.5), 'a flat roof is flat everywhere');
+  const wb = wallBands(4,4,[0.83]);
+  chk(wb.some(b => near(b.a1,0.83) && near(b.b1,0.83)) &&
+      wb.some(b => near(b.a0,0.83) && near(b.b0,0.83)), 'walls split exactly at a deck roof');
   const quad = cubeQuad([0,1,0]);
   chk(quad.length===4 && quad.every(v => near(v[1],1)), 'cube quad sits on its face');
   chk(new Set(quad.map(v => v.join(','))).size === 4, 'cube quad corners are distinct');
@@ -956,9 +1146,9 @@ function endLine(){
 }
 function addBuilding(){
   pushUndo();
-  const [bw,bh] = DEF_BLD[state.unit];
+  const [bw,bh,bz] = DEF_BLD[state.unit];
   const c = snapGridPt(S2W(cw/2, ch/2));
-  state.builds.push({ x:c.x-bw/2, y:c.y-bh/2, w:bw, h:bh });
+  state.builds.push({ x:c.x-bw/2, y:c.y-bh/2, w:bw, h:bh, z:bz });
   sel = { t:'bld', i: state.builds.length-1 };
   updateAll();
 }
@@ -1049,9 +1239,15 @@ function doPaint(){
   state.builds.forEach((b, i) => {
     const A = W2S(b), sw = b.w*view.s, sh = b.h*view.s;
     ctx.fillStyle = C.bldFill; ctx.fillRect(A.x, A.y, sw, sh);
-    ctx.strokeStyle = sel && sel.t==='bld' && sel.i===i ? ACCENT : C.bldStroke;
-    ctx.lineWidth = sel && sel.t==='bld' && sel.i===i ? 3 : 1.5;
+    // the selected building, and anything merged with it, are outlined in the accent
+    const isSel = sel && sel.t==='bld' && sel.i===i;
+    const selB = sel && sel.t==='bld' ? state.builds[sel.i] : null;
+    const sameHouse = !isSel && selB && b.g != null && b.g === selB.g;
+    ctx.strokeStyle = isSel || sameHouse ? ACCENT : C.bldStroke;
+    ctx.lineWidth = isSel ? 3 : sameHouse ? 2 : 1.5;
+    if (sameHouse) ctx.setLineDash([7,4]);
     ctx.strokeRect(A.x, A.y, sw, sh);
+    ctx.setLineDash([]);
     if (sw > 54 && sh > 22){
       ctx.fillStyle = C.bldText; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
       ctx.fillText(fmtLen(b.w, state.unit) + ' × ' + fmtLen(b.h, state.unit), A.x+sw/2, A.y+sh/2+4);
@@ -1063,6 +1259,24 @@ function doPaint(){
       }
     }
   });
+  // one dashed line per house: the ridge of a gable, or the high edge of a single pitch
+  for (const g of houseGroups(state.builds)){
+    const hb = houseBox(state.builds, g);
+    if (!hasRoof(hb)) continue;
+    const ins = 5/view.s, mid = roofAxis(hb) === 'x' ? hb.x+hb.w/2 : hb.y+hb.h/2;
+    const hi = highSide(hb);
+    const line = roofKind(hb) === 'skillion'
+      ? (hi[0] === 'x'
+          ? [{x:(hi==='x0'?hb.x+ins:hb.x+hb.w-ins), y:hb.y+ins}, {x:(hi==='x0'?hb.x+ins:hb.x+hb.w-ins), y:hb.y+hb.h-ins}]
+          : [{x:hb.x+ins, y:(hi==='z0'?hb.y+ins:hb.y+hb.h-ins)}, {x:hb.x+hb.w-ins, y:(hi==='z0'?hb.y+ins:hb.y+hb.h-ins)}])
+      : roofAxis(hb) === 'x'
+        ? [{x:mid, y:hb.y}, {x:mid, y:hb.y+hb.h}]
+        : [{x:hb.x, y:mid}, {x:hb.x+hb.w, y:mid}];
+    const A = W2S(line[0]), B = W2S(line[1]);
+    ctx.setLineDash([6,4]); ctx.strokeStyle = C.bldStroke; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   // --- fence segments + labels ---
   state.polys.forEach((pl, p) => {
@@ -1185,12 +1399,12 @@ function doPaint(){
 const POST_SIDE = 0.100;      // 100 mm square posts
 const PALING_T  = 0.020;      // 20 mm paling thickness
 const RAIL_T    = 0.045;      // 45 mm rail thickness
-const BLD_H     = 3.0;        // buildings are drawn 3 m tall
 const FOV       = 55*Math.PI/180;
 const NEAR      = 0.05;
 const EYE_Y     = 1.0;        // camera looks at eye height, not the ground
 const LIGHT     = [0.40, 0.82, 0.25];        // normalised below
-const WOOD = { post:[122,94,62], rail:[168,134,95], paling:[196,158,112], bld:[150,146,140] };
+const WOOD = { post:[122,94,62], rail:[168,134,95], paling:[196,158,112], bld:[150,146,140],
+               roof:[88,96,108] };
 let mode3d = false;
 let cam = { az: -2.2, el: 0.42, dist: 30, tx: 0, tz: 0 };
 let scene3 = null;                            // cached faces; nulled by updateAll()
@@ -1251,10 +1465,79 @@ function pushBox(F, cx,cy,cz, hx,hy,hz, ang, col, caps = null){
   F.push({ p:[P(-1,-1,-1),P(1,-1,-1),P(1,1,-1),P(-1,1,-1)], n:N(0,-1), col });
   F.push({ p:[P(-1,1,-1),P(1,1,-1),P(1,1,1),P(-1,1,1)],     n:[0,1,0], col });
 }
+// Any planar face. The normal comes from the winding, flipped to agree with `outward`,
+// so callers state which way the face looks instead of ordering vertices just so.
+function pushFace(F, p, col, outward){
+  let n = norm3(cross3(sub3(p[1],p[0]), sub3(p[2],p[1])));
+  if (dot3(n, outward) < 0) n = [-n[0], -n[1], -n[2]];
+  F.push({ p, n, col });
+}
+// One house — any number of overlapping boxes — as a single solid.
+//
+// Slice the footprint on every box edge (plus the ridge line, so no cell straddles the
+// peak) and keep the cells that land inside some box. Each kept cell gets a roof panel
+// whose corners sit at roofHeightAt(); each cell edge with nothing beside it gets a wall
+// running from the ground to that same height. Interior walls never exist, gable ends
+// come out the right shape on their own, and an L-shaped house needs no special case.
+function pushHouse(F, builds, g){
+  const boxes = g.map(i => builds[i]), hb = houseBox(builds, g), axis = roofAxis(hb);
+  const mid = axis === 'x' ? hb.x + hb.w/2 : hb.y + hb.h/2;
+  const cut = hasRoof(hb) && roofKind(hb) === 'gable' ? [mid] : [];
+  const heightCuts = houseGroups(builds).flatMap(group => {
+    const other = houseBox(builds, group);
+    return [bldH(other), hasRoof(other) ? roofTop(other) : bldH(other)];
+  });
+  // Slice lines, with edges within EDGE_SNAP of each other collapsed onto one. Parts drawn
+  // by hand land a centimetre or two out; without this every near-miss becomes a hairline
+  // sliver of wall standing the full height of the house, which reads as a notch.
+  const uniq = v => {
+    const s = [...new Set(v.map(n => +n.toFixed(6)))].sort((a,b) => a-b), out = [];
+    for (const n of s) if (!out.length || n - out[out.length-1] > EDGE_SNAP) out.push(n);
+    return out;
+  };
+  // ...then split anything longer than TILE, for the same sorting reason as the walls.
+  const dense = a => {
+    const out = [];
+    for (let i = 0; i < a.length-1; i++){
+      const n = Math.max(1, Math.ceil((a[i+1]-a[i])/TILE));
+      for (let k = 0; k < n; k++) out.push(a[i] + (a[i+1]-a[i])*k/n);
+    }
+    out.push(a[a.length-1]);
+    return out;
+  };
+  const xs = dense(uniq([...boxes.flatMap(b => [b.x, b.x+b.w]), ...(axis === 'x' ? cut : [])]));
+  const zs = dense(uniq([...boxes.flatMap(b => [b.y, b.y+b.h]), ...(axis === 'z' ? cut : [])]));
+  const covered = (i,j) => {
+    if (i < 0 || j < 0 || i >= xs.length-1 || j >= zs.length-1) return false;
+    const cx = (xs[i]+xs[i+1])/2, cz = (zs[j]+zs[j+1])/2;
+    return boxes.some(b => cx > b.x && cx < b.x+b.w && cz > b.y && cz < b.y+b.h);
+  };
+  const h = (x,z) => roofHeightAt(hb, x, z);
+  const roofCol = hasRoof(hb) ? WOOD.roof : WOOD.bld;   // a flat top is just the top
+  for (let i = 0; i < xs.length-1; i++)
+    for (let j = 0; j < zs.length-1; j++){
+      if (!covered(i,j)) continue;
+      const x0 = xs[i], x1 = xs[i+1], z0 = zs[j], z1 = zs[j+1];
+      pushFace(F, [[x0,h(x0,z0),z0],[x1,h(x1,z0),z0],[x1,h(x1,z1),z1],[x0,h(x0,z1),z1]],
+               roofCol, [0,1,0]);
+      // Walls go up in bands. Faces are sorted back to front by their centre, so one
+      // big face can be ordered as if it were all as far away as its middle — and a
+      // long wall then paints over things standing in front of its near end.
+      const wall = (ax,az,bx,bz,out) => {
+        const ha = h(ax,az), hb2 = h(bx,bz);
+        for (const band of wallBands(ha,hb2,heightCuts))
+          pushFace(F, [[ax,band.a0,az],[bx,band.b0,bz],[bx,band.b1,bz],[ax,band.a1,az]],
+                   WOOD.bld, out);
+      };
+      if (!covered(i-1,j)) wall(x0,z0, x0,z1, [-1,0,0]);
+      if (!covered(i+1,j)) wall(x1,z0, x1,z1, [ 1,0,0]);
+      if (!covered(i,j-1)) wall(x0,z0, x1,z0, [0,0,-1]);
+      if (!covered(i,j+1)) wall(x0,z1, x1,z1, [0,0, 1]);
+    }
+}
 function build3(){
   const F = [], posts = new Map();             // keyed by position: shared posts drawn once
-  for (const b of state.builds)
-    pushBox(F, b.x+b.w/2, BLD_H/2, b.y+b.h/2, b.w/2, BLD_H/2, b.h/2, 0, WOOD.bld);
+  for (const g of houseGroups(state.builds)) pushHouse(F, state.builds, g);
   state.polys.forEach((pl, p) => {
     if (pl.pts.length < 2) return;
     const mat = pl.mat || state.mat;
@@ -1314,6 +1597,7 @@ function build3(){
 /* ---- camera & projection ---- */
 const sub3 = (a,b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
 const dot3 = (a,b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross3 = (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
 function norm3(v){ const L = Math.hypot(v[0],v[1],v[2]) || 1; return [v[0]/L, v[1]/L, v[2]/L]; }
 function camBasis(){
   const ce = Math.cos(cam.el), se = Math.sin(cam.el);
@@ -1591,16 +1875,79 @@ function updateSelbox(){
       box.innerHTML = '<h2>Selected building</h2>' +
         '<div class="row"><span>Width</span><span><input id="iBW" inputmode="text"></span></div>' +
         '<div class="row"><span>Depth</span><span><input id="iBH" inputmode="text"></span></div>' +
-        '<p class="note">Drag to move, drag corners to resize.</p>';
-      const apply = (dim, el) => {
+        '<div class="row" title="Wall height, to the eaves"><span>Height</span><span><input id="iBZ" inputmode="text"></span></div>' +
+        '<div class="row"><span>Roof</span><span><select id="iBRoof" style="min-height:38px;padding:6px">' +
+          '<option value="">Flat</option><option value="gable">Gable</option>' +
+          '<option value="skillion">Single pitch</option></select></span></div>' +
+        '<div class="row roofOnly"><span>Pitch</span><span><input id="iBPitch" inputmode="decimal"> <span class="unit">°</span></span></div>' +
+        '<div class="row gableOnly"><span>Ridge runs</span><span><select id="iBRidge" style="min-height:38px;padding:6px">' +
+          '<option value="w">Along width</option><option value="d">Along depth</option></select></span></div>' +
+        '<div class="row skillOnly"><span>High side</span><span><select id="iBHigh" style="min-height:38px;padding:6px">' +
+          '<option value="x0">Left</option><option value="x1">Right</option>' +
+          '<option value="z0">Top</option><option value="z1">Bottom</option></select></span></div>' +
+        '<p class="note roofOnly" id="bRoofNote"></p>' +
+        '<p class="note" id="bJoinNote"></p>' +
+        '<p class="note">Drag to move, drag corners to resize. Height and roof only show in the 3D view.</p>';
+      const apply = (dim, el) => {                  // width/depth belong to this box alone
         const v = parseLen(el.value, state.unit);
         if (v != null && v >= MIN_BLD && sel && sel.t==='bld'){
           pushUndo(); state.builds[sel.i][dim] = v; updateAll();
         } else updateSelbox();
       };
+      // height and roof belong to the whole house, so they are written to every part of it
+      const applyHouse = fn => {
+        if (!sel || sel.t!=='bld') return;
+        pushUndo();
+        for (const k of groupOf(state.builds, sel.i)) fn(state.builds[k]);
+        updateAll();
+      };
       $('iBW').addEventListener('change', e => apply('w', e.target));
       $('iBH').addEventListener('change', e => apply('h', e.target));
+      $('iBZ').addEventListener('change', e => {
+        const v = parseLen(e.target.value, state.unit);
+        if (v != null && v >= MIN_BLD) applyHouse(bl => bl.z = v); else updateSelbox();
+      });
+      $('iBRoof').addEventListener('change', e => {
+        const kind = e.target.value, hb = sel && sel.t==='bld' && houseBox(state.builds, groupOf(state.builds, sel.i));
+        if (!hb) return;
+        applyHouse(bl => {
+          if (kind === 'gable' || kind === 'skillion'){  // seed from what it already implied
+            bl.roof = kind; bl.pitch = roofPitch(hb);
+            if (kind === 'gable') bl.ridge = ridgeAlong(hb); else bl.high = highSide(hb);
+          } else delete bl.roof;
+        });
+      });
+      $('iBHigh').addEventListener('change', e => applyHouse(bl => bl.high = e.target.value));
+      $('iBRidge').addEventListener('change', e => applyHouse(bl => bl.ridge = e.target.value));
+      $('iBPitch').addEventListener('change', e => {
+        const v = parseFloat(String(e.target.value).replace(/,/g,'.'));
+        if (v >= 1 && v <= 75) applyHouse(bl => bl.pitch = v); else updateSelbox();
+      });
     }
+    // every roof control describes the house this box belongs to, not the box
+    const grp = groupOf(state.builds, sel.i), hb = houseBox(state.builds, grp);
+    $('bJoinNote').textContent =
+      (grp.length > 1
+        ? `Merged with ${grp.length-1} other building${grp.length>2?'s':''} — one house ` +
+          `${fmtLen(hb.w,u)} × ${fmtLen(hb.h,u)} overall, sharing this height and roof. `
+        : 'Overlapping does nothing on its own. ') +
+      'Shift-click another building to merge it into this house, or shift-click a merged ' +
+      'one to take it out. On a touch screen, press and hold it.';
+    box.classList.toggle('noroof', !hasRoof(hb));
+    box.classList.toggle('gableroof', hasRoof(hb) && roofKind(hb) === 'gable');
+    box.classList.toggle('skillroof', hasRoof(hb) && roofKind(hb) === 'skillion');
+    if (document.activeElement !== $('iBRoof')) $('iBRoof').value = hasRoof(hb) ? hb.roof : '';
+    if (document.activeElement !== $('iBPitch')) $('iBPitch').value = roofPitch(hb);
+    if (document.activeElement !== $('iBRidge')) $('iBRidge').value = ridgeAlong(hb);
+    if (document.activeElement !== $('iBHigh')) $('iBHigh').value = highSide(hb);
+    if (hasRoof(hb))
+      $('bRoofNote').textContent = roofKind(hb) === 'skillion'
+        ? `High side ${fmtLen(roofTop(hb), u)} above ground, low side ${fmtLen(bldH(hb), u)} — ` +
+          `rising ${fmtLen(roofRise(hb), u)} across ${fmtLen(roofSpan(hb), u)}.`
+        : `Ridge ${fmtLen(roofTop(hb), u)} above ground — ` +
+          `${fmtLen(roofRise(hb), u)} over ${fmtLen(roofSpan(hb), u)} of span.`;
+    if (document.activeElement !== $('iBZ'))
+      $('iBZ').value = u==='m' ? +bldH(hb).toFixed(2) : ftStr(bldH(hb));
     if (document.activeElement !== $('iBW')) $('iBW').value = u==='m' ? +b.w.toFixed(2) : ftStr(b.w);
     if (document.activeElement !== $('iBH')) $('iBH').value = u==='m' ? +b.h.toFixed(2) : ftStr(b.h);
 
@@ -1641,6 +1988,19 @@ function updateAll(){
    ===================================================================== */
 let pointers = new Map(), pend = null, drag = null, pinch = null, hover = null;
 let guides = null;                            // active X/Y alignment guides, for drawing
+let holdTimer = 0;                            // touch long-press = the shift-click gesture
+const LONG_PRESS = 500;                       // ms
+// Shift-click (or long-press) a building to put it in the selected building's house, or
+// take it out again if it is already in it.
+function toggleMerge(i){
+  if (!sel || sel.t !== 'bld' || sel.i === i || !state.builds[i] || !state.builds[sel.i]) return false;
+  pushUndo();
+  const a = state.builds[sel.i], b = state.builds[i];
+  if (a.g != null && a.g === b.g) separateBuilding(state.builds, i);
+  else joinBuildings(state.builds, sel.i, i);
+  updateAll();
+  return true;
+}
 let lastAdd = { t: 0, x: 0, y: 0 };
 
 cv.addEventListener('contextmenu', e => e.preventDefault());
@@ -1664,7 +2024,17 @@ cv.addEventListener('pointerdown', e => {
     return;
   }
   if (e.button === 2){ drag = { t:'pan' }; return; }
-  pend = { hit: pick(e.offsetX, e.offsetY), x:e.offsetX, y:e.offsetY, moved:false };
+  pend = { hit: pick(e.offsetX, e.offsetY), x:e.offsetX, y:e.offsetY, moved:false,
+           merge: e.shiftKey || e.ctrlKey || e.metaKey };
+  // touch has no shift key: holding a building is the same gesture
+  clearTimeout(holdTimer);
+  if (e.pointerType === 'touch' && pend.hit && pend.hit.t === 'bld')
+    holdTimer = setTimeout(() => {
+      if (pend && !pend.moved && toggleMerge(pend.hit.i)){
+        pend.done = true;                     // the lift must not also select it
+        if (navigator.vibrate) navigator.vibrate(15);
+      }
+    }, LONG_PRESS);
 });
 cv.addEventListener('pointermove', e => {
   if (mode3d){
@@ -1709,6 +2079,8 @@ cv.addEventListener('pointermove', e => {
   }
   if (pend && !pend.moved && Math.hypot(e.offsetX-pend.x, e.offsetY-pend.y) > 6){
     pend.moved = true;
+    clearTimeout(holdTimer);                  // a drag is not a long press
+    if (pend.done){ pend = null; return; }    // already merged under the finger
     const h = pend.hit;
     if (h && h.t==='pt'){ pushUndo(); sel = h; drag = { t:'pt', p:h.p, i:h.i }; }
     else if (h && h.t==='hdl'){ pushUndo(); drag = { t:'hdl', i:h.i, k:h.k }; }
@@ -1748,8 +2120,9 @@ function pointerEnd(e){
     if (!pointers.size) drag = null;
     return;
   }
-  if (pend && !pend.moved && e.type === 'pointerup' && e.button !== 2)
-    handleClick(pend.hit, e.offsetX, e.offsetY);
+  clearTimeout(holdTimer);
+  if (pend && !pend.moved && !pend.done && e.type === 'pointerup' && e.button !== 2)
+    handleClick(pend.hit, e.offsetX, e.offsetY, pend.merge);
   if (pointers.size === 0){
     if (drag && drag.t !== 'pan') updateAll();  // commit + save after an object drag
     pend = null; drag = null;
@@ -1774,8 +2147,9 @@ function resumeLine(p, i){
 //   drawing a line  -> clicks extend it (first point closes the loop, other points attach)
 //   idle + object   -> select it
 //   idle + empty    -> clear the selection, or start a new fence if nothing was selected
-function handleClick(hit, sx, sy){
+function handleClick(hit, sx, sy, merge){
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
+  if (merge && hit && hit.t === 'bld' && toggleMerge(hit.i)) return;
   const tgt = drawTarget();
 
   if (tgt){                                     // --- a line is in progress ---
@@ -1816,7 +2190,9 @@ cv.addEventListener('wheel', e => {
 window.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSelected(); }
-  else if (e.key === 'Escape'){ endLine(); sel = null; updateAll(); }
+  else if (e.key === 'Escape'){
+    endLine(); sel = null; updateAll();
+  }
   else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); undo(); }
 });
 
@@ -1834,7 +2210,8 @@ function updateHint(){
   }
   $('hint').textContent = drawing
     ? 'Tap to add fence posts · tap the first post to close the loop · double-tap or Esc to finish this fence.'
-    : 'Tap empty space to start a fence · tap any fence, post or building to select it · drag to move.';
+    : 'Tap empty space to start a fence · tap any fence, post or building to select it · drag to move · ' +
+      'shift-click or hold a building to merge it with the selected one.';
 }
 
 document.querySelectorAll('#unitTog button').forEach(b =>
@@ -1955,7 +2332,13 @@ $('copyBtn').addEventListener('click', () => {
   L.push('Segments: ' + m.segCount + '   Corners: ' + m.corners);
   L.push('Gates: ' + (m.gates.length ? m.gates.map(g => fmtLen(g,u)).join(', ') : 'none'));
   if (state.builds.length)
-    L.push('Buildings: ' + state.builds.map(b => fmtLen(b.w,u)+' × '+fmtLen(b.h,u)).join('; '));
+    L.push('Buildings: ' + houseGroups(state.builds).map(g => {
+      const hb = houseBox(state.builds, g);
+      return g.map(i => fmtLen(state.builds[i].w,u)+' × '+fmtLen(state.builds[i].h,u)).join(' + ') +
+        ', ' + fmtLen(bldH(hb),u) + ' high' +
+        (hasRoof(hb) ? ` (${roofKind(hb) === 'skillion' ? 'single pitch' : 'gable'} ${roofPitch(hb)}°, ` +
+                       `top ${fmtLen(roofTop(hb),u)})` : '');
+    }).join('; '));
   L.push('');
   const hrDesc = M => { const h = hrOf(M);
     return h.on ? ', handrail ' + fmtSmall(h.w,u) + ' × ' + fmtSmall(h.t,u) : ''; };
@@ -2003,7 +2386,7 @@ function statePayload(){
 function applyState(o){
   state.unit = o.unit === 'ft' ? 'ft' : 'm';
   if (Array.isArray(o.polys))  state.polys  = o.polys;
-  if (Array.isArray(o.builds)) state.builds = o.builds;
+  if (Array.isArray(o.builds)){ state.builds = o.builds; inferHouses(state.builds); }
   if (o.mat) state.mat = Object.assign(state.mat, o.mat);
   state.snapGrid = o.snapGrid !== false; state.snapBld = o.snapBld !== false;
   if (o.view && o.view.s) view = o.view;
