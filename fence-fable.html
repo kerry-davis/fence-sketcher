@@ -48,9 +48,9 @@
   .seg2 button.on{background:var(--accent);color:#fff}
 
   #bar{position:relative;display:flex;gap:10px;row-gap:8px;align-items:center;
-       padding:9px 113px 9px 14px;flex-wrap:wrap;
+       padding:9px 14px;flex-wrap:wrap;
        background:var(--card);border-bottom:1px solid var(--line);user-select:none;-webkit-user-select:none}
-  #bar .grp.units{margin-left:auto}          /* unit toggle pinned to the right edge */
+  #bar .toolbarEnd{margin-left:auto;gap:8px;flex-wrap:nowrap}
   /* snap toggles live on the canvas as compact chips */
   #snapover{position:absolute;top:8px;right:10px;display:flex;gap:6px}
   label.chk{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--chip);
@@ -122,20 +122,51 @@
   .note{color:var(--muted);font-size:12px;margin:6px 0 0}
   .srOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
           clip:rect(0,0,0,0);white-space:nowrap;border:0}
-  #bkSec{position:absolute;top:9px;right:14px}
-  #bkSec>summary{display:flex;align-items:center;min-height:44px;padding:8px 14px;color:var(--ink);
-                 background:var(--card);border:1px solid var(--line);border-radius:10px;
-                 font-weight:550;cursor:pointer;list-style:none}
+  #bkSec{position:relative}
+  #bkSec>summary{display:flex;align-items:center;gap:8px;min-height:44px;padding:8px 13px;color:var(--ink);
+                 background:var(--card);border:1px solid var(--line);border-radius:11px;
+                 box-shadow:0 1px 2px #0000000d;font-weight:650;cursor:pointer;list-style:none}
   #bkSec>summary::-webkit-details-marker{display:none}
-  #bkSec[open]>summary{border-color:var(--accent)}
-  #bkMenuPanel{position:absolute;top:calc(100% + 7px);right:0;z-index:20;width:310px;padding:14px;
-               background:var(--card);border:1px solid var(--line);border-radius:12px;
-               box-shadow:0 12px 30px #0003}
-  #bkMenuPanel h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
-                  margin:0 0 8px}
-  #bkMenuPanel .fileRow{margin-top:8px}
-  #bkMenuPanel .fileRow select{min-width:0}
-  #bkMenuPanel .iconBtn{width:44px;padding:0;flex:none}
+  #bkSec>summary svg{width:18px;height:18px;stroke:currentColor}
+  #bkSec>summary::after{content:"";width:7px;height:7px;margin-left:2px;border-right:1.5px solid;
+                        border-bottom:1.5px solid;transform:rotate(45deg) translateY(-2px);
+                        color:var(--muted);transition:transform .18s ease}
+  #bkSec[open]>summary{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  #bkSec[open]>summary::after{transform:rotate(225deg) translate(-1px,-1px)}
+  #bkMenuPanel{position:absolute;top:calc(100% + 9px);right:0;z-index:20;width:370px;overflow:hidden;
+               background:var(--card);border:1px solid var(--line);border-radius:18px;
+               box-shadow:0 20px 50px #0004,0 4px 12px #0002}
+  .bkHead{display:flex;align-items:center;gap:11px;padding:18px 18px 14px}
+  .bkHeadIcon{display:grid;place-items:center;width:38px;height:38px;flex:none;color:var(--accent);
+              background:var(--accent-soft);border-radius:11px}
+  .bkHeadIcon svg{width:20px;height:20px;stroke:currentColor}
+  #bkMenuPanel h2{font-size:16px;line-height:1.2;margin:0}
+  .bkHead p{font-size:12px;color:var(--muted);margin:2px 0 0}
+  .bkCurrent{margin:0 16px 12px;padding:11px 13px;background:var(--bg);
+             border:1px solid var(--line);border-radius:12px}
+  .bkCurrent span,.bkLibrary>label{display:block;font-size:11px;font-weight:700;letter-spacing:.055em;
+                                  text-transform:uppercase;color:var(--muted)}
+  #bkCur{margin:3px 0 0;font-size:14px;font-weight:620;color:var(--ink);
+         overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bkPrimaryActions{display:grid;grid-template-columns:1.15fr 1fr;gap:8px;padding:0 16px 16px}
+  .bkPrimaryActions button{width:100%;border-radius:11px}
+  #bkSaveAs{background:var(--bg)}
+  .bkLibrary{padding:15px 16px 16px;border-top:1px solid var(--line)}
+  .bkLibrary>label{margin-bottom:7px}
+  #bkList{width:100%;background:var(--bg);border-radius:11px}
+  .bkFileActions{display:grid;grid-template-columns:1fr 44px 44px;gap:8px;margin-top:8px}
+  .bkFileActions button{border-radius:11px}
+  .bkFileActions .iconBtn{display:grid;place-items:center;width:44px;padding:0}
+  .bkFileActions svg{width:18px;height:18px;stroke:currentColor}
+  #bkDel{background:transparent}
+  #bkStatus{margin:0;padding:10px 16px;border-top:1px solid var(--line)}
+  #bkStatus:empty{display:none}
+  #bkStatus[data-kind="success"]{background:var(--accent-soft)}
+  .bkSync{display:flex;align-items:center;gap:8px;padding:11px 16px;color:var(--muted);
+          background:var(--bg);border-top:1px solid var(--line);font-size:11px}
+  .bkSyncDot{width:7px;height:7px;flex:none;background:var(--accent);border-radius:50%;
+             box-shadow:0 0 0 3px var(--accent-soft)}
+  .bkSync strong{color:var(--ink);font-weight:620}
   #bkStatus[data-kind="error"], #bkDialogError{color:#b91c1c}
   #bkStatus[data-kind="success"]{color:var(--accent)}
   dialog{width:min(420px,calc(100vw - 28px));padding:0;color:var(--ink);background:var(--card);
@@ -162,12 +193,13 @@
     aside{width:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
           align-items:start;overflow:visible}
     /* toolbar: primary actions always visible; the rest expands behind "⋯ More" */
-    #bar{padding:8px 104px 8px 10px;gap:8px}
+    #bar{padding:8px 10px;gap:8px}
     #bar h1{display:none}
     #bar .grp.sec{display:none}
     #bar.open .grp.sec{display:flex}
+    #bar .toolbarEnd{display:contents}
     #bMore{display:inline-block}
-    #bkSec{top:8px;right:10px}
+    #bkSec{margin-left:auto}
     .lbl{display:none}         /* icon-only Undo / Delete */
     button{padding:8px 12px}
     .seg2 button{min-width:60px}
@@ -180,7 +212,7 @@
                      background:var(--chip)}
     #orbitctl .orbitWord, #orbitctl label{display:none}
     #orbitctl #bOrbitSpeed{display:block;font-size:13px}
-    #bkMenuPanel{position:fixed;top:66px;right:10px;width:calc(100vw - 20px);max-width:360px}
+    #bkMenuPanel{position:fixed;top:66px;right:10px;width:calc(100vw - 20px);max-width:380px}
   }
 </style>
 </head>
@@ -201,36 +233,73 @@
   <div class="grp sec">
     <button id="bClear" class="danger">Clear all</button>
   </div>
-  <div class="grp sec units">
+  <div class="grp toolbarEnd">
+    <div class="grp sec units">
     <button id="b3d" title="Plan / 3D view">🧊 3D</button>
     <div class="seg2" id="unitTog">
       <button data-u="m"  class="on">Metres</button>
       <button data-u="ft">Feet</button>
     </div>
     <button id="bTheme" title="Light / dark mode">🌓</button>
-  </div>
+    </div>
   <details id="bkSec" style="display:none">
-    <summary id="bkMenuButton">📁 File</summary>
+    <summary id="bkMenuButton">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Files
+    </summary>
     <div id="bkMenuPanel" aria-label="Saved drawings">
-      <h2>Saved drawings</h2>
-      <div class="row">
-        <button id="bkSave" class="primary" style="flex:1">💾 Save</button>
-        <button id="bkSaveAs" title="Save as a new drawing">＋ Save as…</button>
+      <div class="bkHead">
+        <span class="bkHeadIcon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M7 3.5h7l4 4V20.5H7zM14 3.5v4h4"
+                  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+          <h2>Drawing files</h2>
+          <p>Save and manage your plans</p>
+        </div>
       </div>
-      <p class="note" id="bkCur" aria-live="polite"></p>
-      <div class="row fileRow">
-        <label class="srOnly" for="bkList">Saved drawing</label>
+      <div class="bkCurrent">
+        <span>Current drawing</span>
+        <p id="bkCur" aria-live="polite"></p>
+      </div>
+      <div class="bkPrimaryActions">
+        <button id="bkSave" class="primary">Save changes</button>
+        <button id="bkSaveAs" title="Save as a new drawing">Save as new</button>
+      </div>
+      <div class="bkLibrary">
+        <label for="bkList">Saved drawings</label>
         <select id="bkList" aria-label="Saved drawing"></select>
-        <button id="bkLoad">Open</button>
-        <button id="bkRen" class="iconBtn" title="Rename saved drawing"
-                aria-label="Rename saved drawing">✏️</button>
-        <button id="bkDel" class="danger iconBtn" title="Delete saved drawing"
-                aria-label="Delete saved drawing">🗑</button>
+        <div class="bkFileActions">
+          <button id="bkLoad">Open selected</button>
+          <button id="bkRen" class="iconBtn" title="Rename saved drawing"
+                  aria-label="Rename saved drawing">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="m4 20 4.2-1 10.7-10.7a2.1 2.1 0 0 0-3-3L5.2 16zM14.5 6.7l3 3"
+                    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <button id="bkDel" class="danger iconBtn" title="Delete saved drawing"
+                  aria-label="Delete saved drawing">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4.5 7h15M9 7V4.5h6V7m-8.5 0 .8 13h9.4l.8-13M10 11v5M14 11v5"
+                    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <p class="note" id="bkStatus" role="status" aria-live="polite"></p>
-      <p class="note">Saved on gbot and available to your Tailscale devices.</p>
+      <div class="bkSync">
+        <span class="bkSyncDot" aria-hidden="true"></span>
+        <span><strong>Saved on gbot</strong> · Available through Tailscale</span>
+      </div>
     </div>
   </details>
+  </div>
 </div>
 
 <main>
@@ -2796,8 +2865,8 @@ try { bkCurrent = localStorage.getItem(BK_KEY) || ''; } catch(e) {}
 function setBkCurrent(name){
   bkCurrent = name;
   try { localStorage.setItem(BK_KEY, name); } catch(e) {}
-  $('bkCur').textContent = name ? `Current file: ${name}` : 'No current server file.';
-  $('bkSave').textContent = name ? '💾 Save' : '💾 Save as…';
+  $('bkCur').textContent = name || 'Not saved to server yet';
+  $('bkSave').textContent = name ? 'Save changes' : 'Save drawing';
 }
 function bkAutoName(){
   const d = new Date(), p = n => String(n).padStart(2,'0');
