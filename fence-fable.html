@@ -47,7 +47,8 @@
   .seg2 button{border:0;border-radius:0;min-width:70px}
   .seg2 button.on{background:var(--accent);color:#fff}
 
-  #bar{display:flex;gap:10px;row-gap:8px;align-items:center;padding:9px 14px;flex-wrap:wrap;
+  #bar{position:relative;display:flex;gap:10px;row-gap:8px;align-items:center;
+       padding:9px 113px 9px 14px;flex-wrap:wrap;
        background:var(--card);border-bottom:1px solid var(--line);user-select:none;-webkit-user-select:none}
   #bar .grp.units{margin-left:auto}          /* unit toggle pinned to the right edge */
   /* snap toggles live on the canvas as compact chips */
@@ -121,9 +122,20 @@
   .note{color:var(--muted);font-size:12px;margin:6px 0 0}
   .srOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
           clip:rect(0,0,0,0);white-space:nowrap;border:0}
-  #bkSec .fileRow{margin-top:8px}
-  #bkSec .fileRow select{min-width:0}
-  #bkSec .iconBtn{width:44px;padding:0;flex:none}
+  #bkSec{position:absolute;top:9px;right:14px}
+  #bkSec>summary{display:flex;align-items:center;min-height:44px;padding:8px 14px;color:var(--ink);
+                 background:var(--card);border:1px solid var(--line);border-radius:10px;
+                 font-weight:550;cursor:pointer;list-style:none}
+  #bkSec>summary::-webkit-details-marker{display:none}
+  #bkSec[open]>summary{border-color:var(--accent)}
+  #bkMenuPanel{position:absolute;top:calc(100% + 7px);right:0;z-index:20;width:310px;padding:14px;
+               background:var(--card);border:1px solid var(--line);border-radius:12px;
+               box-shadow:0 12px 30px #0003}
+  #bkMenuPanel h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
+                  margin:0 0 8px}
+  #bkMenuPanel .fileRow{margin-top:8px}
+  #bkMenuPanel .fileRow select{min-width:0}
+  #bkMenuPanel .iconBtn{width:44px;padding:0;flex:none}
   #bkStatus[data-kind="error"], #bkDialogError{color:#b91c1c}
   #bkStatus[data-kind="success"]{color:var(--accent)}
   dialog{width:min(420px,calc(100vw - 28px));padding:0;color:var(--ink);background:var(--card);
@@ -150,11 +162,12 @@
     aside{width:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
           align-items:start;overflow:visible}
     /* toolbar: primary actions always visible; the rest expands behind "⋯ More" */
-    #bar{padding:8px 10px;gap:8px}
+    #bar{padding:8px 104px 8px 10px;gap:8px}
     #bar h1{display:none}
     #bar .grp.sec{display:none}
     #bar.open .grp.sec{display:flex}
     #bMore{display:inline-block}
+    #bkSec{top:8px;right:10px}
     .lbl{display:none}         /* icon-only Undo / Delete */
     button{padding:8px 12px}
     .seg2 button{min-width:60px}
@@ -167,6 +180,7 @@
                      background:var(--chip)}
     #orbitctl .orbitWord, #orbitctl label{display:none}
     #orbitctl #bOrbitSpeed{display:block;font-size:13px}
+    #bkMenuPanel{position:fixed;top:66px;right:10px;width:calc(100vw - 20px);max-width:360px}
   }
 </style>
 </head>
@@ -195,6 +209,28 @@
     </div>
     <button id="bTheme" title="Light / dark mode">🌓</button>
   </div>
+  <details id="bkSec" style="display:none">
+    <summary id="bkMenuButton">📁 File</summary>
+    <div id="bkMenuPanel" aria-label="Saved drawings">
+      <h2>Saved drawings</h2>
+      <div class="row">
+        <button id="bkSave" class="primary" style="flex:1">💾 Save</button>
+        <button id="bkSaveAs" title="Save as a new drawing">＋ Save as…</button>
+      </div>
+      <p class="note" id="bkCur" aria-live="polite"></p>
+      <div class="row fileRow">
+        <label class="srOnly" for="bkList">Saved drawing</label>
+        <select id="bkList" aria-label="Saved drawing"></select>
+        <button id="bkLoad">Open</button>
+        <button id="bkRen" class="iconBtn" title="Rename saved drawing"
+                aria-label="Rename saved drawing">✏️</button>
+        <button id="bkDel" class="danger iconBtn" title="Delete saved drawing"
+                aria-label="Delete saved drawing">🗑</button>
+      </div>
+      <p class="note" id="bkStatus" role="status" aria-live="polite"></p>
+      <p class="note">Saved on gbot and available to your Tailscale devices.</p>
+    </div>
+  </details>
 </div>
 
 <main>
@@ -283,25 +319,6 @@
       <p class="note">Saved automatically in this browser.</p>
     </section>
 
-    <section id="bkSec" style="display:none">
-      <h2>Saved drawings</h2>
-      <div class="row">
-        <button id="bkSave" class="primary" style="flex:1">💾 Save</button>
-        <button id="bkSaveAs" title="Save as a new drawing">＋ Save as…</button>
-      </div>
-      <p class="note" id="bkCur" aria-live="polite"></p>
-      <div class="row fileRow">
-        <label class="srOnly" for="bkList">Saved drawing</label>
-        <select id="bkList" aria-label="Saved drawing"></select>
-        <button id="bkLoad">Open</button>
-        <button id="bkRen" class="iconBtn" title="Rename saved drawing"
-                aria-label="Rename saved drawing">✏️</button>
-        <button id="bkDel" class="danger iconBtn" title="Delete saved drawing"
-                aria-label="Delete saved drawing">🗑</button>
-      </div>
-      <p class="note" id="bkStatus" role="status" aria-live="polite"></p>
-      <p class="note">Saved on gbot and available to your Tailscale devices.</p>
-    </section>
   </aside>
 </main>
 
@@ -2519,6 +2536,7 @@ window.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSelected(); }
   else if (e.key === 'Escape'){
+    if ($('bkSec').open && !$('bkDialog').open){ $('bkSec').open = false; return; }
     endLine(); sel = null; updateAll();
   }
   else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); undo(); }
@@ -2961,6 +2979,13 @@ $('bkDel').addEventListener('click', () => { if (bkSelected()) openBkDialog('del
 $('bkList').addEventListener('change', syncBkActions);
 $('bkName').addEventListener('input', syncBkDialog);
 $('bkDialogCancel').addEventListener('click', closeBkDialog);
+$('bkSec').addEventListener('toggle', () => {
+  if ($('bkSec').open) setBkStatus('');
+});
+document.addEventListener('click', e => {
+  if ($('bkSec').open && !e.target.closest('#bkSec') && !e.target.closest('#bkDialog'))
+    $('bkSec').open = false;
+});
 $('bkDialogForm').addEventListener('submit', e => {
   e.preventDefault();
   if (!bkDialogAction || $('bkDialogConfirm').disabled) return;
