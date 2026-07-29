@@ -4,8 +4,8 @@ Sketch a fence line, get the materials list, then walk around it in 3D.
 
 One HTML file. No dependencies, no build step, no framework. Open
 `fence-fable.html` in a browser and it works — on a phone, offline, from a USB
-stick. The optional 30-line Node server exists only to keep named backups you
-can restore from another device.
+stick. The optional Node server keeps named backups and can publish explicitly
+created view-only snapshots without exposing the private backup API.
 
 ---
 
@@ -47,6 +47,9 @@ with the list.
 - **Light / dark theme**, remembered.
 - **Autosave** to `localStorage`, plus named backups on the server.
 - **Undo** (`Ctrl+Z`), 100 deep.
+- **View-only sharing.** Publish a saved drawing as an expiring, revocable link.
+  Viewers can use the plan, 3D controls, labels, units and materials summary,
+  but cannot change or save the drawing.
 
 ---
 
@@ -128,9 +131,54 @@ tailscale serve --https=4646 localhost:4647
 | `PUT` | `/backups/<name>` | save (JSON body, ≤ 2 MB, same name overwrites) |
 | `PATCH` | `/backups/<name>` | rename, body `{"name":"new-name"}` |
 | `DELETE` | `/backups/<name>` | delete |
+| `GET` | `/share-config` | whether public sharing is configured |
+| `GET` | `/shares/<name>` | active share status for one saved drawing |
+| `POST` | `/shares/<name>` | publish its current in-browser snapshot |
+| `PUT` | `/shares/<name>` | update its active snapshot |
+| `DELETE` | `/shares/<name>` | revoke its active link |
 
 Names are whitelisted to `[a-zA-Z0-9._-]{1,64}`, so path traversal isn't
 possible.
+
+### Public view-only sharing
+
+Sharing deliberately uses two security boundaries:
+
+1. `serve-fence.mjs` remains private behind Tailscale. It is the only service
+   allowed to create, update or revoke links.
+2. `share-worker.mjs` is public. It serves only `/share/<token>` and the
+   corresponding GET-only snapshot API. It has no backup routes and cannot list
+   shares.
+
+The public link is a 256-bit random bearer token. Snapshots are separate from
+saved drawings, use `no-store`/`noindex` response headers, and expire after 7
+or 30 days unless the owner explicitly chooses no expiry. Deleting a saved
+drawing revokes its active share before removing the file.
+
+The Worker is optional; the editor and backups continue to work without it.
+To provision it after review:
+
+```sh
+npm install
+npx wrangler kv namespace create SHARES --config wrangler.share.jsonc
+# Put the returned namespace id in wrangler.share.jsonc.
+npx wrangler secret put SHARE_ADMIN_TOKEN --config wrangler.share.jsonc
+npm run build:share
+npm run share:deploy
+```
+
+Configure the same secret and the deployed Worker origin on the private server,
+preferably in a systemd environment override rather than the repository:
+
+```ini
+[Service]
+Environment=FENCE_SHARE_API_URL=https://fence-sketcher-share.<account>.workers.dev
+Environment=FENCE_SHARE_ADMIN_TOKEN=<the same strong secret>
+```
+
+Restart the private server after setting those values. The Files menu then
+shows **Share view** whenever the current drawing has been saved. Secrets must
+never be placed in `fence-fable.html`, committed, or sent in a browser request.
 
 ---
 
@@ -141,7 +189,13 @@ edits, snapping, and the 3D geometry — self-checks on every page load. It's
 silent unless something breaks; open the console and you'll see
 `fence-fable: self-checks passed`.
 
-To run them headlessly:
+To run the complete Node test suite:
+
+```sh
+npm test
+```
+
+To run only the original inline checks headlessly:
 
 ```sh
 awk '/<script>/{f=1;next}/<\/script>/{f=0}f' fence-fable.html > /tmp/ff.js
@@ -157,8 +211,14 @@ Node has no DOM, and everything testable runs before the first DOM access.
 
 ```
 fence-fable.html    the whole app: markup, styles, logic, 3D renderer, tests
-serve-fence.mjs     optional backup server (~70 lines, stdlib only)
+serve-fence.mjs     private backup server and public-share management proxy
+share-worker.mjs    public GET-only snapshot viewer and management API
+wrangler.share.jsonc
+                    Cloudflare Worker assets and KV configuration
+scripts/            repeatable public-view build
+test/               share security and lifecycle integration tests
 backups/            saved drawings (gitignored)
+shares/             private active-link metadata (gitignored)
 ```
 
 Inside `fence-fable.html`, in order: tweakable defaults → units → state → pure

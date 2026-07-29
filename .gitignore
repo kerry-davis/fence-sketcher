@@ -1,1 +1,5 @@
 backups/
+dist-share/
+shares/
+.wrangler/
+.dev.vars*

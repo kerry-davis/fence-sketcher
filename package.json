@@ -1,0 +1,14 @@
+{
+  "name": "fence-sketcher",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:share": "node scripts/build-share.mjs",
+    "test": "node --test",
+    "share:dev": "npm run build:share && npx wrangler dev --config wrangler.share.jsonc",
+    "share:deploy": "npm run build:share && npx wrangler deploy --config wrangler.share.jsonc"
+  },
+  "devDependencies": {
+    "wrangler": "^4.94.0"
+  }
+}
