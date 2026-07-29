@@ -345,6 +345,7 @@ let state = {
 };
 let view = { x: 0, y: 0, s: 24 };             // world origin offset (m) + scale (px per m)
 let sel  = null;                              // {t:'pt'|'seg'|'bld', p?, i?}
+let bsel = new Set();                         // selected building members (whole groups expand here)
 let undoStack = [];
 
 /* =====================================================================
@@ -442,6 +443,19 @@ function inferHouses(builds){
   }));
 }
 const groupOf = (builds, i) => houseGroups(builds).find(g => g.indexOf(i) >= 0) || [i];
+function groupBuildings(builds, ids){
+  const selected = new Set(ids), objects = new Set(ids.map(i => builds[i].g == null ? 'b'+i : 'g'+builds[i].g));
+  if (objects.size < 2) return false;
+  const id = nextHouseId(builds);
+  builds.forEach((b, i) => { if (selected.has(i)) b.g = id; });
+  return true;
+}
+function ungroupBuildings(builds, ids){
+  const groups = new Set(ids.map(i => builds[i].g).filter(g => g != null));
+  if (!groups.size) return false;
+  builds.forEach(b => { if (groups.has(b.g)) delete b.g; });
+  return true;
+}
 // The whole house as one rectangle: its bounding footprint, wearing the settings of its
 // first part. Roof maths then works on the house, not on each box.
 function houseBox(builds, g){
@@ -450,6 +464,17 @@ function houseBox(builds, g){
   const y0 = Math.min(...g.map(i => builds[i].y)), y1 = Math.max(...g.map(i => builds[i].y+builds[i].h));
   return { x:x0, y:y0, w:x1-x0, h:y1-y0,
            z:bldH(own), roof:own.roof, pitch:own.pitch, ridge:own.ridge, high:own.high };
+}
+function scaleBuildings(builds, ids, from, to){
+  const sx = to.w/from.w, sy = to.h/from.h;
+  for (const i of ids){
+    const b = builds[i];
+    b.x = to.x + (b.x-from.x)*sx; b.w *= sx;
+    b.y = to.y + (b.y-from.y)*sy; b.h *= sy;
+  }
+}
+function deleteBuildings(builds, ids){
+  for (const i of [...ids].sort((a,b) => b-a)) builds.splice(i, 1);
 }
 // Which plan axis the roof height varies along, and where its high line sits.
 const roofAxis = hb => roofKind(hb) === 'skillion' ? highSide(hb)[0]
@@ -832,6 +857,19 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   const pair = [bx(0,0,6,6), bx(20,0,6,6)];
   joinBuildings(pair, 0, 1); separateBuilding(pair, 1);
   chk(pair.every(b => b.g == null), 'a house of one is just a building again');
+  const grouped = [bx(0,0,4,4,{g:2}), bx(4,0,4,4,{g:2}), bx(12,0,2,2)];
+  chk(groupBuildings(grouped, [0,1,2]) && new Set(grouped.map(b => b.g)).size === 1,
+      'group combines selected objects and flattens existing groups');
+  chk(ungroupBuildings(grouped, [0,1,2]) && grouped.every(b => b.g == null),
+      'ungroup restores every component rectangle');
+  const scaled = [bx(0,0,4,2), bx(4,2,2,2)], from = houseBox([bx(0,0,4,2), bx(4,2,2,2)], [0,1]);
+  scaleBuildings(scaled, [0,1], from, {x:10,y:20,w:12,h:8});
+  chk(near(scaled[0].x,10) && near(scaled[0].w,8) &&
+      near(scaled[1].x,18) && near(scaled[1].y,24), 'group resize scales component rectangles');
+  const deleted = [bx(0,0,1,1), bx(1,0,1,1), bx(2,0,1,1), bx(3,0,1,1)];
+  deleteBuildings(deleted, [1,3]);
+  chk(deleted.length === 2 && deleted[0].x === 0 && deleted[1].x === 2,
+      'multi-delete removes selected indexes without shifting the survivors');
   // a deck may sit flush, or inside the footprint, and stays its own volume
   const deck = [bx(0,0,10,6), bx(0,6,10,2,{z:0.8})];
   chk(houseGroups(deck).length === 2, 'a deck against a house is not merged');
@@ -1069,7 +1107,7 @@ function snapObjectAxes(w, xOffsets, yOffsets, skipBld){
   const xs = [], ys = [];
   for (const pl of state.polys) for (const q of pl.pts){ xs.push(q.x); ys.push(q.y); }
   state.builds.forEach((b, i) => {
-    if (i === skipBld) return;
+    if (i === skipBld || (skipBld instanceof Set && skipBld.has(i))) return;
     xs.push(b.x, b.x+b.w); ys.push(b.y, b.y+b.h);
   });
   const nearest = (v, offsets, targets, fallback) => {
@@ -1091,12 +1129,12 @@ function pick(sx, sy){
       const s = W2S(state.polys[p].pts[i]);
       if (Math.hypot(sx-s.x, sy-s.y) < HIT.pt) return { t:'pt', p, i };
     }
-  if (sel && sel.t==='bld' && state.builds[sel.i]){   // corner handles of the selected building
-    const b = state.builds[sel.i];
+  if (sel && sel.t==='bld' && bsel.size){       // corner handles of the building selection
+    const b = houseBox(state.builds, [...bsel]);
     const cs = [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]];
     for (let k=0; k<4; k++){
       const s = W2S({x:cs[k][0], y:cs[k][1]});
-      if (Math.hypot(sx-s.x, sy-s.y) < HIT.handle) return { t:'hdl', i:sel.i, k };
+      if (Math.hypot(sx-s.x, sy-s.y) < HIT.handle) return { t:'hdl', k };
     }
   }
   for (let p = state.polys.length-1; p >= 0; p--)
@@ -1123,7 +1161,7 @@ function undo(){
   if (!s) return;
   const o = JSON.parse(s);
   state.polys = o.polys; state.builds = o.builds;
-  sel = null; updateAll();
+  sel = null; bsel.clear(); updateAll();
 }
 // Polyline currently being drawn: the last one, if still open and not finished.
 function drawTarget(){
@@ -1153,6 +1191,7 @@ function addBuilding(){
   const c = snapGridPt(S2W(cw/2, ch/2));
   state.builds.push({ x:c.x-bw/2, y:c.y-bh/2, w:bw, h:bh, z:bz });
   sel = { t:'bld', i: state.builds.length-1 };
+  bsel = new Set([sel.i]);
   updateAll();
 }
 function deleteSelected(){
@@ -1160,13 +1199,13 @@ function deleteSelected(){
   pushUndo();
   if (sel.t==='pt')  deletePoint(state.polys, sel.p, sel.i);
   if (sel.t==='seg') deleteSegment(state.polys, sel.p, sel.i);
-  if (sel.t==='bld') state.builds.splice(sel.i, 1);
-  sel = null; updateAll();
+  if (sel.t==='bld') deleteBuildings(state.builds, bsel);
+  sel = null; bsel.clear(); updateAll();
 }
 function clearAll(){
   if (!confirm('Clear the whole drawing?')) return;
   pushUndo();
-  state.polys = []; state.builds = []; sel = null;
+  state.polys = []; state.builds = []; sel = null; bsel.clear();
   updateAll();
 }
 // Move a dragged fence point: snap, then keep any locked neighbour segments at their length.
@@ -1242,26 +1281,26 @@ function doPaint(){
   state.builds.forEach((b, i) => {
     const A = W2S(b), sw = b.w*view.s, sh = b.h*view.s;
     ctx.fillStyle = C.bldFill; ctx.fillRect(A.x, A.y, sw, sh);
-    // the selected building, and anything merged with it, are outlined in the accent
-    const isSel = sel && sel.t==='bld' && sel.i===i;
-    const selB = sel && sel.t==='bld' ? state.builds[sel.i] : null;
-    const sameHouse = !isSel && selB && b.g != null && b.g === selB.g;
-    ctx.strokeStyle = isSel || sameHouse ? ACCENT : C.bldStroke;
-    ctx.lineWidth = isSel ? 3 : sameHouse ? 2 : 1.5;
-    if (sameHouse) ctx.setLineDash([7,4]);
+    const isSel = sel && sel.t==='bld' && bsel.has(i);
+    ctx.strokeStyle = isSel ? ACCENT : C.bldStroke;
+    ctx.lineWidth = isSel ? 2 : 1.5;
+    if (isSel && bsel.size > 1) ctx.setLineDash([7,4]);
     ctx.strokeRect(A.x, A.y, sw, sh);
     ctx.setLineDash([]);
     if (sw > 54 && sh > 22){
       ctx.fillStyle = C.bldText; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
       ctx.fillText(fmtLen(b.w, state.unit) + ' × ' + fmtLen(b.h, state.unit), A.x+sw/2, A.y+sh/2+4);
     }
-    if (sel && sel.t==='bld' && sel.i===i){          // corner resize handles
-      ctx.fillStyle = ACCENT;
-      for (const [hx,hy] of [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]]){
-        const H = W2S({x:hx,y:hy}); ctx.fillRect(H.x-5, H.y-5, 10, 10);
-      }
-    }
   });
+  if (sel && sel.t==='bld' && bsel.size){
+    const b = houseBox(state.builds, [...bsel]), A = W2S(b);
+    ctx.strokeStyle = ACCENT; ctx.lineWidth = 3; ctx.setLineDash([]);
+    ctx.strokeRect(A.x, A.y, b.w*view.s, b.h*view.s);
+    ctx.fillStyle = ACCENT;
+    for (const [hx,hy] of [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]]){
+      const H = W2S({x:hx,y:hy}); ctx.fillRect(H.x-5, H.y-5, 10, 10);
+    }
+  }
   // one dashed line per house: the ridge of a gable, or the high edge of a single pitch
   for (const g of houseGroups(state.builds)){
     const hb = houseBox(state.builds, g);
@@ -1382,7 +1421,7 @@ function doPaint(){
       a = W2S({ x:(q1.x+q2.x)/2, y:(q1.y+q2.y)/2 });
     }
     if (sel.t==='bld' && state.builds[sel.i]){
-      const b = state.builds[sel.i]; a = W2S({ x:b.x+b.w, y:b.y });
+      const b = houseBox(state.builds, [...bsel]); a = W2S({ x:b.x+b.w, y:b.y });
     }
     if (a){
       fdel.style.display = 'block';
@@ -1890,7 +1929,8 @@ function syncMatInputs(){
 let lastSelKey = '';
 function updateSelbox(){
   const box = $('selbox');
-  const key = sel ? sel.t + '/' + (sel.p ?? '') + '/' + (sel.i ?? '') : '';
+  const key = sel ? sel.t + '/' + (sel.p ?? '') + '/' + (sel.i ?? '') +
+                    (sel.t==='bld' ? '/' + [...bsel].sort((a,b)=>a-b).join(',') : '') : '';
   if (!sel){ box.style.display='none'; lastSelKey=''; return; }
   box.style.display = 'block';
   const u = state.unit;
@@ -1928,8 +1968,11 @@ function updateSelbox(){
 
   } else if (sel.t === 'bld'){
     const b = state.builds[sel.i];
+    const ids = [...bsel], hb = houseBox(state.builds, ids);
     if (key !== lastSelKey){
-      box.innerHTML = '<h2>Selected building</h2>' +
+      box.innerHTML = '<h2>Selected building'+(ids.length>1?'s':'')+'</h2>' +
+        '<div class="grp"><button id="bGroup" class="primary" style="flex:1">Group</button>' +
+          '<button id="bUngroup" style="flex:1">Ungroup</button></div>' +
         '<div class="row"><span>Width</span><span><input id="iBW" inputmode="text"></span></div>' +
         '<div class="row"><span>Depth</span><span><input id="iBH" inputmode="text"></span></div>' +
         '<div class="row" title="Wall height, to the eaves"><span>Height</span><span><input id="iBZ" inputmode="text"></span></div>' +
@@ -1945,19 +1988,22 @@ function updateSelbox(){
         '<p class="note roofOnly" id="bRoofNote"></p>' +
         '<p class="note" id="bJoinNote"></p>' +
         '<p class="note">Drag to move, drag corners to resize. Height and roof only show in the 3D view.</p>';
-      const apply = (dim, el) => {                  // width/depth belong to this box alone
+      const apply = (dim, el) => {
         const v = parseLen(el.value, state.unit);
         if (v != null && v >= MIN_BLD && sel && sel.t==='bld'){
-          pushUndo(); state.builds[sel.i][dim] = v; updateAll();
+          pushUndo();
+          const from = houseBox(state.builds, [...bsel]), to = {...from, [dim]:v};
+          scaleBuildings(state.builds, [...bsel], from, to); updateAll();
         } else updateSelbox();
       };
-      // height and roof belong to the whole house, so they are written to every part of it
       const applyHouse = fn => {
         if (!sel || sel.t!=='bld') return;
         pushUndo();
-        for (const k of groupOf(state.builds, sel.i)) fn(state.builds[k]);
+        for (const k of bsel) fn(state.builds[k]);
         updateAll();
       };
+      $('bGroup').addEventListener('click', groupSelected);
+      $('bUngroup').addEventListener('click', ungroupSelected);
       $('iBW').addEventListener('change', e => apply('w', e.target));
       $('iBH').addEventListener('change', e => apply('h', e.target));
       $('iBZ').addEventListener('change', e => {
@@ -1965,12 +2011,12 @@ function updateSelbox(){
         if (v != null && v >= MIN_BLD) applyHouse(bl => bl.z = v); else updateSelbox();
       });
       $('iBRoof').addEventListener('change', e => {
-        const kind = e.target.value, hb = sel && sel.t==='bld' && houseBox(state.builds, groupOf(state.builds, sel.i));
-        if (!hb) return;
+        const kind = e.target.value, box = sel && sel.t==='bld' && houseBox(state.builds, [...bsel]);
+        if (!box) return;
         applyHouse(bl => {
           if (kind === 'gable' || kind === 'skillion'){  // seed from what it already implied
-            bl.roof = kind; bl.pitch = roofPitch(hb);
-            if (kind === 'gable') bl.ridge = ridgeAlong(hb); else bl.high = highSide(hb);
+            bl.roof = kind; bl.pitch = roofPitch(box);
+            if (kind === 'gable') bl.ridge = ridgeAlong(box); else bl.high = highSide(box);
           } else delete bl.roof;
         });
       });
@@ -1981,15 +2027,17 @@ function updateSelbox(){
         if (v >= 1 && v <= 75) applyHouse(bl => bl.pitch = v); else updateSelbox();
       });
     }
-    // every roof control describes the house this box belongs to, not the box
-    const grp = groupOf(state.builds, sel.i), hb = houseBox(state.builds, grp);
+    const objects = new Set(ids.map(i => state.builds[i].g == null ? 'b'+i : 'g'+state.builds[i].g));
+    $('bGroup').disabled = objects.size < 2;
+    $('bUngroup').disabled = !ids.some(i => state.builds[i].g != null);
     $('bJoinNote').textContent =
-      (grp.length > 1
-        ? `Merged with ${grp.length-1} other building${grp.length>2?'s':''} — one house ` +
+      (objects.size > 1
+        ? `${objects.size} objects selected. Choose Group to combine them. `
+        : ids.length > 1
+        ? `Grouped with ${ids.length-1} other building${ids.length>2?'s':''} — one object ` +
           `${fmtLen(hb.w,u)} × ${fmtLen(hb.h,u)} overall, sharing this height and roof. `
-        : 'Overlapping does nothing on its own. ') +
-      'Shift-click another building to merge it into this house, or shift-click a merged ' +
-      'one to take it out. On a touch screen, press and hold it.';
+        : 'One object selected. ') +
+      'Shift-click or press and hold to add or remove whole objects from the selection.';
     box.classList.toggle('noroof', !hasRoof(hb));
     box.classList.toggle('gableroof', hasRoof(hb) && roofKind(hb) === 'gable');
     box.classList.toggle('skillroof', hasRoof(hb) && roofKind(hb) === 'skillion');
@@ -2005,8 +2053,8 @@ function updateSelbox(){
           `${fmtLen(roofRise(hb), u)} over ${fmtLen(roofSpan(hb), u)} of span.`;
     if (document.activeElement !== $('iBZ'))
       $('iBZ').value = u==='m' ? +bldH(hb).toFixed(2) : ftStr(bldH(hb));
-    if (document.activeElement !== $('iBW')) $('iBW').value = u==='m' ? +b.w.toFixed(2) : ftStr(b.w);
-    if (document.activeElement !== $('iBH')) $('iBH').value = u==='m' ? +b.h.toFixed(2) : ftStr(b.h);
+    if (document.activeElement !== $('iBW')) $('iBW').value = u==='m' ? +hb.w.toFixed(2) : ftStr(hb.w);
+    if (document.activeElement !== $('iBH')) $('iBH').value = u==='m' ? +hb.h.toFixed(2) : ftStr(hb.h);
 
   } else if (key !== lastSelKey){
     const pl = state.polys[sel.p];
@@ -2030,6 +2078,11 @@ function updateAll(){
              (!state.polys[sel.p] || sel.i >= (sel.t==='pt' ? state.polys[sel.p].pts.length
                                                             : segsOf(state.polys[sel.p]).length))) sel = null;
   }
+  if (!sel || sel.t!=='bld') bsel.clear();
+  else {
+    bsel = new Set([...bsel].filter(i => state.builds[i]));
+    if (!bsel.size) bsel = new Set(groupOf(state.builds, sel.i));
+  }
   hover = null; guides = null; scene3 = null; // stale once the drawing changes
   updateHint();
   syncMatInputs();                            // panel follows the selected fence's settings
@@ -2045,18 +2098,34 @@ function updateAll(){
    ===================================================================== */
 let pointers = new Map(), pend = null, drag = null, pinch = null, hover = null;
 let guides = null;                            // active X/Y alignment guides, for drawing
-let holdTimer = 0;                            // touch long-press = the shift-click gesture
+let holdTimer = 0;                            // touch long-press = add/remove from selection
 const LONG_PRESS = 500;                       // ms
-// Shift-click (or long-press) a building to put it in the selected building's house, or
-// take it out again if it is already in it.
-function toggleMerge(i){
-  if (!sel || sel.t !== 'bld' || sel.i === i || !state.builds[i] || !state.builds[sel.i]) return false;
-  pushUndo();
-  const a = state.builds[sel.i], b = state.builds[i];
-  if (a.g != null && a.g === b.g) separateBuilding(state.builds, i);
-  else joinBuildings(state.builds, sel.i, i);
+function selectBuilding(i, additive){
+  if (!state.builds[i]) return false;
+  const members = groupOf(state.builds, i);
+  if (!additive){
+    bsel = new Set(members); sel = {t:'bld', i}; updateAll(); return true;
+  }
+  const remove = members.every(k => bsel.has(k));
+  for (const k of members) remove ? bsel.delete(k) : bsel.add(k);
+  if (bsel.size) sel = {t:'bld', i: remove ? [...bsel][0] : i};
+  else sel = null;
   updateAll();
   return true;
+}
+function groupSelected(){
+  if (!sel || sel.t!=='bld') return;
+  const ids = [...bsel];
+  pushUndo();
+  if (!groupBuildings(state.builds, ids)){ undoStack.pop(); return; }
+  sel.i = ids[0]; updateAll();
+}
+function ungroupSelected(){
+  if (!sel || sel.t!=='bld') return;
+  const ids = [...bsel];
+  pushUndo();
+  if (!ungroupBuildings(state.builds, ids)){ undoStack.pop(); return; }
+  bsel = new Set(ids); sel.i = ids[0]; updateAll();
 }
 let lastAdd = { t: 0, x: 0, y: 0 };
 
@@ -2082,12 +2151,12 @@ cv.addEventListener('pointerdown', e => {
   }
   if (e.button === 2){ drag = { t:'pan' }; return; }
   pend = { hit: pick(e.offsetX, e.offsetY), x:e.offsetX, y:e.offsetY, moved:false,
-           merge: e.shiftKey || e.ctrlKey || e.metaKey };
-  // touch has no shift key: holding a building is the same gesture
+           multi: e.shiftKey || e.ctrlKey || e.metaKey };
+  // touch has no shift key: holding a building toggles it in the selection
   clearTimeout(holdTimer);
   if (e.pointerType === 'touch' && pend.hit && pend.hit.t === 'bld')
     holdTimer = setTimeout(() => {
-      if (pend && !pend.moved && toggleMerge(pend.hit.i)){
+      if (pend && !pend.moved && selectBuilding(pend.hit.i, true)){
         pend.done = true;                     // the lift must not also select it
         if (navigator.vibrate) navigator.vibrate(15);
       }
@@ -2137,14 +2206,22 @@ cv.addEventListener('pointermove', e => {
   if (pend && !pend.moved && Math.hypot(e.offsetX-pend.x, e.offsetY-pend.y) > 6){
     pend.moved = true;
     clearTimeout(holdTimer);                  // a drag is not a long press
-    if (pend.done){ pend = null; return; }    // already merged under the finger
+    if (pend.done){ pend = null; return; }    // already selected under the finger
     const h = pend.hit;
     if (h && h.t==='pt'){ pushUndo(); sel = h; drag = { t:'pt', p:h.p, i:h.i }; }
-    else if (h && h.t==='hdl'){ pushUndo(); drag = { t:'hdl', i:h.i, k:h.k }; }
+    else if (h && h.t==='hdl'){
+      pushUndo();
+      const ids = [...bsel], box = houseBox(state.builds, ids);
+      drag = { t:'hdl', k:h.k, ids, box,
+               items:ids.map(i => ({i, x:state.builds[i].x, y:state.builds[i].y,
+                                    w:state.builds[i].w, h:state.builds[i].h})) };
+    }
     else if (h && h.t==='bld'){
-      pushUndo(); sel = h;
-      const b = state.builds[h.i], w = S2W(pend.x, pend.y);
-      drag = { t:'bld', i:h.i, ox:w.x-b.x, oy:w.y-b.y };
+      if (!bsel.has(h.i)) selectBuilding(h.i, false);
+      pushUndo();
+      const ids = [...bsel], box = houseBox(state.builds, ids), w = S2W(pend.x, pend.y);
+      drag = { t:'bld', ids, box, ox:w.x-box.x, oy:w.y-box.y,
+               items:ids.map(i => ({i, x:state.builds[i].x, y:state.builds[i].y})) };
     }
     else drag = { t:'pan' };                  // empty space (or a segment): drag pans
     updateSelbox(); $('bDelSel').disabled = !sel;
@@ -2154,17 +2231,26 @@ cv.addEventListener('pointermove', e => {
   const w = S2W(e.offsetX, e.offsetY);
   if (drag.t === 'pt'){ movePoint(drag.p, drag.i, w); }
   if (drag.t === 'bld'){
-    const b = state.builds[drag.i];
     const p = snapObjectAxes({ x:w.x-drag.ox, y:w.y-drag.oy },
-                             [0,b.w], [0,b.h], drag.i);
-    b.x = p.x; b.y = p.y;
+                             [0,drag.box.w], [0,drag.box.h], new Set(drag.ids));
+    for (const item of drag.items){
+      state.builds[item.i].x = item.x + p.x-drag.box.x;
+      state.builds[item.i].y = item.y + p.y-drag.box.y;
+    }
   }
   if (drag.t === 'hdl'){                      // resize from the dragged corner, opposite corner anchored
-    const b = state.builds[drag.i];
+    const b = drag.box;
     const opp = [[b.x+b.w,b.y+b.h],[b.x,b.y+b.h],[b.x,b.y],[b.x+b.w,b.y]][drag.k];
-    const c = snapObjectAxes(w, [0], [0], drag.i);
-    b.x = Math.min(c.x, opp[0]); b.w = Math.max(MIN_BLD, Math.abs(c.x-opp[0]));
-    b.y = Math.min(c.y, opp[1]); b.h = Math.max(MIN_BLD, Math.abs(c.y-opp[1]));
+    const c = snapObjectAxes(w, [0], [0], new Set(drag.ids));
+    const minW = b.w*Math.max(...drag.items.map(q => MIN_BLD/q.w));
+    const minH = b.h*Math.max(...drag.items.map(q => MIN_BLD/q.h));
+    const x = drag.k===0 || drag.k===3 ? Math.min(c.x, opp[0]-minW) : Math.max(c.x, opp[0]+minW);
+    const y = drag.k===0 || drag.k===1 ? Math.min(c.y, opp[1]-minH) : Math.max(c.y, opp[1]+minH);
+    const to = {x:Math.min(x,opp[0]), y:Math.min(y,opp[1]),
+                w:Math.abs(x-opp[0]), h:Math.abs(y-opp[1])};
+    for (const item of drag.items)
+      Object.assign(state.builds[item.i], {x:item.x, y:item.y, w:item.w, h:item.h});
+    scaleBuildings(state.builds, drag.ids, b, to);
   }
   updateTotals(); updateSelbox(); paint();
 });
@@ -2179,7 +2265,7 @@ function pointerEnd(e){
   }
   clearTimeout(holdTimer);
   if (pend && !pend.moved && !pend.done && e.type === 'pointerup' && e.button !== 2)
-    handleClick(pend.hit, e.offsetX, e.offsetY, pend.merge);
+    handleClick(pend.hit, e.offsetX, e.offsetY, pend.multi);
   if (pointers.size === 0){
     if (drag && drag.t !== 'pan') updateAll();  // commit + save after an object drag
     pend = null; drag = null;
@@ -2204,9 +2290,9 @@ function resumeLine(p, i){
 //   drawing a line  -> clicks extend it (first point closes the loop, other points attach)
 //   idle + object   -> select it
 //   idle + empty    -> clear the selection, or start a new fence if nothing was selected
-function handleClick(hit, sx, sy, merge){
+function handleClick(hit, sx, sy, multi){
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
-  if (merge && hit && hit.t === 'bld' && toggleMerge(hit.i)) return;
+  if (multi && hit && hit.t === 'bld' && selectBuilding(hit.i, true)) return;
   const tgt = drawTarget();
 
   if (tgt){                                     // --- a line is in progress ---
@@ -2230,7 +2316,11 @@ function handleClick(hit, sx, sy, merge){
   }
 
   // --- idle ---
-  if (hit){ sel = hit; updateAll(); return; }                   // select what was clicked
+  if (hit){
+    if (hit.t==='bld') selectBuilding(hit.i, false);
+    else { sel = hit; updateAll(); }
+    return;
+  }
   if (sel){ sel = null; updateAll(); return; }                  // empty click clears selection first
   lastAdd = { t: performance.now(), x: sx, y: sy };
   addPoint(snapFence(S2W(sx, sy)));                             // then starts a new fence
@@ -2268,7 +2358,7 @@ function updateHint(){
   $('hint').textContent = drawing
     ? 'Tap to add fence posts · tap the first post to close the loop · double-tap or Esc to finish this fence.'
     : 'Tap empty space to start a fence · tap any fence, post or building to select it · drag to move · ' +
-      'shift-click or hold a building to merge it with the selected one.';
+      'shift-click or hold buildings to multi-select, then choose Group.';
 }
 
 document.querySelectorAll('#unitTog button').forEach(b =>
@@ -2437,13 +2527,16 @@ function fallbackCopy(text, done){
    localStorage save/load
    ===================================================================== */
 function statePayload(){
-  return { v:1, unit:state.unit, polys:state.polys, builds:state.builds,
+  return { v:2, unit:state.unit, polys:state.polys, builds:state.builds,
            mat:state.mat, snapGrid:state.snapGrid, snapBld:state.snapBld, view };
 }
 function applyState(o){
   state.unit = o.unit === 'ft' ? 'ft' : 'm';
   if (Array.isArray(o.polys))  state.polys  = o.polys;
-  if (Array.isArray(o.builds)){ state.builds = o.builds; inferHouses(state.builds); }
+  if (Array.isArray(o.builds)){
+    state.builds = o.builds;
+    if (!o.v || o.v < 2) inferHouses(state.builds);
+  }
   if (o.mat) state.mat = Object.assign(state.mat, o.mat);
   state.snapGrid = o.snapGrid !== false; state.snapBld = o.snapBld !== false;
   if (o.view && o.view.s) view = o.view;
@@ -2458,7 +2551,7 @@ function saveSoon(){
 function load(){
   try {
     const o = JSON.parse(localStorage.getItem(LS_KEY));
-    if (o && o.v === 1) applyState(o);
+    if (o && (o.v === 1 || o.v === 2)) applyState(o);
   } catch(e) {}
 }
 function syncControls(){   // push state back into the toolbar/panel widgets after load/restore
