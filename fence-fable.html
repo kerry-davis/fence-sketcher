@@ -364,7 +364,7 @@
         </div>
       </div>
       <div class="row"><span>Post spacing</span><span><input id="iSpacing" inputmode="decimal"> <span class="unit" id="uSpacing">m</span></span></div>
-      <div class="row" title="Posts at the ends of a run. Auto counts both ends but skips one that already sits on another fence. Override if the ends are already posted (e.g. fixed to a building).">
+      <div class="row" title="Posts at the ends of a run. Auto counts both ends but skips one that already sits on another fence. One end uses the unshared end when possible.">
         <span>End posts <span style="opacity:.5">ⓘ</span></span>
         <span><select id="iEnds" style="min-height:38px;padding:6px">
           <option value="auto">Auto</option>
@@ -986,6 +986,9 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
       '3D gate leaf leaves working clearance at both posts');
   let ep = postEndFlags([{pts:[{x:0,y:0},{x:2,y:0}],closed:false}], 0, {ends:1});
   chk(!ep.start && ep.end, '3D one-end override keeps the far end');
+  ep = postEndFlags([{pts:[{x:19.8,y:10.75},{x:18.3,y:10.75}],closed:false},
+                     {pts:[{x:17.8,y:10.75},{x:18.3,y:10.75}],closed:false}], 0, {ends:1});
+  chk(ep.start && !ep.end, '3D one-end override prefers the unshared end');
   ep = postEndFlags(joined, 1, {ends:'auto'});
   chk(!ep.start && ep.end, '3D auto end posts omit an earlier shared post');
   ep = postEndFlags(joined, 1, {ends:2});
@@ -1713,13 +1716,22 @@ function postsAlong(a, b, spacing, gate){
   for (let k = 0; k <= n; k++) out.push({ x: a.x+(b.x-a.x)*k/n, y: a.y+(b.y-a.y)*k/n });
   return out;
 }
-// Which ends of an open run get a post in 3D. "One end" keeps the far end; Auto omits
-// an end already represented by an earlier fence, matching calcMaterials/sharedEnds.
+// Which ends of an open run get a post in 3D. "One end" uses the unshared end when only
+// one is already joined; otherwise it keeps the far end. Auto matches calcMaterials/sharedEnds.
 function postEndFlags(polys, idx, mat){
   const pl = polys[idx];
   if (pl.closed) return { start:true, end:true };
   const e = endsOf(mat);
-  if (e !== 'auto'){ const n = +e; return { start:n === 2, end:n >= 1 }; }
+  if (e !== 'auto'){
+    const n = +e;
+    if (n === 1){
+      const shared = q => polys.some((other,j) => j !== idx &&
+        other.pts.some(r => Math.hypot(r.x-q.x, r.y-q.y) < 1e-4));
+      const startShared = shared(pl.pts[0]), endShared = shared(pl.pts[pl.pts.length-1]);
+      if (startShared !== endShared) return { start:!startShared, end:!endShared };
+    }
+    return { start:n === 2, end:n >= 1 };
+  }
   const shared = q => polys.slice(0,idx).some(prev =>
     prev.pts.some(r => Math.hypot(r.x-q.x, r.y-q.y) < 1e-4));
   return { start:!shared(pl.pts[0]), end:!shared(pl.pts[pl.pts.length-1]) };
