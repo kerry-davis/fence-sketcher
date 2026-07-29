@@ -1282,11 +1282,10 @@ function doPaint(){
     const A = W2S(b), sw = b.w*view.s, sh = b.h*view.s;
     ctx.fillStyle = C.bldFill; ctx.fillRect(A.x, A.y, sw, sh);
     const isSel = sel && sel.t==='bld' && bsel.has(i);
-    ctx.strokeStyle = isSel ? ACCENT : C.bldStroke;
-    ctx.lineWidth = isSel ? 2 : 1.5;
-    if (isSel && bsel.size > 1) ctx.setLineDash([7,4]);
+    const singleSel = isSel && bsel.size === 1;
+    ctx.strokeStyle = singleSel ? ACCENT : C.bldStroke;
+    ctx.lineWidth = singleSel ? 2 : 1.5;
     ctx.strokeRect(A.x, A.y, sw, sh);
-    ctx.setLineDash([]);
     if (sw > 54 && sh > 22){
       ctx.fillStyle = C.bldText; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
       ctx.fillText(fmtLen(b.w, state.unit) + ' × ' + fmtLen(b.h, state.unit), A.x+sw/2, A.y+sh/2+4);
