@@ -763,6 +763,9 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   let pa = postsAlong({x:0,y:0}, {x:10,y:0}, 1.5, false);
   chk(pa.length===8 && near(pa[0].x,0) && near(pa[7].x,10), '3D posts along a run');
   chk(postsAlong({x:0,y:0},{x:10,y:0},1.5,true).length===2, '3D gate = one bay, two posts');
+  const gateLeaf = gateLeafBounds({x:0,y:0}, {x:1.5,y:0}, 0.135);
+  chk(near(gateLeaf.a.x,0.135) && near(gateLeaf.b.x,1.365) && near(gateLeaf.len,1.23),
+      '3D gate leaf leaves working clearance at both posts');
   let ep = postEndFlags([{pts:[{x:0,y:0},{x:2,y:0}],closed:false}], 0, {ends:1});
   chk(!ep.start && ep.end, '3D one-end override keeps the far end');
   ep = postEndFlags(joined, 1, {ends:'auto'});
@@ -1399,6 +1402,9 @@ function doPaint(){
 const POST_SIDE = 0.100;      // 100 mm square posts
 const PALING_T  = 0.020;      // 20 mm paling thickness
 const RAIL_T    = 0.045;      // 45 mm rail thickness
+const GATE_GAP  = 0.040;      // working clearance between a gate leaf and each post
+const GATE_STILE = 0.090;     // vertical frame members
+const GATE_BOTTOM = 0.080;    // leaf clearance above ground
 const FOV       = 55*Math.PI/180;
 const NEAR      = 0.05;
 const EYE_Y     = 1.0;        // camera looks at eye height, not the ground
@@ -1449,6 +1455,13 @@ function railBayBounds(a, b, startOverhang, endOverhang){
   const p = { x:a.x-ux*startOverhang, y:a.y-uy*startOverhang };
   const q = { x:b.x+ux*endOverhang, y:b.y+uy*endOverhang };
   return { a:p, b:q, len:L+startOverhang+endOverhang };
+}
+// Gate leaf endpoints inset from the two post centres.
+function gateLeafBounds(a, b, gap){
+  const L = segLen(a,b) || 1, ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
+  const p = { x:a.x+ux*gap, y:a.y+uy*gap };
+  const q = { x:b.x-ux*gap, y:b.y-uy*gap };
+  return { a:p, b:q, len:Math.max(0, L-2*gap) };
 }
 // Box -> 5 quads (the underside is never seen). Each face carries its outward
 // normal, so shading and back-face culling don't depend on vertex winding.
@@ -1535,6 +1548,50 @@ function pushHouse(F, builds, g){
       if (!covered(i,j+1)) wall(x0,z1, x1,z1, [0,0, 1]);
     }
 }
+// A closed gate leaf. Its frame is fixed to the same side of the posts as the fence.
+// Rail gates reuse the fence's rail heights; paling gates add two frame rails behind
+// their boards. The gate remains a visual object only — materials deliberately exclude it.
+function pushGate(F, a, b, H, mat){
+  const L = segLen(a,b);
+  const inset = POST_SIDE/2 + GATE_GAP + GATE_STILE/2;
+  if (L <= 2*inset) return;
+  const leaf = gateLeafBounds(a,b,inset), ang = Math.atan2(b.y-a.y,b.x-a.x);
+  const ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
+  const bottom = Math.min(GATE_BOTTOM, H*0.15), leafH = Math.max(0.2, H-bottom);
+  const pointOnSide = (q,off) => ({x:q.x-uy*off, y:q.y+ux*off});
+  const frameOff = POST_SIDE/2 + (mat.style === 'rail' ? RAIL_T/2 : PALING_T+RAIL_T/2);
+  const A = pointOnSide(leaf.a,frameOff), B = pointOnSide(leaf.b,frameOff);
+  const mid = {x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+  // two vertical stiles make the opening read as a gate from every camera angle
+  for (const q of [A,B])
+    pushBox(F,q.x,bottom+leafH/2,q.y,GATE_STILE/2,leafH/2,RAIL_T/2,ang,WOOD.rail);
+  if (mat.style === 'rail'){
+    for (const ry of railYs(mat)){
+      if (ry-mat.railW/2 < bottom-1e-6 || ry+mat.railW/2 > H+1e-6) continue;
+      pushBox(F,mid.x,ry,mid.y,leaf.len/2,mat.railW/2,RAIL_T/2,ang,WOOD.rail);
+    }
+    return;
+  }
+  // paling leaf: boards on the post face, with two rails immediately behind them
+  if (mat.paling > 0.001){
+    const pitch = mat.paling + mat.gap, palingOff = POST_SIDE/2 + PALING_T/2;
+    for (let t = mat.paling/2; t <= leaf.len-mat.paling/2+1e-9; t += pitch){
+      const q = pointOnSide({x:leaf.a.x+ux*t,y:leaf.a.y+uy*t},palingOff);
+      pushBox(F,q.x,bottom+leafH/2,q.y,mat.paling/2,leafH/2,PALING_T/2,ang,WOOD.paling);
+    }
+  }
+  const gateRailW = Math.min(0.18,Math.max(0.08,mat.railW||0.1));
+  // Short render pieces sort correctly against the many paling faces at oblique angles.
+  const pieces = Math.max(1,Math.ceil(leaf.len/0.35));
+  for (const ry of [bottom+leafH*0.28,bottom+leafH*0.72])
+    for (let k = 0; k < pieces; k++){
+      const t0=k/pieces, t1=(k+1)/pieces;
+      const p={x:A.x+(B.x-A.x)*t0,y:A.y+(B.y-A.y)*t0};
+      const q={x:A.x+(B.x-A.x)*t1,y:A.y+(B.y-A.y)*t1};
+      pushBox(F,(p.x+q.x)/2,ry,(p.y+q.y)/2,leaf.len/pieces/2,gateRailW/2,RAIL_T/2,
+              ang,WOOD.rail,{start:k===0,end:k===pieces-1});
+    }
+}
 function build3(){
   const F = [], posts = new Map();             // keyed by position: shared posts drawn once
   for (const g of houseGroups(state.builds)) pushHouse(F, state.builds, g);
@@ -1556,7 +1613,7 @@ function build3(){
         const key = q.x.toFixed(3)+','+q.y.toFixed(3), old = posts.get(key);
         if (!old || H > old.H) posts.set(key, { q, H, ang }); // shared post uses taller fence's angle
       });
-      if (a.gateAfter) continue;               // a gate is an opening — no infill
+      if (a.gateAfter){ pushGate(F,a,b,H,mat); continue; }
       if (mat.style === 'rail'){
         for (let k = 0; k < segmentPosts.length-1; k++){
           const first = k === 0, last = k === segmentPosts.length-2;
