@@ -53,6 +53,8 @@
   #bar .toolbarEnd{margin-left:auto;gap:8px;flex-wrap:nowrap}
   /* snap toggles live on the canvas as compact chips */
   #snapover{position:absolute;top:8px;right:10px;display:flex;gap:6px}
+  #label3ctl{position:absolute;top:8px;right:10px;display:none;min-height:44px}
+  body.d3 #label3ctl{display:inline-flex}
   label.chk{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--chip);
             border:1px solid var(--line);border-radius:999px;cursor:pointer;min-height:36px;
             font-size:13px;box-shadow:0 1px 3px #00000012;user-select:none;-webkit-user-select:none}
@@ -311,6 +313,9 @@
       <label class="chk"><input type="checkbox" id="cSnapGrid" checked> Snap grid</label>
       <label class="chk"><input type="checkbox" id="cSnapBld" checked> Snap objects</label>
     </div>
+    <label class="chk" id="label3ctl">
+      <input type="checkbox" id="c3dLabels" checked> Fence labels
+    </label>
     <div id="zoomctl">
       <button id="bFull" title="Full screen" aria-label="Full screen">⛶</button>
       <button id="bZoomIn" title="Zoom in">＋</button>
@@ -1133,12 +1138,17 @@ new ResizeObserver(resize).observe(wrap);
 
 const W2S = w => ({ x:(w.x - view.x)*view.s, y:(w.y - view.y)*view.s });
 const S2W = (sx,sy) => ({ x: sx/view.s + view.x, y: sy/view.s + view.y });
-function fenceLabelLayout(pl, p){
+function fenceLabelSegment(pl){
   const ss = segsOf(pl);
   if (!ss.length) return null;
   const choices = ss.some(([,a]) => !a.gateAfter) ? ss.filter(([,a]) => !a.gateAfter) : ss;
-  const [i,a,b] = choices.reduce((best, s) =>
+  return choices.reduce((best, s) =>
     segLen(s[1],s[2]) > segLen(best[1],best[2]) ? s : best);
+}
+function fenceLabelLayout(pl, p){
+  const segment = fenceLabelSegment(pl);
+  if (!segment) return null;
+  const [i,a,b] = segment;
   const A = W2S(a), B = W2S(b), dx = B.x-A.x, dy = B.y-A.y;
   const d = Math.hypot(dx,dy), nx = d ? -dy/d : 0, ny = d ? dx/d : -1;
   const mx = (A.x+B.x)/2, my = (A.y+B.y)/2, text = 'F' + (p+1);
@@ -1704,6 +1714,10 @@ const WOOD = { post:[122,94,62], rail:[168,134,95], paling:[196,158,112], bld:[1
 let mode3d = false;
 let cam = { az: -2.2, el: 0.42, dist: 30, tx: 0, tz: 0 };
 let scene3 = null;                            // cached faces; nulled by updateAll()
+let fenceLabels3 = [];                        // screen-space badges for direct 3D selection
+const LABELS3_KEY = 'fenceFable.3dLabels';
+let showFenceLabels3 = true;
+try { showFenceLabels3 = localStorage.getItem(LABELS3_KEY) !== 'off'; } catch(e) {}
 let autoOrbit = false, orbitDir = 1, orbitSpeed = 15, orbitFrame = 0, orbitTime = 0;
 
 /* ---- geometry (pure, self-tested) ---- */
@@ -2006,6 +2020,47 @@ function line3(B, a, b){
   const A = proj(B,ca), Bp = proj(B,cb);
   ctx.moveTo(A[0],A[1]); ctx.lineTo(Bp[0],Bp[1]);
 }
+function drawFenceLabels3(B){
+  fenceLabels3 = [];
+  if (!showFenceLabels3) return;
+  state.polys.forEach((pl, p) => {
+    const segment = fenceLabelSegment(pl);
+    if (!segment) return;
+    const [i,a,b] = segment, H = Math.max(0.2, (pl.mat || state.mat).height);
+    const c = toCam(B, [(a.x+b.x)/2, H, (a.y+b.y)/2]);
+    if (c[2] < NEAR) return;
+    const anchor = proj(B,c);
+    if (anchor[0] < -40 || anchor[0] > cw+40 || anchor[1] < -40 || anchor[1] > ch+40) return;
+    const text = 'F' + (p+1), h = 22;
+    ctx.font = '700 11px system-ui';
+    const w = Math.max(30, ctx.measureText(text).width + 16);
+    let x = Math.max(w/2+6, Math.min(cw-w/2-6, anchor[0]));
+    let y = Math.max(h/2+6, Math.min(ch-h/2-6, anchor[1]-25));
+    const overlaps = () => fenceLabels3.some(q =>
+      Math.abs(x-q.x) < (w+q.w)/2+4 && Math.abs(y-q.y) < (h+q.h)/2+4);
+    for (let tries = 0; tries < 6 && overlaps(); tries++)
+      y = Math.max(h/2+6, y-h-6);
+    const selected = sel && (sel.t === 'seg' || sel.t === 'pt') && sel.p === p;
+    ctx.save();
+    ctx.setLineDash([]); ctx.strokeStyle = ACCENT; ctx.lineWidth = selected ? 2 : 1.5;
+    ctx.beginPath(); ctx.moveTo(anchor[0],anchor[1]); ctx.lineTo(x,y); ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(x-w/2, y-h/2, w, h, 8);
+    ctx.fillStyle = selected ? ACCENT : C.halo; ctx.fill(); ctx.stroke();
+    ctx.fillStyle = selected ? '#fff' : ACCENT;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y+.5);
+    ctx.restore();
+    fenceLabels3.push({p, i, x, y, w, h});
+  });
+}
+function pickFenceLabel3(sx, sy){
+  for (let i = fenceLabels3.length-1; i >= 0; i--){
+    const tag = fenceLabels3[i];
+    if (Math.abs(sx-tag.x) <= Math.max(44,tag.w)/2 && Math.abs(sy-tag.y) <= 22)
+      return tag;
+  }
+  return null;
+}
 function paint3d(){
   const B = camBasis();
   ctx.fillStyle = C.sky; ctx.fillRect(0,0,cw,ch);
@@ -2040,6 +2095,7 @@ function paint3d(){
     ctx.fillStyle = ctx.strokeStyle = v.col; ctx.lineWidth = 1;
     ctx.fill(); ctx.stroke();                               // stroke closes hairline seams between quads
   }
+  drawFenceLabels3(B);
   drawCube(B);
 }
 
@@ -2154,7 +2210,7 @@ document.addEventListener('fullscreenchange', syncFullscreen);
 document.addEventListener('webkitfullscreenchange', syncFullscreen);
 function set3d(on){
   mode3d = on;
-  if (!on) setAutoOrbit(false);
+  if (!on){ setAutoOrbit(false); fenceLabels3 = []; }
   document.body.classList.toggle('d3', on);
   $('b3d').classList.toggle('primary', on);
   $('b3d').textContent = on ? '🗺 Plan' : '🧊 3D';
@@ -2456,7 +2512,8 @@ cv.addEventListener('pointerdown', e => {
       const [a,b] = [...pointers.values()];
       pinch = { d: Math.hypot(a.x-b.x, a.y-b.y) };
     }
-    drag = { t: (e.button === 2 || pointers.size === 2) ? 'campan' : 'orbit' };
+    drag = { t: (e.button === 2 || pointers.size === 2) ? 'campan' : 'orbit',
+             x:e.offsetX, y:e.offsetY, moved:false };
     return;
   }
   if (pointers.size === 2){                   // second finger: switch to pan/pinch
@@ -2480,14 +2537,21 @@ cv.addEventListener('pointerdown', e => {
 });
 cv.addEventListener('pointermove', e => {
   if (mode3d){
-    if (!pointers.has(e.pointerId)) return;
+    if (!pointers.has(e.pointerId)){
+      cv.classList.toggle('labelhit', !!pickFenceLabel3(e.offsetX, e.offsetY));
+      return;
+    }
     const prev = pointers.get(e.pointerId);
     const dx = e.offsetX - prev.x, dy = e.offsetY - prev.y;
     pointers.set(e.pointerId, { x:e.offsetX, y:e.offsetY });
     // a tap on the cube jumps to that view; dragging off it orbits like anywhere else
     if (drag && drag.t === 'cube'){
       if (Math.hypot(e.offsetX-drag.x, e.offsetY-drag.y) < 6) return;
-      drag = { t:'orbit' };
+      drag = { t:'orbit', x:drag.x, y:drag.y, moved:true };
+    }
+    if (drag && drag.t === 'orbit' && !drag.moved){
+      if (Math.hypot(e.offsetX-drag.x, e.offsetY-drag.y) < 6) return;
+      drag.moved = true;
     }
     if (pinch && pointers.size === 2){
       const [a,b] = [...pointers.values()], d = Math.hypot(a.x-b.x, a.y-b.y);
@@ -2595,6 +2659,12 @@ function pointerEnd(e){
   if (pointers.size < 2) pinch = null;
   if (mode3d){
     if (drag && drag.t === 'cube' && e.type === 'pointerup') goToFace(drag.face);
+    else if (drag && drag.t === 'orbit' && !drag.moved && e.type === 'pointerup'){
+      const tag = pickFenceLabel3(e.offsetX, e.offsetY);
+      if (tag && drawTarget()) endLine();
+      sel = tag ? {t:'seg', p:tag.p, i:tag.i} : null;
+      bsel.clear(); updateAll();
+    }
     if (!pointers.size) drag = null;
     return;
   }
@@ -2698,7 +2768,9 @@ function updateHint(){
   const drawing = !!drawTarget();
   cv.classList.toggle('selmode', !drawing || mode3d);
   if (mode3d){
-    $('hint').textContent = 'Drag to orbit · tap a face of the corner cube to jump to that view · ' +
+    $('hint').textContent = (showFenceLabels3 ? 'Tap an F-label to select a fence · ' : '') +
+                            'drag to orbit · ' +
+                            'tap a face of the corner cube to jump to that view · ' +
                             'right-drag or two fingers to pan · scroll or pinch to zoom.';
     return;
   }
@@ -2734,6 +2806,12 @@ fdel.addEventListener('click', deleteSelected);
 $('bClear').addEventListener('click', clearAll);
 $('cSnapGrid').addEventListener('change', e => { state.snapGrid = e.target.checked; saveSoon(); });
 $('cSnapBld').addEventListener('change', e => { state.snapBld = e.target.checked; saveSoon(); });
+$('c3dLabels').checked = showFenceLabels3;
+$('c3dLabels').addEventListener('change', e => {
+  showFenceLabels3 = e.target.checked;
+  try { localStorage.setItem(LABELS3_KEY, showFenceLabels3 ? 'on' : 'off'); } catch(err) {}
+  fenceLabels3 = []; updateHint(); paint();
+});
 const camZoom = f => { cam.dist *= f; clampCam(); paint(); };
 $('bZoomIn').addEventListener('click', () => mode3d ? camZoom(1/1.3) : zoomAt(cw/2, ch/2, 1.3));
 $('bZoomOut').addEventListener('click', () => mode3d ? camZoom(1.3) : zoomAt(cw/2, ch/2, 1/1.3));
