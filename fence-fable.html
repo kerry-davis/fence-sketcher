@@ -659,6 +659,12 @@ function reversePoly(pl){
     q.gateAfter = src.g; q.lockAfter = src.l == null ? null : src.l;
   });
 }
+function translatePolyline(pl, start, dx, dy){
+  pl.pts.forEach((q, i) => {
+    q.x = start[i].x + dx;
+    q.y = start[i].y + dy;
+  });
+}
 
 // The 4 corners of a unit cube's face, given its outward normal (an axis vector).
 function cubeQuad(n){
@@ -780,6 +786,10 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   reversePoly(rev);
   chk(rev.pts[0].x===10 && !rev.pts[0].gateAfter && rev.pts[1].gateAfter===true &&
       rev.pts[1].lockAfter===5, 'reverse keeps flags');
+  const moved = {pts:[{x:0,y:1,lockAfter:5},{x:5,y:1,gateAfter:true},{x:5,y:4}]};
+  translatePolyline(moved, moved.pts.map(q => ({x:q.x,y:q.y})), 3, -2);
+  chk(moved.pts[0].x===3 && moved.pts[2].y===2 && moved.pts[0].lockAfter===5 &&
+      moved.pts[1].gateAfter, 'whole-fence move preserves shape and segment flags');
   // alignment snap: a near-vertical drag off a corner locks to exactly vertical
   const wasGrid = state.snapGrid; state.snapGrid = false;
   const anchor = {x:0, y:0};
@@ -1150,11 +1160,13 @@ function snapGridPt(w){
 
 // Snap one or more moving X/Y axes to fence posts or the edges of other buildings.
 // Object targets win within the screen-space tolerance; the grid remains the fallback.
-function snapObjectAxes(w, xOffsets, yOffsets, skipBld){
+function snapObjectAxes(w, xOffsets, yOffsets, skipBld, skipPoly){
   const base = snapGridPt(w);
   if (!state.snapBld) return base;
   const xs = [], ys = [];
-  for (const pl of state.polys) for (const q of pl.pts){ xs.push(q.x); ys.push(q.y); }
+  state.polys.forEach((pl, p) => {
+    if (p !== skipPoly) for (const q of pl.pts){ xs.push(q.x); ys.push(q.y); }
+  });
   state.builds.forEach((b, i) => {
     if (i === skipBld || (skipBld instanceof Set && skipBld.has(i))) return;
     xs.push(b.x, b.x+b.w); ys.push(b.y, b.y+b.h);
@@ -2042,7 +2054,8 @@ function updateSelbox(){
       box.innerHTML = '<h2>Selected segment</h2>' +
         '<div class="row"><span>Length</span><span><input id="iSegLen" inputmode="text"> <span class="unit">'+(u==='m'?'m':'')+'</span></span></div>' +
         '<label><input type="checkbox" id="iGate"> This is a gate</label>' +
-        '<label><input type="checkbox" id="iLock"> Length locked</label>';
+        '<label><input type="checkbox" id="iLock"> Length locked</label>' +
+        '<p class="note">Drag this segment to move the whole fence. Locked lengths stay unchanged.</p>';
       $('iSegLen').addEventListener('change', e => {
         const v = parseLen(e.target.value, state.unit);
         if (v != null && v > 0.01 && sel && sel.t==='seg'){
@@ -2310,6 +2323,14 @@ cv.addEventListener('pointermove', e => {
     if (pend.done){ pend = null; return; }    // already selected under the finger
     const h = pend.hit;
     if (h && h.t==='pt'){ pushUndo(); sel = h; drag = { t:'pt', p:h.p, i:h.i }; }
+    else if (h && h.t==='seg'){
+      pushUndo(); sel = h;
+      const pts = state.polys[h.p].pts.map(q => ({x:q.x,y:q.y}));
+      const x = Math.min(...pts.map(q => q.x)), y = Math.min(...pts.map(q => q.y));
+      const w = S2W(pend.x, pend.y);
+      drag = {t:'poly', p:h.p, pts, x, y, ox:w.x-x, oy:w.y-y,
+              xs:pts.map(q => q.x-x), ys:pts.map(q => q.y-y)};
+    }
     else if (h && h.t==='hdl'){
       pushUndo();
       const ids = [...bsel], box = houseBox(state.builds, ids);
@@ -2331,6 +2352,11 @@ cv.addEventListener('pointermove', e => {
   if (drag.t === 'pan'){ view.x -= dx/view.s; view.y -= dy/view.s; paint(); return; }
   const w = S2W(e.offsetX, e.offsetY);
   if (drag.t === 'pt'){ movePoint(drag.p, drag.i, w); }
+  if (drag.t === 'poly'){
+    const p = snapObjectAxes({x:w.x-drag.ox, y:w.y-drag.oy},
+                             drag.xs, drag.ys, null, drag.p);
+    translatePolyline(state.polys[drag.p], drag.pts, p.x-drag.x, p.y-drag.y);
+  }
   if (drag.t === 'bld'){
     const p = snapObjectAxes({ x:w.x-drag.ox, y:w.y-drag.oy },
                              [0,drag.box.w], [0,drag.box.h], new Set(drag.ids));
