@@ -1566,6 +1566,32 @@ function doPaint(){
       ctx.fillStyle = isSel ? ACCENT : C.ptFill; ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = isSel ? ACCENT : C.fence; ctx.stroke();
     });
+    // Match the per-fence materials list to the plan with a compact badge.
+    // Prefer the longest real fence segment, so a gate does not become the run's identity.
+    const ss = segsOf(pl);
+    if (ss.length){
+      const choices = ss.some(([,a]) => !a.gateAfter) ? ss.filter(([,a]) => !a.gateAfter) : ss;
+      const [,a,b] = choices.reduce((best, s) =>
+        segLen(s[1],s[2]) > segLen(best[1],best[2]) ? s : best);
+      const A = W2S(a), B = W2S(b), dx = B.x-A.x, dy = B.y-A.y;
+      const d = Math.hypot(dx,dy), nx = d ? -dy/d : 0, ny = d ? dx/d : -1;
+      const mx = (A.x+B.x)/2, my = (A.y+B.y)/2, text = 'F' + (p+1);
+      ctx.font = '700 11px system-ui';
+      const w = Math.max(28, ctx.measureText(text).width + 14), h = 20, off = 23;
+      let x = mx+nx*off, y = my+ny*off;
+      if (x-w/2 < 4 || x+w/2 > cw-4 || y-h/2 < 4 || y+h/2 > ch-4){
+        x = mx-nx*off; y = my-ny*off;
+      }
+      x = Math.max(w/2+4, Math.min(cw-w/2-4, x));
+      y = Math.max(h/2+4, Math.min(ch-h/2-4, y));
+      ctx.setLineDash([]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(mx,my); ctx.lineTo(x,y); ctx.stroke();
+      ctx.beginPath(); ctx.roundRect(x-w/2, y-h/2, w, h, 7);
+      ctx.fillStyle = C.halo; ctx.fill(); ctx.stroke();
+      ctx.fillStyle = ACCENT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(text, x, y+.5);
+      ctx.textBaseline = 'alphabetic';
+    }
   });
 
   // dashed guides back to whatever post/corner the point lined up with
