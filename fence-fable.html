@@ -536,8 +536,7 @@ const gateOnly = pl => segsOf(pl).length > 0 && segsOf(pl).every(([,a]) => a.gat
 const defaultFenceName = (pl, i) => (gateOnly(pl) ? 'Gate ' : 'Fence ') + (i+1);
 const fenceName = (pl, i) => String(pl.name || '').trim() || defaultFenceName(pl, i);
 const fenceCode = (pl, i) => (gateOnly(pl) ? 'G' : 'F') + (i+1);
-const fenceBadgeText = (pl, i) => String(pl.name || '').trim()
-  ? fenceCode(pl,i) + ' · ' + fenceName(pl,i) : fenceCode(pl,i);
+const fenceBadgeText = (pl, i) => String(pl.name || '').trim() || fenceCode(pl,i);
 
 // Rail fence: rails live in the band between the bottom clearance (ground -> bottom rail)
 // and top clearance (top rail -> fence top). These derivations only pre-fill the editable
@@ -855,7 +854,7 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   chk(defaultFenceName(namedFence,0) === 'Fence 1' && fenceCode(namedFence,0) === 'F1',
       'fence name and code');
   namedGate.name = 'Driveway gate';
-  chk(fenceBadgeText(namedGate,0) === 'G1 · Driveway gate', 'custom gate badge');
+  chk(fenceBadgeText(namedGate,0) === 'Driveway gate', 'custom gate badge');
   namedGate.name = '  ';
   chk(fenceName(namedGate,0) === 'Gate 1' && fenceBadgeText(namedGate,0) === 'G1',
       'blank custom name falls back');
