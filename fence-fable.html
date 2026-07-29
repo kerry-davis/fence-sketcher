@@ -1495,9 +1495,8 @@ function doPaint(){
     const A = W2S(b), sw = b.w*view.s, sh = b.h*view.s;
     ctx.fillStyle = C.bldFill; ctx.fillRect(A.x, A.y, sw, sh);
     const isSel = sel && sel.t==='bld' && bsel.has(i);
-    const singleSel = isSel && bsel.size === 1;
-    ctx.strokeStyle = singleSel ? ACCENT : C.bldStroke;
-    ctx.lineWidth = singleSel ? 2 : 1.5;
+    ctx.strokeStyle = isSel ? ACCENT : C.bldStroke;
+    ctx.lineWidth = isSel ? 2 : 1.5;
     ctx.strokeRect(A.x, A.y, sw, sh);
     if (sw > 54 && sh > 22){
       ctx.fillStyle = C.bldText; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
@@ -1505,9 +1504,7 @@ function doPaint(){
     }
   });
   if (sel && sel.t==='bld' && bsel.size){
-    const b = houseBox(state.builds, [...bsel]), A = W2S(b);
-    ctx.strokeStyle = ACCENT; ctx.lineWidth = 3; ctx.setLineDash([]);
-    ctx.strokeRect(A.x, A.y, b.w*view.s, b.h*view.s);
+    const b = houseBox(state.builds, [...bsel]);
     ctx.fillStyle = ACCENT;
     for (const [hx,hy] of [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]]){
       const H = W2S({x:hx,y:hy}); ctx.fillRect(H.x-5, H.y-5, 10, 10);
