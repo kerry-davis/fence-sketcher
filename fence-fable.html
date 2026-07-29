@@ -63,6 +63,14 @@
   #zoomctl button{width:46px;height:46px;padding:0;font-size:20px;box-shadow:0 1px 4px #0002}
   #bFull{display:none}
   body.d3 #bFull{display:block}
+  #orbitctl{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:none;
+            align-items:center;gap:6px;padding:6px;background:var(--chip);border:1px solid var(--line);
+            border-radius:12px;box-shadow:0 1px 4px #0002}
+  body.d3 #orbitctl{display:flex}
+  #orbitctl button{height:40px;min-height:40px;padding:6px 10px}
+  #orbitctl label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  #orbitctl input{width:100px;accent-color:var(--accent)}
+  #orbitSpeed{width:40px;color:var(--ink)}
   #wrap:fullscreen{border:0;border-radius:0}
 
   main{flex:1;display:flex;min-height:0;gap:10px;padding:0 10px 10px}
@@ -172,6 +180,12 @@
       <button id="bZoomIn" title="Zoom in">＋</button>
       <button id="bZoomOut" title="Zoom out">−</button>
       <button id="bFit" title="Fit to drawing">⤢</button>
+    </div>
+    <div id="orbitctl">
+      <button id="bOrbit" title="Start orbit">▶ Orbit</button>
+      <button id="bOrbitDir" title="Orbit clockwise" aria-label="Orbit clockwise">↻</button>
+      <label>Speed <input id="iOrbitSpeed" type="range" min="5" max="60" step="5" value="15">
+        <span id="orbitSpeed">15°/s</span></label>
     </div>
     <button id="fdel" title="Delete">✕</button>
     <div id="gridcap"></div>
@@ -1456,6 +1470,7 @@ const WOOD = { post:[122,94,62], rail:[168,134,95], paling:[196,158,112], bld:[1
 let mode3d = false;
 let cam = { az: -2.2, el: 0.42, dist: 30, tx: 0, tz: 0 };
 let scene3 = null;                            // cached faces; nulled by updateAll()
+let autoOrbit = false, orbitDir = 1, orbitSpeed = 15, orbitFrame = 0, orbitTime = 0;
 
 /* ---- geometry (pure, self-tested) ---- */
 // Post centres along one segment — same division as calcMaterials: ceil(L/spacing)
@@ -1831,6 +1846,20 @@ function goToFace(f){
 const clampCam = () => { cam.dist = Math.max(2, Math.min(400, cam.dist));
                          cam.el = Math.max(0.03, Math.min(CUBE_TOP_EL, cam.el)); };
 function orbit(dx, dy){ cam.az += dx*0.008; cam.el -= dy*0.006; clampCam(); }
+function orbitTick(t){
+  if (!autoOrbit) return;
+  if (orbitTime) cam.az += orbitDir*orbitSpeed*Math.PI/180*Math.min(0.05, (t-orbitTime)/1000);
+  orbitTime = t; paint();
+  orbitFrame = requestAnimationFrame(orbitTick);
+}
+function setAutoOrbit(on){
+  autoOrbit = on && mode3d;
+  cancelAnimationFrame(orbitFrame); orbitFrame = 0; orbitTime = 0;
+  const b = $('bOrbit');
+  b.textContent = autoOrbit ? '⏸ Orbit' : '▶ Orbit';
+  b.title = autoOrbit ? 'Pause orbit' : 'Start orbit';
+  if (autoOrbit) orbitFrame = requestAnimationFrame(orbitTick);
+}
 function camPan(dx, dy){
   const k = cam.dist/(ch*0.9), sa = Math.sin(cam.az), ca = Math.cos(cam.az);
   cam.tx += (-sa*dx - ca*dy)*k;
@@ -1874,6 +1903,7 @@ document.addEventListener('fullscreenchange', syncFullscreen);
 document.addEventListener('webkitfullscreenchange', syncFullscreen);
 function set3d(on){
   mode3d = on;
+  if (!on) setAutoOrbit(false);
   document.body.classList.toggle('d3', on);
   $('b3d').classList.toggle('primary', on);
   $('b3d').textContent = on ? '🗺 Plan' : '🧊 3D';
@@ -2161,6 +2191,7 @@ cv.addEventListener('pointerdown', e => {
   cv.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x:e.offsetX, y:e.offsetY });
   if (mode3d){                                 // drag = orbit, right-drag / 2 fingers = pan+zoom
+    setAutoOrbit(false);
     const face = pointers.size === 1 && e.button !== 2 && cubePick(e.offsetX, e.offsetY);
     if (face){ drag = { t:'cube', face, x:e.offsetX, y:e.offsetY }; return; }
     if (pointers.size === 2){
@@ -2419,6 +2450,18 @@ $('bZoomIn').addEventListener('click', () => mode3d ? camZoom(1/1.3) : zoomAt(cw
 $('bZoomOut').addEventListener('click', () => mode3d ? camZoom(1.3) : zoomAt(cw/2, ch/2, 1/1.3));
 $('bFit').addEventListener('click', () => mode3d ? fit3() : fitView());
 $('bFull').addEventListener('click', toggleFullscreen);
+$('bOrbit').addEventListener('click', () => setAutoOrbit(!autoOrbit));
+$('bOrbitDir').addEventListener('click', e => {
+  orbitDir *= -1;
+  const clockwise = orbitDir > 0;
+  e.currentTarget.textContent = clockwise ? '↻' : '↺';
+  e.currentTarget.title = e.currentTarget.ariaLabel =
+    clockwise ? 'Orbit clockwise' : 'Orbit counter-clockwise';
+});
+$('iOrbitSpeed').addEventListener('input', e => {
+  orbitSpeed = +e.target.value;
+  $('orbitSpeed').textContent = orbitSpeed + '°/s';
+});
 $('b3d').addEventListener('click', () => set3d(!mode3d));
 
 // materials inputs
