@@ -71,6 +71,7 @@
   #orbitctl label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
   #orbitctl input{width:100px;accent-color:var(--accent)}
   #orbitSpeed{width:40px;color:var(--ink)}
+  #bOrbitSpeed{display:none}
   #wrap:fullscreen{border:0;border-radius:0}
 
   main{flex:1;display:flex;min-height:0;gap:10px;padding:0 10px 10px}
@@ -138,6 +139,14 @@
     .seg2 button{min-width:60px}
     #hint{font-size:11px}
   }
+  @media (max-width: 600px){
+    #orbitctl{left:auto;right:10px;bottom:218px;transform:none;flex-direction:column;
+              padding:0;background:transparent;border:0;box-shadow:none}
+    #orbitctl button{width:46px;height:46px;min-height:46px;padding:0;font-size:20px;
+                     background:var(--chip)}
+    #orbitctl .orbitWord, #orbitctl label{display:none}
+    #orbitctl #bOrbitSpeed{display:block;font-size:13px}
+  }
 </style>
 </head>
 <body>
@@ -182,10 +191,12 @@
       <button id="bFit" title="Fit to drawing">⤢</button>
     </div>
     <div id="orbitctl">
-      <button id="bOrbit" title="Start orbit">▶ Orbit</button>
+      <button id="bOrbit" title="Start orbit" aria-label="Start orbit">▶<span class="orbitWord"> Orbit</span></button>
       <button id="bOrbitDir" title="Orbit clockwise" aria-label="Orbit clockwise">↻</button>
       <label>Speed <input id="iOrbitSpeed" type="range" min="5" max="60" step="5" value="15">
         <span id="orbitSpeed">15°/s</span></label>
+      <button id="bOrbitSpeed" title="Orbit speed: 15 degrees per second"
+              aria-label="Orbit speed: 15 degrees per second">15°</button>
     </div>
     <button id="fdel" title="Delete">✕</button>
     <div id="gridcap"></div>
@@ -1856,9 +1867,17 @@ function setAutoOrbit(on){
   autoOrbit = on && mode3d;
   cancelAnimationFrame(orbitFrame); orbitFrame = 0; orbitTime = 0;
   const b = $('bOrbit');
-  b.textContent = autoOrbit ? '⏸ Orbit' : '▶ Orbit';
-  b.title = autoOrbit ? 'Pause orbit' : 'Start orbit';
+  b.innerHTML = (autoOrbit ? '⏸' : '▶') + '<span class="orbitWord"> Orbit</span>';
+  b.title = b.ariaLabel = autoOrbit ? 'Pause orbit' : 'Start orbit';
   if (autoOrbit) orbitFrame = requestAnimationFrame(orbitTick);
+}
+function setOrbitSpeed(speed){
+  orbitSpeed = speed;
+  $('iOrbitSpeed').value = speed;
+  $('orbitSpeed').textContent = speed + '°/s';
+  $('bOrbitSpeed').textContent = speed + '°';
+  $('bOrbitSpeed').title = $('bOrbitSpeed').ariaLabel =
+    'Orbit speed: ' + speed + ' degrees per second';
 }
 function camPan(dx, dy){
   const k = cam.dist/(ch*0.9), sa = Math.sin(cam.az), ca = Math.cos(cam.az);
@@ -2459,8 +2478,11 @@ $('bOrbitDir').addEventListener('click', e => {
     clockwise ? 'Orbit clockwise' : 'Orbit counter-clockwise';
 });
 $('iOrbitSpeed').addEventListener('input', e => {
-  orbitSpeed = +e.target.value;
-  $('orbitSpeed').textContent = orbitSpeed + '°/s';
+  setOrbitSpeed(+e.target.value);
+});
+$('bOrbitSpeed').addEventListener('click', () => {
+  const speeds = [5,15,30,60], next = speeds.find(v => v > orbitSpeed);
+  setOrbitSpeed(next || speeds[0]);
 });
 $('b3d').addEventListener('click', () => set3d(!mode3d));
 
