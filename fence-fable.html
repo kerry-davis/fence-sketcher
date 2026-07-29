@@ -80,9 +80,7 @@
   canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
   canvas.selmode{cursor:default}
   #gridcap{position:absolute;left:10px;bottom:8px;font-size:12px;color:var(--muted);
-           background:var(--chip);padding:3px 6px 3px 9px;border:1px solid var(--line);
-           border-radius:8px;display:flex;align-items:center;gap:5px}
-  #gridcap select{min-height:28px;padding:2px 6px;font-size:12px;border-radius:6px}
+           background:var(--chip);padding:3px 8px;border-radius:6px;pointer-events:none}
   /* floating delete button next to the selected object (works with touch) */
   #fdel{position:absolute;display:none;width:44px;height:44px;border-radius:50%;padding:0;
         background:#b91c1c;color:#fff;border:0;font-size:20px;line-height:44px;box-shadow:0 2px 8px #0003}
@@ -203,7 +201,7 @@
               aria-label="Orbit speed: 15 degrees per second">15°</button>
     </div>
     <button id="fdel" title="Delete">✕</button>
-    <label id="gridcap">Grid <select id="iGridSize" aria-label="Grid size"></select></label>
+    <div id="gridcap" title="Grid spacing adapts automatically as you zoom"></div>
   </div>
 
   <aside>
@@ -379,7 +377,6 @@ let state = {
          handrail: false, hrW: DEF.m.hrW, hrT: DEF.m.hrT,
          touched: {} },                       // touched.<field> = user edited it; stops unit-switch resets
   snapGrid: true, snapBld: true,
-  gridSize: null,                            // metres; null follows the current unit default
 };
 let view = { x: 0, y: 0, s: 24 };             // world origin offset (m) + scale (px per m)
 let sel  = null;                              // {t:'pt'|'seg'|'bld', p?, i?}
@@ -827,11 +824,12 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   state.snapBld = false;
   bs = snapObjectAxes({x:2.15,y:2.25}, [0], [0], 1);
   chk(near(bs.x, 2.15) && near(bs.y, 2.25), 'object snap toggle disables building snap');
-  const wasGridSize = state.gridSize;
-  state.gridSize = 0.25;
+  chk(dynamicGridStep('m',24)===0.5 && dynamicGridStep('m',60)===0.25 &&
+      near(dynamicGridStep('ft',24),2*FT), 'grid spacing follows zoom and units');
+  state.snapGrid = true;
   const gs = snapGridPt({x:0.37,y:0.62});
-  chk(near(gs.x,0.25) && near(gs.y,0.5), 'custom grid size controls snapping');
-  state.gridSize = wasGridSize;
+  chk(near(gs.x,0.5) && near(gs.y,0.5), 'snapping follows the visible dynamic grid');
+  state.snapGrid = false;
   state.builds = wasBuilds;
   state.snapBld = wasObjectSnap;
   state.polys = wasPolys;
@@ -1025,19 +1023,16 @@ function fitView(){
 /* =====================================================================
    Snapping & picking (all thresholds in screen px, converted by zoom)
    ===================================================================== */
-const gridStep = () => state.gridSize > 0 ? state.gridSize : (state.unit==='m' ? 1 : FT);
-function syncGridInput(){
-  const choices = state.unit === 'm'
-    ? [[0.05,'50 mm'],[0.1,'100 mm'],[0.25,'250 mm'],[0.5,'500 mm'],[1,'1 m'],[2,'2 m']]
-    : [[IN,'1 in'],[3*IN,'3 in'],[6*IN,'6 in'],[FT,'1 ft'],[2*FT,'2 ft'],[4*FT,'4 ft']];
-  const value = gridStep();
-  if (!choices.some(([v]) => Math.abs(v-value) < 1e-9))
-    choices.push([value, state.unit==='m'
-      ? (value < 1 ? fmtSmall(value,'m') : fmtLen(value,'m'))
-      : (value < FT ? fmtSmall(value,'ft') : ftStr(value))]);
-  $('iGridSize').innerHTML = choices.map(([v,label]) =>
-    `<option value="${v}"${Math.abs(v-value)<1e-9?' selected':''}>${label}</option>`).join('');
+function dynamicGridStep(unit, scale){
+  const choices = unit === 'm'
+    ? [0.01,0.02,0.05,0.1,0.25,0.5,1,2,5,10,20,50]
+    : [IN,3*IN,6*IN,FT,2*FT,4*FT,8*FT,16*FT,32*FT,64*FT];
+  return choices.find(step => step*scale >= 12) || choices[choices.length-1];
 }
+function gridStep(){ return dynamicGridStep(state.unit, view.s); }
+const gridStepLabel = step => state.unit === 'm'
+  ? (step < 1 ? fmtSmall(step,'m') : fmtLen(step,'m'))
+  : (step < FT ? fmtSmall(step,'ft') : ftStr(step));
 
 // Alignment snap: pull the direction anchor->w onto a 45° ray (world axes) or onto a ray
 // parallel/perpendicular to the fence arriving at the anchor. This is what makes a new
@@ -1343,9 +1338,8 @@ function doPaint(){
   ctx.clearRect(0,0,cw,ch);
   if (mode3d){ fdel.style.display = 'none'; paint3d(); return; }
 
-  // --- grid: use the chosen spacing, coarsened only below 2 screen pixels ---
-  let step = gridStep(); const ladder = [2, 2.5, 2]; let li = 0;
-  while (step*view.s < 2) step *= ladder[li++ % 3];
+  // --- grid: spacing follows zoom, keeping squares readable without manual controls ---
+  const step = gridStep();
   ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
   ctx.beginPath();
   for (let x = Math.floor(view.x/step)*step; x < view.x + cw/view.s; x += step){
@@ -1355,6 +1349,7 @@ function doPaint(){
     const sy = Math.round((y-view.y)*view.s)+.5; ctx.moveTo(0,sy); ctx.lineTo(cw,sy);
   }
   ctx.stroke();
+  $('gridcap').textContent = 'Grid: ' + gridStepLabel(step);
 
   // --- buildings ---
   state.builds.forEach((b, i) => {
@@ -2515,7 +2510,7 @@ document.querySelectorAll('#unitTog button').forEach(b =>
       for (const M of [state.mat, ...state.polys.map(p => p.mat).filter(Boolean)])
         if (!(M.touched || {})[f]) M[f] = DEF[state.unit][f];
     document.querySelectorAll('#unitTog button').forEach(x => x.classList.toggle('on', x === b));
-    syncGridInput(); syncMatInputs(); updateAll();
+    syncMatInputs(); updateAll();
   }));
 
 $('bMore').addEventListener('click', () => {
@@ -2532,10 +2527,6 @@ fdel.addEventListener('click', deleteSelected);
 $('bClear').addEventListener('click', clearAll);
 $('cSnapGrid').addEventListener('change', e => { state.snapGrid = e.target.checked; saveSoon(); });
 $('cSnapBld').addEventListener('change', e => { state.snapBld = e.target.checked; saveSoon(); });
-$('iGridSize').addEventListener('change', e => {
-  state.gridSize = +e.target.value;
-  updateAll();
-});
 const camZoom = f => { cam.dist *= f; clampCam(); paint(); };
 $('bZoomIn').addEventListener('click', () => mode3d ? camZoom(1/1.3) : zoomAt(cw/2, ch/2, 1.3));
 $('bZoomOut').addEventListener('click', () => mode3d ? camZoom(1.3) : zoomAt(cw/2, ch/2, 1/1.3));
@@ -2701,8 +2692,7 @@ function fallbackCopy(text, done){
    ===================================================================== */
 function statePayload(){
   return { v:2, unit:state.unit, polys:state.polys, builds:state.builds,
-           mat:state.mat, snapGrid:state.snapGrid, snapBld:state.snapBld,
-           gridSize:state.gridSize, view };
+           mat:state.mat, snapGrid:state.snapGrid, snapBld:state.snapBld, view };
 }
 function applyState(o){
   state.unit = o.unit === 'ft' ? 'ft' : 'm';
@@ -2713,7 +2703,6 @@ function applyState(o){
   }
   if (o.mat) state.mat = Object.assign(state.mat, o.mat);
   state.snapGrid = o.snapGrid !== false; state.snapBld = o.snapBld !== false;
-  state.gridSize = o.gridSize > 0 ? o.gridSize : null;
   if (o.view && o.view.s) view = o.view;
 }
 let saveTimer = 0;
@@ -2733,7 +2722,7 @@ function syncControls(){   // push state back into the toolbar/panel widgets aft
   document.querySelectorAll('#unitTog button').forEach(b => b.classList.toggle('on', b.dataset.u === state.unit));
   $('cSnapGrid').checked = state.snapGrid;
   $('cSnapBld').checked = state.snapBld;
-  updateHint(); syncGridInput(); syncMatInputs();
+  updateHint(); syncMatInputs();
 }
 
 /* ---- named backups on the fence server (see ~/fence/serve-fence.mjs) ----
