@@ -106,6 +106,10 @@
   #matSec.rail .onlyPaling{display:none}
   #matSec.paling .onlyRail{display:none}
   #matSec.nohr .onlyHR{display:none}
+  #fenceNameWrap{display:flex;flex-direction:column;gap:5px;margin:0 0 10px;font-size:12px;color:var(--muted)}
+  #iFenceName{width:100%;box-sizing:border-box;font:inherit;font-size:14px;color:var(--ink);
+              background:var(--card);padding:9px 10px;border:1px solid var(--line);border-radius:8px}
+  #iFenceName:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
   #selbox{border-color:var(--accent);background:var(--accent-soft)}
   #selbox.noroof .roofOnly{display:none}
   #selbox:not(.gableroof) .gableOnly{display:none}
@@ -355,6 +359,9 @@
 
     <section id="matSec" class="paling">
       <h2>Materials</h2>
+      <label id="fenceNameWrap" style="display:none">Fence or gate name
+        <input id="iFenceName" maxlength="64" autocomplete="off">
+      </label>
       <label id="matIncludeWrap" class="own" style="display:none">
         <input type="checkbox" id="matInclude" checked> Include this fence in materials</label>
       <p class="note" id="matExcludeNote" style="display:none;margin:0 0 8px">
@@ -525,6 +532,12 @@ function segsOf(pl){                          // -> [[i, a, b], ...] for each se
   return out;
 }
 const segLen = (a,b) => Math.hypot(b.x-a.x, b.y-a.y);
+const gateOnly = pl => segsOf(pl).length > 0 && segsOf(pl).every(([,a]) => a.gateAfter);
+const defaultFenceName = (pl, i) => (gateOnly(pl) ? 'Gate ' : 'Fence ') + (i+1);
+const fenceName = (pl, i) => String(pl.name || '').trim() || defaultFenceName(pl, i);
+const fenceCode = (pl, i) => (gateOnly(pl) ? 'G' : 'F') + (i+1);
+const fenceBadgeText = (pl, i) => String(pl.name || '').trim()
+  ? fenceCode(pl,i) + ' · ' + fenceName(pl,i) : fenceCode(pl,i);
 
 // Rail fence: rails live in the band between the bottom clearance (ground -> bottom rail)
 // and top clearance (top rail -> fence top). These derivations only pre-fill the editable
@@ -712,7 +725,7 @@ function calcMaterials(polys, defMat){
     if (pl.pts.length < 2) return;
     const mat = pl.mat || defMat;
     if (pl.excludeMaterials){
-      per.push({ i:idx, name:'Fence '+(idx+1), len:0, posts:0, rails:0, palings:0,
+      per.push({ i:idx, name:fenceName(pl,idx), len:0, posts:0, rails:0, palings:0,
                  panels:0, gates:0, handrail:0, own:!!pl.mat, excluded:true, mat });
       return;
     }
@@ -746,7 +759,7 @@ function calcMaterials(polys, defMat){
     const pHandrail = mat.handrail ? len : 0;
     fenceLen += len; panels += pPanels; posts += pPosts; rails += pRails; palings += pPalings;
     handrail += pHandrail;
-    per.push({ i: idx, name: 'Fence ' + (idx+1), len, posts: pPosts, rails: pRails,
+    per.push({ i: idx, name: fenceName(pl,idx), len, posts: pPosts, rails: pRails,
                palings: pPalings, panels: pPanels, gates: pGates, handrail: pHandrail,
                own: !!pl.mat, mat });
   });
@@ -835,6 +848,17 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   chk(fmtLen(12*FT+6*IN,'ft') === "12' 6\"", 'fmt ft');
   chk(fmtLen(2.4,'m') === '2.4 m', 'fmt m');
   chk(fmtLen(11.999*IN + 11*FT,'ft') === "12' 0\"", 'fmt inch carry');
+  const namedGate = {pts:[{x:0,y:0,gateAfter:true},{x:1,y:0}], closed:false};
+  const namedFence = {pts:[{x:0,y:0},{x:1,y:0}], closed:false};
+  chk(defaultFenceName(namedGate,0) === 'Gate 1' && fenceCode(namedGate,0) === 'G1',
+      'gate name and code');
+  chk(defaultFenceName(namedFence,0) === 'Fence 1' && fenceCode(namedFence,0) === 'F1',
+      'fence name and code');
+  namedGate.name = 'Driveway gate';
+  chk(fenceBadgeText(namedGate,0) === 'G1 · Driveway gate', 'custom gate badge');
+  namedGate.name = '  ';
+  chk(fenceName(namedGate,0) === 'Gate 1' && fenceBadgeText(namedGate,0) === 'G1',
+      'blank custom name falls back');
   // 10 m closed square, 2.4 m spacing, 2 rails, 100+5 mm palings
   const sq = () => ({ pts:[{x:0,y:0},{x:10,y:0},{x:10,y:10},{x:0,y:10}], closed:true });
   let m = calcMaterials([sq()], {spacing:2.4, rails:2, paling:0.1, gap:0.005});
@@ -1145,14 +1169,21 @@ function fenceLabelSegment(pl){
   return choices.reduce((best, s) =>
     segLen(s[1],s[2]) > segLen(best[1],best[2]) ? s : best);
 }
+function fitCanvasText(text, maxWidth){
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let out = text;
+  while (out.length && ctx.measureText(out + '…').width > maxWidth) out = out.slice(0,-1);
+  return out + '…';
+}
 function fenceLabelLayout(pl, p){
   const segment = fenceLabelSegment(pl);
   if (!segment) return null;
   const [i,a,b] = segment;
   const A = W2S(a), B = W2S(b), dx = B.x-A.x, dy = B.y-A.y;
   const d = Math.hypot(dx,dy), nx = d ? -dy/d : 0, ny = d ? dx/d : -1;
-  const mx = (A.x+B.x)/2, my = (A.y+B.y)/2, text = 'F' + (p+1);
+  const mx = (A.x+B.x)/2, my = (A.y+B.y)/2;
   ctx.save(); ctx.font = '700 11px system-ui';
+  const text = fitCanvasText(fenceBadgeText(pl,p), 116);
   const w = Math.max(28, ctx.measureText(text).width + 14), h = 20, off = 23;
   ctx.restore();
   let x = mx+nx*off, y = my+ny*off;
@@ -2031,8 +2062,9 @@ function drawFenceLabels3(B){
     if (c[2] < NEAR) return;
     const anchor = proj(B,c);
     if (anchor[0] < -40 || anchor[0] > cw+40 || anchor[1] < -40 || anchor[1] > ch+40) return;
-    const text = 'F' + (p+1), h = 22;
+    const h = 22;
     ctx.font = '700 11px system-ui';
+    const text = fitCanvasText(fenceBadgeText(pl,p), 116);
     const w = Math.max(30, ctx.measureText(text).width + 16);
     let x = Math.max(w/2+6, Math.min(cw-w/2-6, anchor[0]));
     let y = Math.max(h/2+6, Math.min(ch-h/2-6, anchor[1]-25));
@@ -2264,6 +2296,11 @@ const curMat = () => matScope().mat;
 
 function syncMatInputs(){
   const u = state.unit, sc = matScope(), M = sc.mat;
+  $('fenceNameWrap').style.display = sc.pl ? 'flex' : 'none';
+  if (sc.pl && document.activeElement !== $('iFenceName')){
+    $('iFenceName').value = sc.pl.name || '';
+    $('iFenceName').placeholder = defaultFenceName(sc.pl, sc.idx);
+  }
   $('matIncludeWrap').style.display = sc.pl ? 'flex' : 'none';
   $('matInclude').checked = !sc.pl || !sc.pl.excludeMaterials;
   $('matIncludeWrap').classList.toggle('off', !!(sc.pl && sc.pl.excludeMaterials));
@@ -2271,8 +2308,8 @@ function syncMatInputs(){
   $('matOwnWrap').style.display = sc.pl ? 'flex' : 'none';
   $('matOwn').checked = sc.own;
   $('matWho').textContent = !sc.pl ? 'Editing the defaults — used by every fence without its own settings.'
-    : sc.own ? `Editing Fence ${sc.idx+1} only.`
-             : `Fence ${sc.idx+1} follows the defaults. Tick above to give it its own settings.`;
+    : sc.own ? `Editing ${fenceName(sc.pl,sc.idx)} only.`
+             : `${fenceName(sc.pl,sc.idx)} follows the defaults. Tick above to give it its own settings.`;
   const set = (id, val) => { const el = $(id); if (document.activeElement !== el) el.value = val; };
   const big   = v => u==='m' ? +v.toFixed(2) : +(v/FT).toFixed(2);
   const small = v => u==='m' ? Math.round(v*1000) : +(v/IN).toFixed(2);
@@ -2768,7 +2805,7 @@ function updateHint(){
   const drawing = !!drawTarget();
   cv.classList.toggle('selmode', !drawing || mode3d);
   if (mode3d){
-    $('hint').textContent = (showFenceLabels3 ? 'Tap an F-label to select a fence · ' : '') +
+    $('hint').textContent = (showFenceLabels3 ? 'Tap a fence label to select it · ' : '') +
                             'drag to orbit · ' +
                             'tap a face of the corner cube to jump to that view · ' +
                             'right-drag or two fingers to pan · scroll or pinch to zoom.';
@@ -2835,6 +2872,19 @@ $('bOrbitSpeed').addEventListener('click', () => {
 $('b3d').addEventListener('click', () => set3d(!mode3d));
 
 // materials inputs
+$('iFenceName').addEventListener('keydown', e => {
+  if (e.key === 'Enter'){ e.preventDefault(); e.currentTarget.blur(); }
+});
+$('iFenceName').addEventListener('change', e => {
+  const sc = matScope();
+  if (!sc.pl) return;
+  const value = e.target.value.trim(), previous = String(sc.pl.name || '').trim();
+  if (value === previous){ syncMatInputs(); return; }
+  pushUndo();
+  if (value) sc.pl.name = value;
+  else delete sc.pl.name;
+  updateAll();
+});
 $('iSpacing').addEventListener('change', e => {
   const v = parseLen(e.target.value, state.unit);
   const M = curMat();
