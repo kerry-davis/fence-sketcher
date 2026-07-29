@@ -200,7 +200,7 @@
     #bar .toolbarEnd{display:contents}
     #bMore{display:inline-block}
     #bkSec{margin-left:auto}
-    .lbl{display:none}         /* icon-only Undo / Delete */
+    .lbl{display:none}         /* icon-only Undo / Redo / Delete */
     button{padding:8px 12px}
     .seg2 button{min-width:60px}
     #hint{font-size:11px}
@@ -222,11 +222,11 @@
   <h1>Fence sketcher</h1>
   <div class="grp">
     <button id="bUndo">↩<span class="lbl"> Undo</span></button>
+    <button id="bRedo">↪<span class="lbl"> Redo</span></button>
     <button id="bDelSel" class="danger" title="Delete selected">🗑<span class="lbl"> Delete</span></button>
   </div>
   <button id="bMore" aria-expanded="false">⋯ More</button>
   <div class="grp sec">
-    <button id="bNew" title="Finish the current line — your next click starts a separate fence">✚ New fence</button>
     <button id="bBuild">＋ Building</button>
     <button id="bClose">Close loop</button>
   </div>
@@ -508,7 +508,7 @@ let state = {
 let view = { x: 0, y: 0, s: 24 };             // world origin offset (m) + scale (px per m)
 let sel  = null;                              // {t:'pt'|'seg'|'bld', p?, i?}
 let bsel = new Set();                         // selected building members (whole groups expand here)
-let undoStack = [];
+let undoStack = [], redoStack = [];
 
 /* =====================================================================
    Pure helpers (self-tested below — keep them DOM-free)
@@ -1358,10 +1358,22 @@ function pick(sx, sy){
 function pushUndo(){
   undoStack.push(JSON.stringify({ polys: state.polys, builds: state.builds }));
   if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack = [];
 }
 function undo(){
   const s = undoStack.pop();
   if (!s) return;
+  redoStack.push(JSON.stringify({ polys: state.polys, builds: state.builds }));
+  if (redoStack.length > UNDO_MAX) redoStack.shift();
+  const o = JSON.parse(s);
+  state.polys = o.polys; state.builds = o.builds;
+  sel = null; bsel.clear(); updateAll();
+}
+function redo(){
+  const s = redoStack.pop();
+  if (!s) return;
+  undoStack.push(JSON.stringify({ polys: state.polys, builds: state.builds }));
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
   const o = JSON.parse(s);
   state.polys = o.polys; state.builds = o.builds;
   sel = null; bsel.clear(); updateAll();
@@ -2339,8 +2351,9 @@ function updateAll(){
   hover = null; guides = null; scene3 = null; // stale once the drawing changes
   updateHint();
   syncMatInputs();                            // panel follows the selected fence's settings
+  $('bUndo').disabled = !undoStack.length;
+  $('bRedo').disabled = !redoStack.length;
   $('bDelSel').disabled = !sel;
-  $('bNew').disabled = !drawTarget();
   $('bClose').disabled = !(drawTarget() && drawTarget().pts.length >= 3);
   updateTotals(); updateSelbox(); paint(); saveSoon();
 }
@@ -2600,13 +2613,17 @@ cv.addEventListener('wheel', e => {
   zoomAt(e.offsetX, e.offsetY, Math.exp(-e.deltaY * 0.0012));
 }, { passive:false });
 
-// keyboard: Delete/Backspace, Esc, Ctrl+Z
+// keyboard: Delete/Backspace, Esc, Undo/Redo
 window.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSelected(); }
   else if (e.key === 'Escape'){
     if ($('bkSec').open && !$('bkDialog').open){ $('bkSec').open = false; return; }
     endLine(); sel = null; updateAll();
+  }
+  else if ((e.ctrlKey || e.metaKey) &&
+           ((e.shiftKey && e.key.toLowerCase() === 'z') || e.key.toLowerCase() === 'y')){
+    e.preventDefault(); redo();
   }
   else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); undo(); }
 });
@@ -2646,10 +2663,10 @@ $('bMore').addEventListener('click', () => {
   $('bMore').setAttribute('aria-expanded', open);
   $('bMore').textContent = open ? '⌃ Less' : '⋯ More';
 });
-$('bNew').addEventListener('click', () => { endLine(); sel = null; updateAll(); });
 $('bBuild').addEventListener('click', addBuilding);
 $('bClose').addEventListener('click', closeLoop);
 $('bUndo').addEventListener('click', undo);
+$('bRedo').addEventListener('click', redo);
 $('bDelSel').addEventListener('click', deleteSelected);
 fdel.addEventListener('click', deleteSelected);
 $('bClear').addEventListener('click', clearAll);
