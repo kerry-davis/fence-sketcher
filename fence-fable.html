@@ -268,6 +268,21 @@ const MIN_BLD     = 0.5;                      // smallest building side, metres
 const HIT = { pt:12, seg:9, handle:12, corner:12, edge:10 };  // hit/snap radii in screen px
 const ANGLE_TOL = 14;                         // px: how close to a 45°/90° ray before it locks on
 const ZOOM_MIN = 1.5, ZOOM_MAX = 500;         // px per metre
+// Orientation cube in the 3D view's bottom-left corner: half-extent and inset, screen px.
+const CUBE = { half: 26, pad: 58 };
+// Its faces, with the camera angles that look straight at each one. World axes are
+// x = plan x, y = up, z = plan y; the camera sits along the face's outward normal, so
+// (cos el·cos az, sin el, cos el·sin az) must equal that normal (self-tested).
+// The underside is never visible from above ground, so there is no Bottom face.
+const CUBE_TOP_EL = Math.PI/2 - 0.02;         // not exactly vertical: the view basis degenerates
+const CUBE_SIDE_EL = 0.05;
+const CUBE_FACES = [
+  { n:[0,1,0],  label:'Top',   el: CUBE_TOP_EL },          // keeps the current heading
+  { n:[0,0,1],  label:'Front', el: CUBE_SIDE_EL, az:  Math.PI/2 },
+  { n:[0,0,-1], label:'Back',  el: CUBE_SIDE_EL, az: -Math.PI/2 },
+  { n:[1,0,0],  label:'Right', el: CUBE_SIDE_EL, az:  0 },
+  { n:[-1,0,0], label:'Left',  el: CUBE_SIDE_EL, az:  Math.PI },
+];
 const UNDO_MAX = 100;
 const LS_KEY = 'fenceFable.v1';
 
@@ -461,6 +476,22 @@ function reversePoly(pl){
   });
 }
 
+// The 4 corners of a unit cube's face, given its outward normal (an axis vector).
+function cubeQuad(n){
+  const X = (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const u1 = X(n, Math.abs(n[1]) ? [1,0,0] : [0,1,0]), u2 = X(n, u1);
+  return [[-1,-1],[1,-1],[1,1],[-1,1]].map(([s,t]) =>
+    [n[0]+u1[0]*s+u2[0]*t, n[1]+u1[1]*s+u2[1]*t, n[2]+u1[2]*s+u2[2]*t]);
+}
+function ptInPoly(px, py, pts){               // ray crossing
+  let inside = false;
+  for (let i = 0, j = pts.length-1; i < pts.length; j = i++){
+    const [xi,yi] = pts[i], [xj,yj] = pts[j];
+    if ((yi > py) !== (yj > py) && px < (xj-xi)*(py-yi)/(yj-yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   const dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
   const t = L2 ? Math.max(0, Math.min(1, ((px-ax)*dx+(py-ay)*dy)/L2)) : 0;
@@ -638,6 +669,18 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   chk(joinedRail.length===3, '3D joined rail omits hidden butt faces');
   const rot = []; pushBox(rot, 0,0,0, 1,1,1, Math.PI/2, [0,0,0]);
   chk(near(rot[0].n[0],0) && near(rot[0].n[2],1), '3D rotated normal follows the segment');
+  // orientation cube: each face's angles must put the camera on that face's normal
+  for (const f of CUBE_FACES){
+    const az = f.az != null ? f.az : 0.7;      // Top works from any heading
+    const dir = [Math.cos(f.el)*Math.cos(az), Math.sin(f.el), Math.cos(f.el)*Math.sin(az)];
+    const alongNormal = dir[0]*f.n[0] + dir[1]*f.n[1] + dir[2]*f.n[2];
+    chk(alongNormal > 0.99, 'cube face ' + f.label + ' looks at its own normal');
+  }
+  const quad = cubeQuad([0,1,0]);
+  chk(quad.length===4 && quad.every(v => near(v[1],1)), 'cube quad sits on its face');
+  chk(new Set(quad.map(v => v.join(','))).size === 4, 'cube quad corners are distinct');
+  const sqPts = [[0,0],[10,0],[10,10],[0,10]];
+  chk(ptInPoly(5,5,sqPts) && !ptInPoly(15,5,sqPts) && !ptInPoly(5,-1,sqPts), 'point in polygon');
   // near-plane clip: a quad straddling the camera keeps only what is in front
   const cl = clipNear([[0,0,-1],[1,0,1],[1,1,1],[0,1,-1]], 0.05);
   chk(cl.length===4 && cl.every(p => p[2] >= 0.05 - 1e-9), 'near clip keeps the front half');
@@ -964,10 +1007,12 @@ let ACCENT = '#15803d';
 const PALETTES = {
   light: { grid:'#eceae5', fence:'#1f2937', gate:'#64748b', halo:'#ffffff', label:'#374151',
            bldFill:'#eceae4', bldStroke:'#a8a29e', bldText:'#78716c', ptFill:'#ffffff',
-           sky:'#dfe7ee', ground:'#c8cfbc', gline:'#b7bfab' },
+           sky:'#dfe7ee', ground:'#c8cfbc', gline:'#b7bfab',
+           cubeFill:'#f2f0ecee', cubeTop:'#fffffff2', cubeEdge:'#8b8681', cubeText:'#57534e' },
   dark:  { grid:'#2c2f34', fence:'#e5e7eb', gate:'#94a3b8', halo:'#17191c', label:'#cbd5e1',
            bldFill:'#26292e', bldStroke:'#5b6470', bldText:'#9aa3ae', ptFill:'#17191c',
-           sky:'#181c21', ground:'#2a2e28', gline:'#373c34' },
+           sky:'#181c21', ground:'#2a2e28', gline:'#373c34',
+           cubeFill:'#2a2e34ee', cubeTop:'#3a4048f2', cubeEdge:'#79828e', cubeText:'#d6dbe1' },
 };
 let C = PALETTES.light;
 const THEME_KEY = 'fenceFable.theme';
@@ -1354,11 +1399,54 @@ function paint3d(){
     ctx.fillStyle = ctx.strokeStyle = v.col; ctx.lineWidth = 1;
     ctx.fill(); ctx.stroke();                               // stroke closes hairline seams between quads
   }
+  drawCube(B);
+}
+
+/* ---- orientation cube: which way am I looking, and click a face to go there ----
+   Drawn flat (no perspective) at a fixed corner using the same camera basis, so it
+   turns exactly with the view. Only front faces are drawn, and a cube is convex, so
+   they never overlap — no depth sorting and the first hit wins when picking. */
+const cubeAt = () => [CUBE.pad, ch - CUBE.pad];
+function cubeProj(B, v){
+  const [ax, ay] = cubeAt();
+  return [ax + CUBE.half*dot3(v, B.r), ay - CUBE.half*dot3(v, B.u)];
+}
+const cubeFront = (B, f) => dot3(f.n, B.f) < -0.001;        // normal points back at the eye
+function drawCube(B){
+  ctx.font = '600 10px system-ui'; ctx.textAlign = 'center';
+  for (const f of CUBE_FACES){
+    if (!cubeFront(B, f)) continue;
+    const pts = cubeQuad(f.n).map(v => cubeProj(B, v));
+    ctx.beginPath();
+    pts.forEach((p,i) => i ? ctx.lineTo(p[0],p[1]) : ctx.moveTo(p[0],p[1]));
+    ctx.closePath();
+    ctx.fillStyle = f.n[1] ? C.cubeTop : C.cubeFill;        // lighter lid reads as 3D
+    ctx.strokeStyle = C.cubeEdge; ctx.lineWidth = 1;
+    ctx.fill(); ctx.stroke();
+    if (dot3(f.n, B.f) < -0.32){                            // too edge-on to letter
+      const c = cubeProj(B, f.n);
+      ctx.fillStyle = C.cubeText;
+      ctx.fillText(f.label, c[0], c[1] + 3.5);
+    }
+  }
+}
+function cubePick(sx, sy){
+  const [ax, ay] = cubeAt();
+  if (Math.abs(sx-ax) > CUBE.half*2 || Math.abs(sy-ay) > CUBE.half*2) return null;
+  const B = camBasis();
+  for (const f of CUBE_FACES)
+    if (cubeFront(B, f) && ptInPoly(sx, sy, cubeQuad(f.n).map(v => cubeProj(B, v)))) return f;
+  return null;
+}
+function goToFace(f){
+  if (f.az != null) cam.az = f.az;                          // Top keeps the current heading
+  cam.el = f.el;
+  clampCam(); paint();
 }
 
 /* ---- camera controls ---- */
 const clampCam = () => { cam.dist = Math.max(2, Math.min(400, cam.dist));
-                         cam.el = Math.max(0.03, Math.min(1.5, cam.el)); };
+                         cam.el = Math.max(0.03, Math.min(CUBE_TOP_EL, cam.el)); };
 function orbit(dx, dy){ cam.az += dx*0.008; cam.el -= dy*0.006; clampCam(); }
 function camPan(dx, dy){
   const k = cam.dist/(ch*0.9), sa = Math.sin(cam.az), ca = Math.cos(cam.az);
@@ -1560,6 +1648,8 @@ cv.addEventListener('pointerdown', e => {
   cv.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x:e.offsetX, y:e.offsetY });
   if (mode3d){                                 // drag = orbit, right-drag / 2 fingers = pan+zoom
+    const face = pointers.size === 1 && e.button !== 2 && cubePick(e.offsetX, e.offsetY);
+    if (face){ drag = { t:'cube', face, x:e.offsetX, y:e.offsetY }; return; }
     if (pointers.size === 2){
       const [a,b] = [...pointers.values()];
       pinch = { d: Math.hypot(a.x-b.x, a.y-b.y) };
@@ -1582,6 +1672,11 @@ cv.addEventListener('pointermove', e => {
     const prev = pointers.get(e.pointerId);
     const dx = e.offsetX - prev.x, dy = e.offsetY - prev.y;
     pointers.set(e.pointerId, { x:e.offsetX, y:e.offsetY });
+    // a tap on the cube jumps to that view; dragging off it orbits like anywhere else
+    if (drag && drag.t === 'cube'){
+      if (Math.hypot(e.offsetX-drag.x, e.offsetY-drag.y) < 6) return;
+      drag = { t:'orbit' };
+    }
     if (pinch && pointers.size === 2){
       const [a,b] = [...pointers.values()], d = Math.hypot(a.x-b.x, a.y-b.y);
       cam.dist *= (pinch.d || 1) / (d || 1);
@@ -1648,7 +1743,11 @@ function pointerEnd(e){
   if (!pointers.has(e.pointerId)) return;
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (mode3d){ if (!pointers.size) drag = null; return; }
+  if (mode3d){
+    if (drag && drag.t === 'cube' && e.type === 'pointerup') goToFace(drag.face);
+    if (!pointers.size) drag = null;
+    return;
+  }
   if (pend && !pend.moved && e.type === 'pointerup' && e.button !== 2)
     handleClick(pend.hit, e.offsetX, e.offsetY);
   if (pointers.size === 0){
@@ -1729,7 +1828,8 @@ function updateHint(){
   const drawing = !!drawTarget();
   cv.classList.toggle('selmode', !drawing || mode3d);
   if (mode3d){
-    $('hint').textContent = 'Drag to orbit · right-drag or two fingers to pan · scroll or pinch to zoom.';
+    $('hint').textContent = 'Drag to orbit · tap a face of the corner cube to jump to that view · ' +
+                            'right-drag or two fingers to pan · scroll or pinch to zoom.';
     return;
   }
   $('hint').textContent = drawing
