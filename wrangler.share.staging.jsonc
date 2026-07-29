@@ -1,8 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "fence-sketcher-share",
+  "name": "fence-sketcher-share-staging",
   "main": "share-worker.mjs",
   "compatibility_date": "2026-07-30",
+  "workers_dev": true,
   "assets": {
     "directory": "./dist-share",
     "binding": "ASSETS",
@@ -13,5 +14,8 @@
       "binding": "SHARES",
       "id": "REPLACE_WITH_KV_NAMESPACE_ID"
     }
-  ]
+  ],
+  "observability": {
+    "enabled": true
+  }
 }

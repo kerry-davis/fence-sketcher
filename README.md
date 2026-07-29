@@ -156,16 +156,41 @@ or 30 days unless the owner explicitly chooses no expiry. Deleting a saved
 drawing revokes its active share before removing the file.
 
 The Worker is optional; the editor and backups continue to work without it.
-To provision it after review:
+Worker deployment is GitHub Actions only—do not use a personal `wrangler login`
+or deploy directly from a development machine.
 
-```sh
-npm install
-npx wrangler kv namespace create SHARES --config wrangler.share.jsonc
-# Put the returned namespace id in wrangler.share.jsonc.
-npx wrangler secret put SHARE_ADMIN_TOKEN --config wrangler.share.jsonc
-npm run build:share
-npm run share:deploy
-```
+The promotion path matches the Modern Energy Dashboard:
+
+1. Pull requests to `staging` or `main` run tests, syntax checks, the public
+   viewer build and a Wrangler dry run. PR jobs receive no deployment secrets.
+2. A merge to `staging` deploys `fence-sketcher-share-staging` with its own KV
+   namespace through the GitHub `staging` environment.
+3. Complete UAT using the staging share URL.
+4. Promote `staging` to `main` through a pull request.
+5. The production workflow passes its verification gate, pauses for the
+   protected `production` environment approval, then deploys
+   `fence-sketcher-share` with a separate production KV namespace.
+
+Create GitHub environments named exactly `staging` and `production`. Restrict
+staging deployments to the `staging` branch. Restrict production deployments
+to `main` and require a reviewer.
+
+Add these separately to both environments:
+
+| Kind | Name | Purpose |
+| --- | --- | --- |
+| Secret | `CLOUDFLARE_API_TOKEN` | Account-scoped Workers Scripts and Workers KV deployment token |
+| Secret | `CLOUDFLARE_ACCOUNT_ID` | Account selected by Wrangler in non-interactive CI |
+| Secret | `FENCE_SHARE_ADMIN_TOKEN` | Strong, environment-specific snapshot management secret |
+| Variable | `CLOUDFLARE_KV_NAMESPACE_ID` | 32-character KV namespace id for that environment |
+| Variable | `FENCE_SHARE_PUBLIC_URL` | Deployed Worker origin, without a trailing slash |
+
+Create separate staging and production KV namespaces once in Cloudflare. The
+namespace ids are GitHub environment variables rather than committed values;
+the workflow generates an ignored `wrangler.share.ci.jsonc` on the runner.
+The first deployment creates the Worker and writes `SHARE_ADMIN_TOKEN` from the
+matching protected GitHub secret. Staging and production admin tokens must be
+different.
 
 Configure the same secret and the deployed Worker origin on the private server,
 preferably in a systemd environment override rather than the repository:
@@ -176,9 +201,10 @@ Environment=FENCE_SHARE_API_URL=https://fence-sketcher-share.<account>.workers.d
 Environment=FENCE_SHARE_ADMIN_TOKEN=<the same strong secret>
 ```
 
-Restart the private server after setting those values. The Files menu then
-shows **Share view** whenever the current drawing has been saved. Secrets must
-never be placed in `fence-fable.html`, committed, or sent in a browser request.
+Use the **production** GitHub environment's admin-token value here. Restart the
+private server after setting those values. The Files menu then shows
+**Share view** whenever the current drawing has been saved. Secrets must never
+be placed in `fence-fable.html`, committed, or sent in a browser request.
 
 ---
 
@@ -192,7 +218,8 @@ silent unless something breaks; open the console and you'll see
 To run the complete Node test suite:
 
 ```sh
-npm test
+npm run verify
+npm run share:dry-run
 ```
 
 To run only the original inline checks headlessly:
@@ -213,8 +240,10 @@ Node has no DOM, and everything testable runs before the first DOM access.
 fence-fable.html    the whole app: markup, styles, logic, 3D renderer, tests
 serve-fence.mjs     private backup server and public-share management proxy
 share-worker.mjs    public GET-only snapshot viewer and management API
-wrangler.share.jsonc
-                    Cloudflare Worker assets and KV configuration
+wrangler.share.staging.jsonc
+wrangler.share.production.jsonc
+                    isolated staging and production Worker templates
+.github/workflows/  PR validation and protected staging/production deployments
 scripts/            repeatable public-view build
 test/               share security and lifecycle integration tests
 backups/            saved drawings (gitignored)

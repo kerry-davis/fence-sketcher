@@ -5,8 +5,9 @@
   "scripts": {
     "build:share": "node scripts/build-share.mjs",
     "test": "node --test",
-    "share:dev": "npm run build:share && npx wrangler dev --config wrangler.share.jsonc",
-    "share:deploy": "npm run build:share && npx wrangler deploy --config wrangler.share.jsonc"
+    "verify": "node --check serve-fence.mjs && node --check share-worker.mjs && npm test && npm run build:share",
+    "share:dev": "npm run build:share && npx wrangler dev --config wrangler.share.staging.jsonc",
+    "share:dry-run": "npm run build:share && npx wrangler deploy --dry-run --config wrangler.share.production.jsonc"
   },
   "devDependencies": {
     "wrangler": "^4.94.0"

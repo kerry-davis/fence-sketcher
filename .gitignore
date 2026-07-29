@@ -1,5 +1,7 @@
 backups/
+node_modules/
 dist-share/
 shares/
 .wrangler/
 .dev.vars*
+wrangler.share.ci.jsonc
