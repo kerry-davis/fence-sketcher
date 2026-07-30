@@ -62,6 +62,9 @@ test('round post settings render and split the materials count by shape', () => 
   };
 
   assert.equal(faces(true) - faces(false), 12);
+  const squareFaces = faces(false);
+  context.state.polys[1].mat = {...mat, postShape:'round'};
+  assert.equal(context.build3().length - squareFaces, 12);
 
   const materialStart = html.indexOf('function sharedEnds(');
   const materialEnd = html.indexOf('// Delete point i', materialStart);
@@ -82,6 +85,15 @@ test('round post settings render and split the materials count by shape', () => 
   materials = context.calcMaterials([
     {closed:false, pts:[{x:0,y:0}, {x:1,y:0}]},
     {closed:false, pts:[{x:1,y:0}, {x:2,y:0}],
+     mat:{...mat, ends:'auto', postShape:'round'}},
+  ], {...mat, ends:'auto', postShape:'square'});
+  assert.equal(materials.posts, 3);
+  assert.equal(materials.squarePosts, 2);
+  assert.equal(materials.roundPosts, 1);
+
+  materials = context.calcMaterials([
+    {closed:false, pts:[{x:0,y:0}, {x:1,y:0}]},
+    {closed:false, pts:[{x:1,y:0,postShape:'round'}, {x:2,y:0}],
      mat:{...mat, ends:'auto', postShape:'round'}},
   ], {...mat, ends:'auto', postShape:'square'});
   assert.equal(materials.posts, 3);

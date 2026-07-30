@@ -666,20 +666,20 @@ const fenceBadgeText = (pl, i) => String(pl.name || '').trim() || fenceCode(pl,i
 const ownPostShape = source => source && (source.postShape === 'round' || source.postShape === 'square')
   ? source.postShape : null;
 const postShapeOf = source => ownPostShape(source) || 'square';
-function postShapeAt(polys, defMat, point, fallbackMat, include = () => true){
-  const matches = [];
+function explicitPostShapeAt(polys, point, include = () => true){
+  const shapes = [];
   polys.forEach(pl => {
     if (!include(pl)) return;
     pl.pts.forEach(q => {
       if (Math.hypot(q.x-point.x, q.y-point.y) < 1e-4)
-        matches.push({point:q, mat:pl.mat || defMat});
+        shapes.push(ownPostShape(q));
     });
   });
-  const explicit = matches.map(match => ownPostShape(match.point)).filter(Boolean);
-  if (explicit.length) return explicit.includes('round') ? 'round' : 'square';
-  if (matches.some(match => postShapeOf(match.mat) === 'round')) return 'round';
-  return postShapeOf(fallbackMat);
+  const explicit = shapes.filter(Boolean);
+  return explicit.length ? (explicit.includes('round') ? 'round' : 'square') : null;
 }
+const postShapeAt = (polys, point, fallbackMat, include) =>
+  explicitPostShapeAt(polys,point,include) || postShapeOf(fallbackMat);
 const escHTML = value => String(value).replace(/[&<>"']/g, char =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 
@@ -887,7 +887,7 @@ function materialPostInventory(polys, defMat){
         if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
         if (!pl.closed && i === pl.pts.length-2 &&
             k === segmentPosts.length-1 && !ends.end) return;
-        const shape = postShapeAt(polys,defMat,point,mat,poly => !poly.excludeMaterials);
+        const shape = postShapeAt(polys,point,mat,poly => !poly.excludeMaterials);
         const existing = run.find(post => Math.hypot(post.x-point.x,post.y-point.y) < 1e-4);
         if (existing){
           if (shape === 'round') existing.shape = 'round';
@@ -1873,7 +1873,7 @@ function doPaint(){
       const isSel = sel && sel.t==='pt' && sel.p===p && sel.i===i;
       const r = isSel ? 8 : 5.5;
       ctx.beginPath();
-      if (postShapeAt(state.polys,state.mat,q,pl.mat || state.mat) === 'round')
+      if (postShapeAt(state.polys,q,pl.mat || state.mat) === 'round')
         ctx.arc(S.x, S.y, r, 0, 7);
       else ctx.rect(S.x-r, S.y-r, r*2, r*2);
       ctx.fillStyle = isSel ? ACCENT : C.ptFill; ctx.fill();
@@ -2214,10 +2214,11 @@ function build3(){
           Math.hypot(post.q.x-q.x, post.q.y-q.y) < 1e-4);
         const key = shared ? shared[0] : q.x.toFixed(4)+','+q.y.toFixed(4);
         const old = shared && shared[1];
-        const shape = postShapeAt(state.polys,state.mat,q,mat);
+        const explicitShape = explicitPostShapeAt(state.polys,q);
+        const shape = explicitShape || (old ? old.shape : postShapeOf(mat));
         if (!old || H > old.H)
-          posts.set(key, { q, H, ang, shape:old && old.shape === 'round' ? 'round' : shape });
-        else if (shape === 'round') old.shape = 'round';
+          posts.set(key, { q, H, ang, shape });
+        else if (explicitShape) old.shape = explicitShape;
       });
       if (a.gateAfter){ pushGate(F,a,b,H,mat); continue; }
       if (mat.style === 'rail'){
