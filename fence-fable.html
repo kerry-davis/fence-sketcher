@@ -146,7 +146,8 @@
                         color:var(--muted);transition:transform .18s ease}
   #bkSec[open]>summary{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   #bkSec[open]>summary::after{transform:rotate(225deg) translate(-1px,-1px)}
-  #bkMenuPanel{position:absolute;top:calc(100% + 9px);right:0;z-index:20;width:370px;overflow:hidden;
+  #bkMenuPanel{position:absolute;top:calc(100% + 9px);right:0;z-index:20;width:370px;
+               max-height:calc(100dvh - 84px);overflow-y:auto;
                background:var(--card);border:1px solid var(--line);border-radius:18px;
                box-shadow:0 20px 50px #0004,0 4px 12px #0002}
   .bkHead{display:flex;align-items:center;gap:11px;padding:18px 18px 14px}
@@ -173,6 +174,23 @@
   .bkFileActions .iconBtn{display:grid;place-items:center;width:44px;padding:0}
   .bkFileActions svg{width:18px;height:18px;stroke:currentColor}
   #bkDel{background:transparent}
+  .bkShares{padding:15px 16px 16px;border-top:1px solid var(--line)}
+  .bkSharesHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
+  .bkSharesHead span{font-size:11px;font-weight:700;letter-spacing:.055em;text-transform:uppercase;
+                     color:var(--muted)}
+  #bkSharesCount{font-size:11px;color:var(--muted)}
+  #bkSharesList{display:grid;gap:9px}
+  .bkShareCard{padding:11px;background:var(--bg);border:1px solid var(--line);border-radius:12px}
+  .bkShareSummary{display:flex;align-items:flex-start;gap:8px;min-width:0}
+  .bkShareDot{width:8px;height:8px;flex:none;margin-top:5px;background:var(--accent);
+              border-radius:50%;box-shadow:0 0 0 3px var(--accent-soft)}
+  .bkShareText{min-width:0}
+  .bkShareText strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                      font-size:13px}
+  .bkShareText small{display:block;margin-top:2px;color:var(--muted);font-size:11px}
+  .bkShareActions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:9px}
+  .bkShareActions button{min-height:36px;padding:6px 8px;border-radius:9px;font-size:12px}
+  #bkSharesEmpty{margin:0;color:var(--muted);font-size:12px}
   #bkStatus{margin:0;padding:10px 16px;border-top:1px solid var(--line)}
   #bkStatus:empty{display:none}
   #bkStatus[data-kind="success"]{background:var(--accent-soft)}
@@ -194,6 +212,7 @@
   #shareCreate,#shareUpdate{width:100%}
   #shareActive{display:none}
   .shareActions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+  #shareActive.manageOnly .shareActions{grid-template-columns:1fr}
   #shareStop{color:#b91c1c;border-color:#e5c4c4}
   #shareStopPanel{margin-top:12px;padding:12px;background:#b91c1c0d;border:1px solid #e5c4c4;
                   border-radius:10px}
@@ -334,6 +353,14 @@
           </button>
         </div>
       </div>
+      <section id="bkShares" class="bkShares" hidden aria-labelledby="bkSharesTitle">
+        <div class="bkSharesHead">
+          <span id="bkSharesTitle">Shared drawings</span>
+          <small id="bkSharesCount"></small>
+        </div>
+        <div id="bkSharesList"></div>
+        <p id="bkSharesEmpty">No active shared drawings.</p>
+      </section>
       <p class="note" id="bkStatus" role="status" aria-live="polite"></p>
       <div class="bkSync">
         <span class="bkSyncDot" aria-hidden="true"></span>
@@ -3264,6 +3291,7 @@ const BK_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 let bkCurrent = '';
 let bkItems = [], bkDialogAction = null, bkBusy = false;
 let shareAvailable = false, currentShare = null, shareSource = '', shareBusy = false;
+let sharedItems = [];
 try { bkCurrent = localStorage.getItem(BK_KEY) || ''; } catch(e) {}
 
 function setBkCurrent(name){
@@ -3324,6 +3352,47 @@ async function refreshShareConfig(){
     shareAvailable = response.ok && value.configured === true;
   } catch { shareAvailable = false; }
   syncShareAction();
+  if (shareAvailable) await refreshSharedDrawings();
+  else $('bkShares').hidden = true;
+}
+function shareListExpiry(value){
+  return value ? 'Expires ' + new Date(value).toLocaleString() : 'Does not expire';
+}
+function renderSharedDrawings(){
+  $('bkShares').hidden = false;
+  $('bkSharesEmpty').textContent = 'No active shared drawings.';
+  $('bkSharesCount').textContent = sharedItems.length
+    ? sharedItems.length + ' active' : '';
+  $('bkSharesEmpty').hidden = !!sharedItems.length;
+  $('bkSharesList').innerHTML = sharedItems.map((item, i) =>
+    `<article class="bkShareCard">
+      <div class="bkShareSummary">
+        <span class="bkShareDot" aria-hidden="true"></span>
+        <div class="bkShareText">
+          <strong title="${escHTML(item.name)}">${escHTML(item.name)}</strong>
+          <small>${escHTML(shareListExpiry(item.expiresAt))}</small>
+        </div>
+      </div>
+      <div class="bkShareActions">
+        <button data-share-action="open" data-share-index="${i}">Open</button>
+        <button data-share-action="copy" data-share-index="${i}">Copy</button>
+        <button data-share-action="manage" data-share-index="${i}">Manage</button>
+      </div>
+    </article>`).join('');
+}
+async function refreshSharedDrawings(){
+  if (!shareAvailable) return;
+  try {
+    const value = await bkRequest('shares', {cache:'no-store'},
+                                  'Could not load shared drawings.');
+    sharedItems = Array.isArray(value) ? value : [];
+    renderSharedDrawings();
+  } catch(error) {
+    sharedItems = [];
+    renderSharedDrawings();
+    $('bkSharesEmpty').hidden = false;
+    $('bkSharesEmpty').textContent = error.message;
+  }
 }
 function setShareStatus(message, kind=''){
   $('shareDialogStatus').textContent = message;
@@ -3347,9 +3416,13 @@ function expiryText(value){
 }
 function syncShareDialog(){
   const active = !!currentShare;
+  const current = shareSource === bkCurrent;
   setStopSharingOpen(false);
-  $('shareCreate').style.display = active ? 'none' : '';
+  $('shareCreate').style.display = !active && current ? '' : 'none';
   $('shareActive').style.display = active ? 'block' : 'none';
+  $('shareActive').classList.toggle('manageOnly', !current);
+  $('shareUpdate').style.display = current ? '' : 'none';
+  $('shareExpiry').closest('label').style.display = current ? 'flex' : 'none';
   if (active){
     $('shareUrl').value = currentShare.url;
     $('shareExpiryNote').textContent = expiryText(currentShare.expiresAt);
@@ -3374,9 +3447,9 @@ async function shareRequest(source, options={}){
   }
   return value;
 }
-async function openShareDialog(){
-  if (!shareAvailable || !bkCurrent) return;
-  shareSource = bkCurrent; currentShare = null;
+async function openShareDialog(source=bkCurrent){
+  if (!shareAvailable || !source) return;
+  shareSource = source; currentShare = null;
   $('bkSec').open = false;
   $('shareDialogTitle').textContent = `Share “${shareSource}”`;
   $('shareExpiry').value = '2592000';
@@ -3385,12 +3458,14 @@ async function openShareDialog(){
   $('shareDialog').showModal();
   try {
     currentShare = await shareRequest(shareSource);
-    setShareStatus('');
+    setShareStatus(currentShare || shareSource === bkCurrent
+      ? '' : 'This public link is no longer active.');
+    if (!currentShare) refreshSharedDrawings();
   } catch(error) { setShareStatus(error.message, 'error'); }
   finally { setShareBusy(false); syncShareDialog(); }
 }
 async function publishShare(method){
-  if (!shareSource || shareBusy) return;
+  if (!shareSource || shareSource !== bkCurrent || shareBusy) return;
   setShareBusy(true);
   setShareStatus(method === 'POST' ? 'Creating secure link…' : 'Updating shared view…');
   try {
@@ -3403,6 +3478,7 @@ async function publishShare(method){
       }),
     });
     syncShareDialog();
+    refreshSharedDrawings();
     if (method === 'POST') await copyShareLink();
     else setShareStatus('Shared view updated.', 'success');
   } catch(error) { setShareStatus(error.message, 'error'); }
@@ -3410,14 +3486,20 @@ async function publishShare(method){
 }
 async function copyShareLink(){
   if (!currentShare) return;
-  try {
-    await navigator.clipboard.writeText(currentShare.url);
-  } catch {
-    const input = $('shareUrl');
-    input.focus(); input.select();
-    if (!document.execCommand('copy')) throw new Error('Copy the link from the field above.');
-  }
+  await copyPublicLink(currentShare.url);
   setShareStatus('View-only link copied.', 'success');
+}
+async function copyPublicLink(url){
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error();
+    await navigator.clipboard.writeText(url);
+  } catch {
+    const input = document.createElement('textarea');
+    input.value = url; document.body.appendChild(input); input.select();
+    const copied = document.execCommand('copy');
+    input.remove();
+    if (!copied) throw new Error('Could not copy the public link.');
+  }
 }
 async function stopSharing(){
   if (!currentShare || shareBusy) return;
@@ -3426,6 +3508,7 @@ async function stopSharing(){
   try {
     await shareRequest(shareSource, {method:'DELETE'});
     currentShare = null; syncShareDialog();
+    refreshSharedDrawings();
     setShareStatus('Public link removed. The old link no longer works.', 'success');
   } catch(error) { setShareStatus(error.message, 'error'); }
   finally { setShareBusy(false); }
@@ -3444,6 +3527,7 @@ async function refreshBackups(preferred=''){
     if (selected && list.some(b => b.name === selected)) $('bkList').value = selected;
     setBkCurrent(bkCurrent);
     syncBkActions();
+    if (shareAvailable) refreshSharedDrawings();
   } catch(e) {
     if (wasVisible) setBkStatus(e.message, 'error');
     else $('bkSec').style.display = 'none'; // local file without the optional server
@@ -3568,7 +3652,28 @@ async function deleteBackup(name){
 $('bkSave').addEventListener('click', () =>
   bkCurrent ? saveBackup(bkCurrent) : openBkDialog('create'));
 $('bkSaveAs').addEventListener('click', () => openBkDialog('create'));
-$('bkShare').addEventListener('click', openShareDialog);
+$('bkShare').addEventListener('click', () => openShareDialog());
+$('bkSharesList').addEventListener('click', async e => {
+  const button = e.target.closest('button[data-share-action]');
+  if (!button) return;
+  const item = sharedItems[+button.dataset.shareIndex];
+  if (!item) return;
+  const action = button.dataset.shareAction;
+  if (action === 'open') {
+    const link = document.createElement('a');
+    link.href = item.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.click();
+  }
+  if (action === 'copy') {
+    const label = button.textContent;
+    try {
+      await copyPublicLink(item.url);
+      button.textContent = 'Copied';
+      setTimeout(() => button.textContent = label, 1500);
+    } catch(error) { setBkStatus(error.message, 'error'); }
+  }
+  if (action === 'manage') openShareDialog(item.name);
+});
 $('bkLoad').addEventListener('click', () => { if (bkSelected()) openBkDialog('open', bkSelected()); });
 $('bkRen').addEventListener('click', () => { if (bkSelected()) openBkDialog('rename', bkSelected()); });
 $('bkDel').addEventListener('click', () => { if (bkSelected()) openBkDialog('delete', bkSelected()); });
@@ -3576,7 +3681,10 @@ $('bkList').addEventListener('change', syncBkActions);
 $('bkName').addEventListener('input', syncBkDialog);
 $('bkDialogCancel').addEventListener('click', closeBkDialog);
 $('bkSec').addEventListener('toggle', () => {
-  if ($('bkSec').open) setBkStatus('');
+  if ($('bkSec').open) {
+    setBkStatus('');
+    if (shareAvailable) refreshSharedDrawings();
+  }
 });
 document.addEventListener('click', e => {
   if ($('bkSec').open && !e.target.closest('#bkSec') && !e.target.closest('#bkDialog'))

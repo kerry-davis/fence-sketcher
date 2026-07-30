@@ -19,3 +19,13 @@ test('share management exposes explicit link removal confirmation', () => {
   assert.match(html, /id="shareStopConfirm">Remove link<\/button>/);
   assert.doesNotMatch(html, /dataset\.armed|shareRevokeTimer/);
 });
+
+test('files menu lists and manages every active shared drawing', () => {
+  assert.match(html, /id="bkShares" class="bkShares" hidden/);
+  assert.match(html, /id="bkSharesTitle">Shared drawings<\/span>/);
+  for (const action of ['open', 'copy', 'manage'])
+    assert.match(html, new RegExp(`data-share-action="${action}"`));
+  assert.match(html, /bkRequest\('shares', \{cache:'no-store'\}/);
+  assert.match(html, /async function openShareDialog\(source=bkCurrent\)/);
+  assert.match(html, /shareSource !== bkCurrent/);
+});
