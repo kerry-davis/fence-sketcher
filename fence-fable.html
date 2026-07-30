@@ -650,6 +650,7 @@ const defaultFenceName = (pl, i) => (gateOnly(pl) ? 'Gate ' : 'Fence ') + (i+1);
 const fenceName = (pl, i) => String(pl.name || '').trim() || defaultFenceName(pl, i);
 const fenceCode = (pl, i) => (gateOnly(pl) ? 'G' : 'F') + (i+1);
 const fenceBadgeText = (pl, i) => String(pl.name || '').trim() || fenceCode(pl,i);
+const postShapeOf = point => point && point.postShape === 'round' ? 'round' : 'square';
 const escHTML = value => String(value).replace(/[&<>"']/g, char =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 
@@ -1787,7 +1788,10 @@ function doPaint(){
     pl.pts.forEach((q, i) => {
       const S = W2S(q);
       const isSel = sel && sel.t==='pt' && sel.p===p && sel.i===i;
-      ctx.beginPath(); ctx.arc(S.x, S.y, isSel ? 8 : 5.5, 0, 7);
+      const r = isSel ? 8 : 5.5;
+      ctx.beginPath();
+      if (postShapeOf(q) === 'round') ctx.arc(S.x, S.y, r, 0, 7);
+      else ctx.rect(S.x-r, S.y-r, r*2, r*2);
       ctx.fillStyle = isSel ? ACCENT : C.ptFill; ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = isSel ? ACCENT : C.fence; ctx.stroke();
     });
@@ -1978,6 +1982,18 @@ function pushBox(F, cx,cy,cz, hx,hy,hz, ang, col, caps = null){
   F.push({ p:[P(-1,-1,-1),P(1,-1,-1),P(1,1,-1),P(-1,1,-1)], n:N(0,-1), col });
   F.push({ p:[P(-1,1,-1),P(1,1,-1),P(1,1,1),P(-1,1,1)],     n:[0,1,0], col });
 }
+function pushCylinder(F, cx,cy,cz, radius, height, col){
+  const sides = 16, y0 = cy-height/2, y1 = cy+height/2, top = [];
+  for (let i = 0; i < sides; i++){
+    const a = i*2*Math.PI/sides, b = (i+1)*2*Math.PI/sides;
+    const p0 = [cx+Math.cos(a)*radius,y0,cz+Math.sin(a)*radius];
+    const p1 = [cx+Math.cos(b)*radius,y0,cz+Math.sin(b)*radius];
+    const p2 = [p1[0],y1,p1[2]], p3 = [p0[0],y1,p0[2]];
+    pushFace(F, [p0,p1,p2,p3], col, [Math.cos((a+b)/2),0,Math.sin((a+b)/2)]);
+    top.push(p3);
+  }
+  pushFace(F, top, col, [0,1,0]);
+}
 // Any planar face. The normal comes from the winding, flipped to agree with `outward`,
 // so callers state which way the face looks instead of ordering vertices just so.
 function pushFace(F, p, col, outward){
@@ -2111,7 +2127,11 @@ function build3(){
       segmentPosts.forEach((q, k) => {
         if (!hasPost(k)) return;
         const key = q.x.toFixed(3)+','+q.y.toFixed(3), old = posts.get(key);
-        if (!old || H > old.H) posts.set(key, { q, H, ang }); // shared post uses taller fence's angle
+        const shape = k === 0 ? postShapeOf(a)
+                    : k === segmentPosts.length-1 ? postShapeOf(b) : 'square';
+        if (!old || H > old.H)
+          posts.set(key, { q, H, ang, shape:old && old.shape === 'round' ? 'round' : shape });
+        else if (shape === 'round') old.shape = 'round';
       });
       if (a.gateAfter){ pushGate(F,a,b,H,mat); continue; }
       if (mat.style === 'rail'){
@@ -2146,8 +2166,9 @@ function build3(){
       }
     }
   });
-  for (const { q, H, ang } of posts.values())
-    pushBox(F, q.x, H/2, q.y, POST_SIDE/2, H/2, POST_SIDE/2, ang, WOOD.post);
+  for (const { q, H, ang, shape } of posts.values())
+    if (shape === 'round') pushCylinder(F, q.x, H/2, q.y, POST_SIDE/2, H, WOOD.post);
+    else pushBox(F, q.x, H/2, q.y, POST_SIDE/2, H/2, POST_SIDE/2, ang, WOOD.post);
   return F;
 }
 
@@ -2652,14 +2673,32 @@ function updateSelbox(){
     if (document.activeElement !== $('iBW')) $('iBW').value = u==='m' ? +hb.w.toFixed(2) : ftStr(hb.w);
     if (document.activeElement !== $('iBH')) $('iBH').value = u==='m' ? +hb.h.toFixed(2) : ftStr(hb.h);
 
-  } else if (key !== lastSelKey){
+  } else {
     const pl = state.polys[sel.p];
+    const point = pl && pl.pts[sel.i];
     // an end of an open run can be picked back up and drawn from
     const isEnd = pl && !pl.closed && (sel.i === 0 || sel.i === pl.pts.length-1);
-    box.innerHTML = '<h2>Selected fence point</h2>' +
-      (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
-      '<p class="note">Drag to move. Deleting it joins the two neighbouring segments.</p>';
-    if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
+    if (key !== lastSelKey){
+      box.innerHTML = '<h2>Selected fence point</h2>' +
+        '<div class="row"><span>Post shape</span><span><select id="iPostShape" style="min-height:38px;padding:6px">' +
+          '<option value="square">Square (default)</option><option value="round">Round</option>' +
+        '</select></span></div>' +
+        (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
+        '<p class="note">This changes only the post at this point. Drag to move; deleting it joins the neighbouring segments.</p>';
+      $('iPostShape').addEventListener('change', e => {
+        if (!sel || sel.t !== 'pt') return;
+        const q = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+        if (!q) return;
+        commitEdit(() => {
+          if (e.target.value === 'round') q.postShape = 'round';
+          else delete q.postShape;
+        });
+        updateAll();
+      });
+      if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
+    }
+    if (point && document.activeElement !== $('iPostShape'))
+      $('iPostShape').value = postShapeOf(point);
   }
   // bring the panel into view when the selection changes (it lives at the top of the sidebar)
   if (key !== lastSelKey) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });

@@ -49,6 +49,11 @@ test('undo and redo restore materials and units as well as geometry', () => {
 
   context.redo();
   assert.equal(context.state.mat.height, 1.8);
+
+  assert.equal(context.commitEdit(() => context.state.polys[0].pts[0].postShape = 'round'), true);
+  assert.equal(context.state.polys[0].pts[0].postShape, 'round');
+  context.undo();
+  assert.equal(context.state.polys[0].pts[0].postShape, undefined);
 });
 
 test('material controls record individual history entries', () => {
