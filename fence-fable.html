@@ -364,7 +364,7 @@
       <button id="bOrbitSpeed" title="Orbit speed: 15 degrees per second"
               aria-label="Orbit speed: 15 degrees per second">15°</button>
     </div>
-    <button id="fdel" title="Delete">✕</button>
+    <button id="fdel" class="editorOnly" title="Delete">✕</button>
     <div id="gridcap" title="Grid spacing adapts automatically as you zoom"></div>
     <div id="shareState" role="status" aria-live="polite">
       <div class="shareStateCard">
@@ -909,6 +909,12 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   return { d: Math.hypot(px-(ax+t*dx), py-(ay+t*dy)), t };
 }
 
+function freezeTree(value){
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) freezeTree(child);
+  return Object.freeze(value);
+}
+
 /* ---- self-checks: silent unless something fails ---- */
 (function selfTest(){
   let fails = 0;
@@ -923,6 +929,11 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   chk(fmtLen(12*FT+6*IN,'ft') === "12' 6\"", 'fmt ft');
   chk(fmtLen(2.4,'m') === '2.4 m', 'fmt m');
   chk(fmtLen(11.999*IN + 11*FT,'ft') === "12' 0\"", 'fmt inch carry');
+  const frozen = freezeTree({items:[{x:1}]});
+  let frozenSplice = false;
+  try { frozen.items.splice(0,1); } catch { frozenSplice = true; }
+  chk(frozenSplice && frozen.items.length === 1 && Object.isFrozen(frozen.items[0]),
+      'read-only drawing tree is immutable');
   const namedGate = {pts:[{x:0,y:0,gateAfter:true},{x:1,y:0}], closed:false};
   const namedFence = {pts:[{x:0,y:0},{x:1,y:0}], closed:false};
   chk(defaultFenceName(namedGate,0) === 'Gate 1' && fenceCode(namedGate,0) === 'G1',
@@ -1506,6 +1517,7 @@ function pushUndo(){
   redoStack = [];
 }
 function undo(){
+  if (readOnly) return;
   const s = undoStack.pop();
   if (!s) return;
   redoStack.push(JSON.stringify({ polys: state.polys, builds: state.builds }));
@@ -1515,6 +1527,7 @@ function undo(){
   sel = null; bsel.clear(); updateAll();
 }
 function redo(){
+  if (readOnly) return;
   const s = redoStack.pop();
   if (!s) return;
   undoStack.push(JSON.stringify({ polys: state.polys, builds: state.builds }));
@@ -1529,6 +1542,7 @@ function drawTarget(){
   return pl && !pl.closed && !pl.done ? pl : null;
 }
 function addPoint(w){
+  if (readOnly) return;
   pushUndo();
   let pl = drawTarget();
   if (!pl){ pl = { pts:[], closed:false }; state.polys.push(pl); }
@@ -1536,16 +1550,19 @@ function addPoint(w){
   updateAll();
 }
 function closeLoop(){
+  if (readOnly) return;
   const pl = drawTarget();
   if (!pl || pl.pts.length < 3) return;
   pushUndo(); pl.closed = true; updateAll();
 }
 function endLine(){
+  if (readOnly) return;
   const pl = drawTarget();
   if (!pl) return;
   pushUndo(); pl.done = true; updateAll();
 }
 function addBuilding(){
+  if (readOnly) return;
   pushUndo();
   const [bw,bh,bz] = DEF_BLD[state.unit];
   const c = snapGridPt(S2W(cw/2, ch/2));
@@ -1555,6 +1572,7 @@ function addBuilding(){
   updateAll();
 }
 function deleteSelected(){
+  if (readOnly) return;
   if (!sel) return;
   pushUndo();
   if (sel.t==='pt')  deletePoint(state.polys, sel.p, sel.i);
@@ -1563,6 +1581,7 @@ function deleteSelected(){
   sel = null; bsel.clear(); updateAll();
 }
 function clearAll(){
+  if (readOnly) return;
   if (!confirm('Clear the whole drawing?')) return;
   pushUndo();
   state.polys = []; state.builds = []; sel = null; bsel.clear();
@@ -1572,6 +1591,7 @@ function clearAll(){
 // ponytail: locks are enforced one neighbour at a time — with BOTH sides locked the first may
 // drift slightly; a real constraint solver is the upgrade if that ever matters.
 function movePoint(p, i, w){
+  if (readOnly) return;
   const pl = state.polys[p], n = pl.pts.length;
   // align against a neighbouring point while dragging, too
   const prevI = pl.closed ? (i-1+n)%n : i-1, nextI = pl.closed ? (i+1)%n : i+1;
@@ -2630,6 +2650,7 @@ function selectBuilding(i, additive){
   return true;
 }
 function groupSelected(){
+  if (readOnly) return;
   if (!sel || sel.t!=='bld') return;
   const ids = [...bsel];
   pushUndo();
@@ -2637,6 +2658,7 @@ function groupSelected(){
   sel.i = ids[0]; updateAll();
 }
 function ungroupSelected(){
+  if (readOnly) return;
   if (!sel || sel.t!=='bld') return;
   const ids = [...bsel];
   pushUndo();
@@ -2847,6 +2869,7 @@ cv.addEventListener('pointerleave', () => {
 
 // Pick drawing a line back up from one of its ends.
 function resumeLine(p, i){
+  if (readOnly) return;
   const pl = state.polys[p], last = pl.pts.length - 1;
   pushUndo();
   if (i === 0 && last > 0) reversePoly(pl);     // continue from the old start
@@ -3204,6 +3227,9 @@ async function loadSharedDrawing(){
       !Array.isArray(value.snapshot.polys) || !Array.isArray(value.snapshot.builds))
     throw new Error('This view-only link is invalid, expired, or has been stopped.');
   applyState(value.snapshot);
+  freezeTree(state.polys);
+  freezeTree(state.builds);
+  freezeTree(state.mat);
   const title = String(value.title || 'Shared fence plan');
   document.title = title + ' — View-only fence plan';
   $('appTitle').textContent = title;
