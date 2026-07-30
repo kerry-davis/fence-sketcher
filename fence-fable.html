@@ -1172,6 +1172,10 @@ function freezeTree(value){
   al = snapAlign({x:5.1, y:2.05}, null);
   chk(al && near(al.x, 5) && near(al.y, 2), 'aligns to post X and Y');
   chk(snapAlign({x:20, y:20}, null) === null, 'nothing to align to');
+  state.polys = [{pts:[{x:5,y:2},{x:9,y:10},{x:5.5,y:10}],closed:false}];
+  al = snapFence({x:5.08,y:10.04},{p:0,i:2},state.polys[0].pts[1],null);
+  chk(al && near(al.x,5) && near(al.y,10),
+      'dragged post aligns to another post on its own fence before angle locking');
   // diagonal alignment: project onto the ray from the anchor through a neighbouring corner
   state.polys = [];
   const wasBuilds = state.builds, wasObjectSnap = state.snapBld;
@@ -1515,7 +1519,8 @@ function snapObjectRay(w, anchor, skip){
 
 // Snap a world point for fence drawing. Priority: existing fence points & building corners
 // (nearest wins), then diagonal alignment through a neighbouring corner, fence lines &
-// building edges, 45° alignment off the anchor, X/Y alignment, then the grid.
+// building edges, X/Y alignment with existing posts, 45° alignment off the anchor,
+// then the grid.
 // skip = {p,i} point to ignore (the one being dragged / drawn from).
 function snapFence(w, skip, anchor, prevDir){
   guides = null;
@@ -1552,10 +1557,10 @@ function snapFence(w, skip, anchor, prevDir){
       }
     }
     if (best) return best;
+    const g = snapAlign(w, skip);              // posts/corners take priority over angle locking
+    if (g){ guides = g; return g; }
     const a = snapAngle(w, anchor, prevDir);   // no object nearby: try 45° off the anchor
     if (a) return a;
-    const g = snapAlign(w, skip);              // else line up with an existing post/corner
-    if (g){ guides = g; return g; }
   }
   return snapGridPt(w);
 }
