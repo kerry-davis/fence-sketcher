@@ -463,7 +463,9 @@
         <span>End posts <span style="opacity:.5">ⓘ</span></span>
         <span><select id="iEnds" style="min-height:38px;padding:6px">
           <option value="auto">Auto</option>
-          <option value="2">Both ends</option><option value="1">One end</option><option value="0">None</option>
+          <option value="2">Both ends</option>
+          <option value="start">Start point only</option><option value="1">End point only</option>
+          <option value="0">None</option>
         </select></span></div>
       <div class="row" id="postShapeWrap" style="display:none">
         <span>Selected post shape</span>
@@ -844,6 +846,10 @@ const hrOf = mat => ({ on: !!mat.handrail, w: mat.hrW ?? DEF.m.hrW, t: mat.hrT ?
 // already sits on an earlier fence (that junction post is counted once, by the earlier run).
 // 2/1/0 override it by hand when you know the ends are already posted.
 const endsOf = mat => mat.ends == null ? DEF_ENDS : mat.ends;
+const endCount = mat => endsOf(mat) === 'auto' ? 2 : endsOf(mat) === 'start' ? 1 : +endsOf(mat);
+const endsLabel = mat => ({
+  auto:'Auto', 2:'Both ends', start:'Start point only', 1:'End point only', 0:'None',
+})[endsOf(mat)] || 'Auto';
 
 // How many of this run's two ends land on a point of an earlier run.
 function sharedEnds(polys, idx){
@@ -866,6 +872,7 @@ function materialPostEndFlags(polys, idx, mat){
     other.pts.some(q => Math.hypot(q.x-point.x, q.y-point.y) < 1e-4));
   if (ends === 'auto')
     return {start:!shared(pl.pts[0],true), end:!shared(pl.pts[pl.pts.length-1],true)};
+  if (ends === 'start') return {start:true,end:false};
   const count = +ends;
   if (count === 1){
     const startShared = shared(pl.pts[0],false);
@@ -948,7 +955,7 @@ function calcMaterials(polys, defMat){
       if (e === 'auto'){                      // drop only ends already posted by an earlier fence
         const dropped = sharedEnds(polys, idx);
         pPosts -= dropped; shared += dropped;
-      } else pPosts = Math.max(0, pPosts - (2 - e));
+      } else pPosts = Math.max(0, pPosts - (2 - endCount(mat)));
     }
     const pw = mat.paling + mat.gap;
     // rail-style fence (or paling width 0) has no boards to count
@@ -1236,6 +1243,8 @@ function freezeTree(value){
   chk(!ep.start && ep.end, '3D auto end posts omit an earlier shared post');
   ep = postEndFlags(joined, 1, {ends:2});
   chk(ep.start && ep.end, '3D both-ends override keeps both ends');
+  ep = postEndFlags(joined, 1, {ends:'start'});
+  chk(ep.start && !ep.end, '3D start-only override keeps the first endpoint');
   // 3 rails, 100 mm deep, 350 mm gaps, 150 mm off the ground -> centres 200/650/1100 mm
   const ry = railYs({rails:3, railW:0.1, railGap:0.35, botOff:0.15});
   chk(ry.length===3 && near(ry[0],0.2) && near(ry[2],1.1), '3D rail heights');
@@ -2023,6 +2032,7 @@ function postEndFlags(polys, idx, mat){
   if (pl.closed) return { start:true, end:true };
   const e = endsOf(mat);
   if (e !== 'auto'){
+    if (e === 'start') return {start:true,end:false};
     const n = +e;
     if (n === 1){
       const shared = q => polys.some((other,j) => j !== idx &&
@@ -2537,7 +2547,7 @@ function updateTotals(){
   // per-fence breakdown, once there's more than one line
   const cur = matScope().idx;
   $('perFence').innerHTML = (m.per.length > 1 || m.per.some(f => f.excluded)) ? m.per.map(f =>
-    `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${state.polys[f.i].hidden3d ? 'Hidden in 3D · ' : ''}${f.excluded ? 'Excluded from materials' : `${f.squarePosts} square · ${f.roundPosts} round · ${f.panels} panels · ${f.gates} gates · end posts: ${endsOf(f.mat)}`}">` +
+    `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${state.polys[f.i].hidden3d ? 'Hidden in 3D · ' : ''}${f.excluded ? 'Excluded from materials' : `${f.squarePosts} square · ${f.roundPosts} round · ${f.panels} panels · ${f.gates} gates · end posts: ${endsLabel(f.mat)}`}">` +
     `<span>${escHTML(f.name)}${state.polys[f.i].hidden3d ? ' ◌' : ''}${f.excluded ? '' : (f.own ? ' ⚙' : '') + (endsOf(f.mat) === 'auto' ? '' : ' ✂')}</span>` +
     `<span>${f.excluded ? 'Not in materials' : `${fmtLen(f.len, u)} · ${f.posts} posts`}</span></div>`).join('') : '';
   $('tLen').textContent = fmtLen(m.fenceLen, u);
@@ -2576,7 +2586,7 @@ function syncReadOnlyDetails(){
     ['Height', fmtLen(M.height,u)],
     ['Post spacing', fmtLen(M.spacing,u)],
     ['Post shape', postShapeOf(M) === 'round' ? 'Round' : 'Square'],
-    ['End posts', String(endsOf(M) === 'auto' ? 'Auto' : endsOf(M))],
+    ['End posts', endsLabel(M)],
     ['3D visibility', sc.pl.hidden3d ? 'Hidden' : 'Shown'],
     ['Rails per panel', String(M.rails)],
   ];
@@ -2795,9 +2805,11 @@ function updateSelbox(){
   } else {
     const pl = state.polys[sel.p];
     // an end of an open run can be picked back up and drawn from
-    const isEnd = pl && !pl.closed && (sel.i === 0 || sel.i === pl.pts.length-1);
+    const isStart = pl && !pl.closed && sel.i === 0;
+    const isFinish = pl && !pl.closed && sel.i === pl.pts.length-1;
+    const isEnd = isStart || isFinish;
     if (key !== lastSelKey){
-      box.innerHTML = '<h2>Selected fence point</h2>' +
+      box.innerHTML = '<h2>Selected '+(isStart ? 'start point' : isFinish ? 'end point' : 'fence point')+'</h2>' +
         (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
         '<p class="note">Drag to move. Deleting it joins the neighbouring segments.</p>';
       if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
@@ -3318,7 +3330,8 @@ $('iHR').addEventListener('change', e => {
   syncMatInputs(); updateAll();
 });
 $('iEnds').addEventListener('change', e => {
-  const M = curMat(), value = e.target.value === 'auto' ? 'auto' : +e.target.value;
+  const M = curMat(), value = e.target.value === 'auto' || e.target.value === 'start'
+    ? e.target.value : +e.target.value;
   commitEdit(() => M.ends = value);
   updateAll();
 });

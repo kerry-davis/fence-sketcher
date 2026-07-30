@@ -26,6 +26,8 @@ test('round post settings render and split the materials count by shape', () => 
       return Array.from({length:count}, (_,i) => [i,pl.pts[i],pl.pts[(i+1)%pl.pts.length]]);
     },
     endsOf:mat => mat.ends ?? 'auto',
+    endCount:mat => (mat.ends ?? 'auto') === 'auto' ? 2
+      : mat.ends === 'start' ? 1 : +mat.ends,
     hrOf:() => ({on:false}),
     norm3:v => {
       const length = Math.hypot(...v) || 1;
@@ -82,6 +84,18 @@ test('round post settings render and split the materials count by shape', () => 
     {closed:false, pts:[{x:0,y:0,postShape:'square'}, {x:1,y:0}]},
   ], {...mat, postShape:'round'});
   assert.equal(materials.squarePosts, 1);
+  assert.equal(materials.roundPosts, 1);
+
+  materials = context.calcMaterials([
+    {closed:false, pts:[{x:0,y:0,postShape:'square'}, {x:1,y:0}]},
+  ], {...mat, ends:'start', postShape:'round'});
+  assert.equal(materials.squarePosts, 1);
+  assert.equal(materials.roundPosts, 0);
+
+  materials = context.calcMaterials([
+    {closed:false, pts:[{x:0,y:0,postShape:'square'}, {x:1,y:0}]},
+  ], {...mat, ends:1, postShape:'round'});
+  assert.equal(materials.squarePosts, 0);
   assert.equal(materials.roundPosts, 1);
 
   materials = context.calcMaterials([

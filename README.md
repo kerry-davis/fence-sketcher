@@ -68,8 +68,9 @@ spacing:
 - An open run adds **one more** for its starting post.
 - Where two runs meet at a point, that **junction post is counted once**.
 - **End posts** default to `Auto` (count both ends, except one already posted by
-  an earlier fence). Override with Both / One / None when the ends are already
-  posted — fixed to a building, say.
+  an earlier fence). Override with Both / Start point only / End point only /
+  None when the ends are already posted — fixed to a building, say. Selecting
+  an endpoint in plan identifies whether it is the run's start or end point.
 - **Post shape** can be square or round for a complete fence run. Selecting an
   individual post allows that one point to inherit the fence setting or override
   it as square or round. The materials summary counts each shape separately.
