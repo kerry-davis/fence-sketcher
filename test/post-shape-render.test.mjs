@@ -65,6 +65,8 @@ test('round post settings render and split the materials count by shape', () => 
   const squareFaces = faces(false);
   context.state.polys[1].mat = {...mat, postShape:'round'};
   assert.equal(context.build3().length - squareFaces, 12);
+  context.state.polys.forEach(poly => poly.hidden3d = true);
+  assert.equal(context.build3().length, 0);
 
   const materialStart = html.indexOf('function sharedEnds(');
   const materialEnd = html.indexOf('// Delete point i', materialStart);
@@ -108,6 +110,17 @@ test('round post settings render and split the materials count by shape', () => 
   assert.equal(materials.posts, 2);
   assert.equal(materials.squarePosts, 2);
   assert.equal(materials.roundPosts, 0);
+
+  const visibleMaterials = context.calcMaterials([
+    {closed:false, pts:[{x:0,y:0}, {x:1,y:0}]},
+  ], {...mat, postShape:'square'});
+  const hiddenMaterials = context.calcMaterials([
+    {closed:false, hidden3d:true, pts:[{x:0,y:0}, {x:1,y:0}]},
+  ], {...mat, postShape:'square'});
+  assert.deepEqual(
+    {posts:hiddenMaterials.posts, square:hiddenMaterials.squarePosts, round:hiddenMaterials.roundPosts},
+    {posts:visibleMaterials.posts, square:visibleMaterials.squarePosts, round:visibleMaterials.roundPosts},
+  );
 
   for (const polys of [
     [{closed:true, pts:[{x:0,y:0},{x:2,y:0},{x:2,y:2},{x:0,y:2}]}],

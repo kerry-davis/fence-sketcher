@@ -127,7 +127,7 @@
             background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;
             font-size:13px;cursor:pointer}
   label.own input{width:18px;height:18px;accent-color:var(--accent)}
-  #matIncludeWrap.off{background:var(--card);border-color:var(--line)}
+  #matIncludeWrap.off,#fenceVisibleWrap.off{background:var(--card);border-color:var(--line)}
   #perFence{border-top:1px solid var(--line);margin-top:8px;padding-top:6px}
   #perFence .row{font-size:13px;color:var(--muted);padding:2px 0}
   #perFence .row.cur{color:var(--accent);font-weight:600}
@@ -441,6 +441,10 @@
         <input type="checkbox" id="matInclude" checked> Include this fence in materials</label>
       <p class="note" id="matExcludeNote" style="display:none;margin:0 0 8px">
         Still shown in plan and 3D; excluded from totals and the copied summary.</p>
+      <label id="fenceVisibleWrap" class="own" style="display:none">
+        <input type="checkbox" id="fenceVisible" checked> Show this fence in 3D</label>
+      <p class="note" id="fenceHiddenNote" style="display:none;margin:0 0 8px">
+        Hidden from 3D; retained as a dotted line in the plan and included in materials.</p>
       <label id="matOwnWrap" class="own" style="display:none">
         <input type="checkbox" id="matOwn"> This fence has its own settings</label>
       <p class="note" id="matWho" style="margin:0 0 8px"></p>
@@ -981,7 +985,8 @@ function deleteSegment(polys, p, i){
     const parts = [pl.pts.slice(0, i+1), pl.pts.slice(i+1)]
       .filter(q => q.length >= 2)
       .map(q => ({ pts:q, closed:false, done:true,
-                   excludeMaterials:pl.excludeMaterials || undefined }));
+                   excludeMaterials:pl.excludeMaterials || undefined,
+                   hidden3d:pl.hidden3d || undefined }));
     polys.splice(p, 1, ...parts);
   }
 }
@@ -1392,7 +1397,7 @@ function fenceLabelLayout(pl, p){
   const d = Math.hypot(dx,dy), nx = d ? -dy/d : 0, ny = d ? dx/d : -1;
   const mx = (A.x+B.x)/2, my = (A.y+B.y)/2;
   ctx.save(); ctx.font = '700 11px system-ui';
-  const text = fitCanvasText(fenceBadgeText(pl,p), 116);
+  const text = fitCanvasText((pl.hidden3d ? '◌ ' : '') + fenceBadgeText(pl,p), 116);
   const w = Math.max(28, ctx.measureText(text).width + 14), h = 20, off = 23;
   ctx.restore();
   let x = mx+nx*off, y = my+ny*off;
@@ -1846,9 +1851,10 @@ function doPaint(){
       const isSel = sel && sel.t==='seg' && sel.p===p && sel.i===i;
       if (isSel){ ctx.strokeStyle = ACCENT; ctx.lineWidth = 6; ctx.setLineDash([]);
         ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke(); }
+      ctx.globalAlpha = pl.hidden3d ? .45 : 1;
       ctx.strokeStyle = a.gateAfter ? C.gate : C.fence;
       ctx.lineWidth = 2.5;
-      ctx.setLineDash(a.gateAfter ? [8,6] : []);
+      ctx.setLineDash(pl.hidden3d ? [2,5] : a.gateAfter ? [8,6] : []);
       ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
       ctx.setLineDash([]);
       // label — fixed screen size so it stays readable at any zoom
@@ -1867,23 +1873,27 @@ function doPaint(){
         ctx.fillText(label, 0, -7);
         ctx.restore();
       }
+      ctx.globalAlpha = 1;
     }
     // points
     pl.pts.forEach((q, i) => {
       const S = W2S(q);
       const isSel = sel && sel.t==='pt' && sel.p===p && sel.i===i;
       const r = isSel ? 8 : 5.5;
+      ctx.globalAlpha = pl.hidden3d && !isSel ? .45 : 1;
       ctx.beginPath();
       if (postShapeAt(state.polys,q,pl.mat || state.mat) === 'round')
         ctx.arc(S.x, S.y, r, 0, 7);
       else ctx.rect(S.x-r, S.y-r, r*2, r*2);
       ctx.fillStyle = isSel ? ACCENT : C.ptFill; ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = isSel ? ACCENT : C.fence; ctx.stroke();
+      ctx.globalAlpha = 1;
     });
     // Match the per-fence materials list to the plan with a compact badge.
     const tag = fenceLabelLayout(pl, p);
     if (tag){
       const {text,x,y,w,h,mx,my} = tag;
+      ctx.globalAlpha = pl.hidden3d ? .65 : 1;
       ctx.font = '700 11px system-ui';
       ctx.setLineDash([]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(mx,my); ctx.lineTo(x,y); ctx.stroke();
@@ -1892,6 +1902,7 @@ function doPaint(){
       ctx.fillStyle = ACCENT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(text, x, y+.5);
       ctx.textBaseline = 'alphabetic';
+      ctx.globalAlpha = 1;
     }
   });
 
@@ -2195,12 +2206,13 @@ function pushGate(F, a, b, H, mat){
 }
 function build3(){
   const F = [], posts = new Map();             // keyed by position: shared posts drawn once
+  const visiblePolys = state.polys.filter(pl => !pl.hidden3d);
   for (const g of houseGroups(state.builds)) pushHouse(F, state.builds, g);
-  state.polys.forEach((pl, p) => {
+  visiblePolys.forEach((pl, p) => {
     if (pl.pts.length < 2) return;
     const mat = pl.mat || state.mat;
     const H = Math.max(0.2, mat.height), sp = Math.max(0.1, mat.spacing);
-    const ends = postEndFlags(state.polys, p, mat);
+    const ends = postEndFlags(visiblePolys, p, mat);
     for (const [i,a,b] of segsOf(pl)){
       const L = segLen(a,b);
       if (L < 1e-6) continue;
@@ -2215,7 +2227,7 @@ function build3(){
           Math.hypot(post.q.x-q.x, post.q.y-q.y) < 1e-4);
         const key = shared ? shared[0] : q.x.toFixed(4)+','+q.y.toFixed(4);
         const old = shared && shared[1];
-        const explicitShape = explicitPostShapeAt(state.polys,q);
+        const explicitShape = explicitPostShapeAt(visiblePolys,q);
         const shape = explicitShape || (old ? old.shape : postShapeOf(mat));
         if (!old || H > old.H)
           posts.set(key, { q, H, ang, shape });
@@ -2319,6 +2331,7 @@ function drawFenceLabels3(B){
   fenceLabels3 = [];
   if (!showFenceLabels3) return;
   state.polys.forEach((pl, p) => {
+    if (pl.hidden3d) return;
     const segment = fenceLabelSegment(pl);
     if (!segment) return;
     const [i,a,b] = segment, H = Math.max(0.2, (pl.mat || state.mat).height);
@@ -2470,7 +2483,8 @@ function camPan(dx, dy){
 }
 function fit3(){
   let xs = [], ys = [];
-  for (const pl of state.polys) for (const q of pl.pts){ xs.push(q.x); ys.push(q.y); }
+  for (const pl of state.polys) if (!pl.hidden3d)
+    for (const q of pl.pts){ xs.push(q.x); ys.push(q.y); }
   for (const b of state.builds){ xs.push(b.x, b.x+b.w); ys.push(b.y, b.y+b.h); }
   if (!xs.length){ cam.tx = cam.tz = 0; cam.dist = 30; }
   else {
@@ -2523,8 +2537,8 @@ function updateTotals(){
   // per-fence breakdown, once there's more than one line
   const cur = matScope().idx;
   $('perFence').innerHTML = (m.per.length > 1 || m.per.some(f => f.excluded)) ? m.per.map(f =>
-    `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${f.excluded ? 'Excluded from materials' : `${f.squarePosts} square · ${f.roundPosts} round · ${f.panels} panels · ${f.gates} gates · end posts: ${endsOf(f.mat)}`}">` +
-    `<span>${escHTML(f.name)}${f.excluded ? '' : (f.own ? ' ⚙' : '') + (endsOf(f.mat) === 'auto' ? '' : ' ✂')}</span>` +
+    `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${state.polys[f.i].hidden3d ? 'Hidden in 3D · ' : ''}${f.excluded ? 'Excluded from materials' : `${f.squarePosts} square · ${f.roundPosts} round · ${f.panels} panels · ${f.gates} gates · end posts: ${endsOf(f.mat)}`}">` +
+    `<span>${escHTML(f.name)}${state.polys[f.i].hidden3d ? ' ◌' : ''}${f.excluded ? '' : (f.own ? ' ⚙' : '') + (endsOf(f.mat) === 'auto' ? '' : ' ✂')}</span>` +
     `<span>${f.excluded ? 'Not in materials' : `${fmtLen(f.len, u)} · ${f.posts} posts`}</span></div>`).join('') : '';
   $('tLen').textContent = fmtLen(m.fenceLen, u);
   $('tSegs').textContent = m.segCount;
@@ -2563,6 +2577,7 @@ function syncReadOnlyDetails(){
     ['Post spacing', fmtLen(M.spacing,u)],
     ['Post shape', postShapeOf(M) === 'round' ? 'Round' : 'Square'],
     ['End posts', String(endsOf(M) === 'auto' ? 'Auto' : endsOf(M))],
+    ['3D visibility', sc.pl.hidden3d ? 'Hidden' : 'Shown'],
     ['Rails per panel', String(M.rails)],
   ];
   if (M.style === 'rail'){
@@ -2606,6 +2621,10 @@ function syncMatInputs(){
   $('matInclude').checked = !sc.pl || !sc.pl.excludeMaterials;
   $('matIncludeWrap').classList.toggle('off', !!(sc.pl && sc.pl.excludeMaterials));
   $('matExcludeNote').style.display = sc.pl && sc.pl.excludeMaterials ? '' : 'none';
+  $('fenceVisibleWrap').style.display = sc.pl ? 'flex' : 'none';
+  $('fenceVisible').checked = !sc.pl || !sc.pl.hidden3d;
+  $('fenceVisibleWrap').classList.toggle('off', !!(sc.pl && sc.pl.hidden3d));
+  $('fenceHiddenNote').style.display = sc.pl && sc.pl.hidden3d ? '' : 'none';
   $('matOwnWrap').style.display = sc.pl ? 'flex' : 'none';
   $('matOwn').checked = sc.own;
   $('matWho').textContent = !sc.pl ? 'Editing the defaults — used by every fence without its own settings.'
@@ -3324,6 +3343,12 @@ $('matInclude').addEventListener('change', e => {
   if (!sc.pl) return;
   pushUndo();
   sc.pl.excludeMaterials = e.target.checked ? undefined : true;
+  updateAll();
+});
+$('fenceVisible').addEventListener('change', e => {
+  const sc = matScope();
+  if (!sc.pl) return;
+  commitEdit(() => sc.pl.hidden3d = e.target.checked ? undefined : true);
   updateAll();
 });
 $('matOwn').addEventListener('change', e => {

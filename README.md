@@ -14,8 +14,8 @@ created view-only snapshots without exposing the private backup API.
 **Draw the fence.** Tap to drop posts, tap the first post to close a loop,
 double-tap or `Esc` to finish a run. Drag anything to move it. Points snap to
 existing posts and building corners, then to fence lines and building edges,
-then to 45°/90° rays off the last post, then to alignment with any existing
-post (with dashed guides), then to the grid — first match wins.
+then to alignment with any existing post (with dashed guides), then to
+45°/90° rays off the last post, then to the grid — first match wins.
 
 **Get the quantities.** Live totals for posts, rails, palings, handrail metres,
 gates and corners, with the working shown ("13 panels, 1 corner, 1 gate").
@@ -40,6 +40,8 @@ with the list.
   to its corners and edges. Excluded from materials.
 - **Exact lengths.** Type a segment length and the far end moves along its line;
   lock it so dragging a neighbouring post can't change it.
+- **Per-fence 3D visibility.** Hide a fence from the 3D scene while retaining a
+  muted dotted, selectable reference in plan and keeping its materials counted.
 - **Metric or imperial.** Everything is stored in metres; units only affect
   display and parsing. `12'6"`, `12 ft 6 in`, `6"` and bare numbers all parse.
   Fields you haven't touched jump to the sensible default for the new unit
