@@ -1550,30 +1550,51 @@ function pick(sx, sy){
 /* =====================================================================
    Mutations — every one snapshots first so Undo reverses it
    ===================================================================== */
-function pushUndo(){
-  undoStack.push(JSON.stringify({ polys: state.polys, builds: state.builds }));
+function historySnapshot(){
+  return JSON.stringify({
+    unit:state.unit, polys:state.polys, builds:state.builds, mat:state.mat,
+  });
+}
+function pushHistory(snapshot){
+  undoStack.push(snapshot);
   if (undoStack.length > UNDO_MAX) undoStack.shift();
   redoStack = [];
+}
+function pushUndo(){
+  pushHistory(historySnapshot());
+}
+function commitEdit(edit){
+  if (readOnly) return false;
+  const before = historySnapshot();
+  edit();
+  if (historySnapshot() === before) return false;
+  pushHistory(before);
+  return true;
+}
+function restoreHistory(snapshot){
+  const value = JSON.parse(snapshot);
+  state.unit = value.unit === 'ft' ? 'ft' : 'm';
+  state.polys = value.polys;
+  state.builds = value.builds;
+  if (value.mat) state.mat = value.mat;
 }
 function undo(){
   if (readOnly) return;
   const s = undoStack.pop();
   if (!s) return;
-  redoStack.push(JSON.stringify({ polys: state.polys, builds: state.builds }));
+  redoStack.push(historySnapshot());
   if (redoStack.length > UNDO_MAX) redoStack.shift();
-  const o = JSON.parse(s);
-  state.polys = o.polys; state.builds = o.builds;
-  sel = null; bsel.clear(); updateAll();
+  restoreHistory(s);
+  sel = null; bsel.clear(); syncControls(); updateAll();
 }
 function redo(){
   if (readOnly) return;
   const s = redoStack.pop();
   if (!s) return;
-  undoStack.push(JSON.stringify({ polys: state.polys, builds: state.builds }));
+  undoStack.push(historySnapshot());
   if (undoStack.length > UNDO_MAX) undoStack.shift();
-  const o = JSON.parse(s);
-  state.polys = o.polys; state.builds = o.builds;
-  sel = null; bsel.clear(); updateAll();
+  restoreHistory(s);
+  sel = null; bsel.clear(); syncControls(); updateAll();
 }
 // Polyline currently being drawn: the last one, if still open and not finished.
 function drawTarget(){
@@ -2529,6 +2550,7 @@ function updateSelbox(){
       });
       $('iLock').addEventListener('change', e => {
         if (sel && sel.t==='seg'){
+          pushUndo();
           const pt = state.polys[sel.p].pts[sel.i];
           pt.lockAfter = e.target.checked ? segLen(pt, state.polys[sel.p].pts[(sel.i+1)%state.polys[sel.p].pts.length]) : null;
           updateAll();
@@ -3016,16 +3038,19 @@ function updateHint(){
 document.querySelectorAll('#unitTog button').forEach(b =>
   b.addEventListener('click', () => {
     if (state.unit === b.dataset.u) return;
-    state.unit = b.dataset.u;
     if (readOnly){
+      state.unit = b.dataset.u;
       document.querySelectorAll('#unitTog button').forEach(x => x.classList.toggle('on', x === b));
       syncMatInputs(); updateAll();
       return;
     }
-    // untouched materials fields jump to the sensible default for the new unit (2.4 m ↔ 8 ft)
-    for (const f of ['spacing','paling','gap','height','railW','railGap','botOff','topOff','hrW','hrT'])
-      for (const M of [state.mat, ...state.polys.map(p => p.mat).filter(Boolean)])
-        if (!(M.touched || {})[f]) M[f] = DEF[state.unit][f];
+    commitEdit(() => {
+      state.unit = b.dataset.u;
+      // untouched materials fields jump to the sensible default for the new unit (2.4 m ↔ 8 ft)
+      for (const f of ['spacing','paling','gap','height','railW','railGap','botOff','topOff','hrW','hrT'])
+        for (const M of [state.mat, ...state.polys.map(p => p.mat).filter(Boolean)])
+          if (!(M.touched || {})[f]) M[f] = DEF[state.unit][f];
+    });
     document.querySelectorAll('#unitTog button').forEach(x => x.classList.toggle('on', x === b));
     syncMatInputs(); updateAll();
   }));
@@ -3089,19 +3114,23 @@ $('iFenceName').addEventListener('change', e => {
 $('iSpacing').addEventListener('change', e => {
   const v = parseLen(e.target.value, state.unit);
   const M = curMat();
-  if (v != null && v > 0.1){ M.spacing = v; M.touched.spacing = true; }
+  if (v != null && v > 0.1) commitEdit(() => {
+    M.spacing = v; M.touched.spacing = true;
+  });
   syncMatInputs(); updateAll();
 });
 $('iRails').addEventListener('change', e => {
   const v = parseInt(e.target.value, 10);
   if (v >= 1 && v <= 10){
     const M = curMat();
-    M.rails = v;
-    // rail mode: fewer rails over the same height means bigger gaps — keep the field honest
-    if (M.style === 'rail'){
-      M.railGap = derivedGap(M, v);
-      M.touched.railGap = true;
-    }
+    commitEdit(() => {
+      M.rails = v;
+      // rail mode: fewer rails over the same height means bigger gaps — keep the field honest
+      if (M.style === 'rail'){
+        M.railGap = derivedGap(M, v);
+        M.touched.railGap = true;
+      }
+    });
   }
   syncMatInputs(); updateAll();
 });
@@ -3111,37 +3140,44 @@ for (const [id, f] of [['iPaling','paling'], ['iGap','gap'], ['iRailW','railW'],
   $(id).addEventListener('change', e => {
     const v = parseSmall(e.target.value, state.unit);
     const M = curMat();
-    if (v != null && v >= 0){ M[f] = v; M.touched[f] = true; }  // paling width 0 = no palings
-    if (M.style === 'rail'){
-      // rail count + rail width are user-owned; the GAP is what the model recalculates.
-      // Only a manual gap edit re-derives the count.
-      if (f === 'railGap') M.rails = derivedRails(M);
-      else if (f === 'railW' || f === 'botOff' || f === 'topOff'){
-        M.railGap = derivedGap(M, M.rails);
-        M.touched.railGap = true;
+    if (v != null && v >= 0) commitEdit(() => {
+      M[f] = v; M.touched[f] = true;           // paling width 0 = no palings
+      if (M.style === 'rail'){
+        // rail count + rail width are user-owned; the GAP is what the model recalculates.
+        // Only a manual gap edit re-derives the count.
+        if (f === 'railGap') M.rails = derivedRails(M);
+        else if (f === 'railW' || f === 'botOff' || f === 'topOff'){
+          M.railGap = derivedGap(M, M.rails);
+          M.touched.railGap = true;
+        }
       }
-    }
+    });
     syncMatInputs(); updateAll();
   });
 $('iHeight').addEventListener('change', e => {
   const v = parseLen(e.target.value, state.unit);
   const M = curMat();
-  if (v != null && v > 0.2){ M.height = v; M.touched.height = true; }
-  if (M.style === 'rail'){            // taller fence, same rails -> bigger gaps
-    M.railGap = derivedGap(M, M.rails);
-    M.touched.railGap = true;
-  }
+  if (v != null && v > 0.2) commitEdit(() => {
+    M.height = v; M.touched.height = true;
+    if (M.style === 'rail'){                    // taller fence, same rails -> bigger gaps
+      M.railGap = derivedGap(M, M.rails);
+      M.touched.railGap = true;
+    }
+  });
   syncMatInputs(); updateAll();
 });
 $('iHR').addEventListener('change', e => {
   const M = curMat(), hr = hrOf(M);
-  M.handrail = e.target.checked;
-  M.hrW = hr.w; M.hrT = hr.t;                 // fill in dimensions for pre-handrail saves
-  M.touched.handrail = true;
+  commitEdit(() => {
+    M.handrail = e.target.checked;
+    M.hrW = hr.w; M.hrT = hr.t;               // fill in dimensions for pre-handrail saves
+    M.touched.handrail = true;
+  });
   syncMatInputs(); updateAll();
 });
 $('iEnds').addEventListener('change', e => {
-  curMat().ends = e.target.value === 'auto' ? 'auto' : +e.target.value;
+  const M = curMat(), value = e.target.value === 'auto' ? 'auto' : +e.target.value;
+  commitEdit(() => M.ends = value);
   updateAll();
 });
 $('matInclude').addEventListener('change', e => {
@@ -3163,9 +3199,11 @@ $('matOwn').addEventListener('change', e => {
 document.querySelectorAll('#styleTog button').forEach(b =>
   b.addEventListener('click', () => {
     const M = curMat();
-    M.style = b.dataset.s;
-    // entering rail mode keeps the rail count and derives the gap that spreads them
-    if (b.dataset.s === 'rail') M.railGap = derivedGap(M, M.rails);
+    commitEdit(() => {
+      M.style = b.dataset.s;
+      // entering rail mode keeps the rail count and derives the gap that spreads them
+      if (b.dataset.s === 'rail') M.railGap = derivedGap(M, M.rails);
+    });
     syncMatInputs(); updateAll();
   }));
 
