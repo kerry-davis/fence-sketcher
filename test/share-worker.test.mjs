@@ -36,14 +36,18 @@ const snapshot = {
 
 function fixture() {
   const SHARES = new MemoryKV();
+  const assetPaths = [];
   const env = {
     SHARES,
     SHARE_ADMIN_TOKEN: 'a-secure-admin-token-that-is-long-enough',
     PUBLIC_ORIGIN: 'https://fences.example',
     ASSETS: {
-      fetch: async () => new Response('<!doctype html><title>Fence</title>', {
-        headers: { 'content-type': 'text/html' },
-      }),
+      fetch: async request => {
+        assetPaths.push(new URL(request.url).pathname);
+        return new Response('<!doctype html><title>Fence</title>', {
+          headers: { 'content-type': 'text/html' },
+        });
+      },
     },
   };
   const call = (path, options = {}) => worker.fetch(
@@ -56,7 +60,7 @@ function fixture() {
       ...options.headers,
     },
   });
-  return { env, SHARES, call, admin };
+  return { env, SHARES, call, admin, assetPaths };
 }
 
 test('admin authentication conceals management routes', async () => {
@@ -115,12 +119,13 @@ test('share lifecycle creates, reads, updates, and revokes a snapshot', async ()
 });
 
 test('viewer route serves hardened HTML and no other files', async () => {
-  const { call } = fixture();
+  const { call, assetPaths } = fixture();
   const token = 'A'.repeat(43);
   const response = await call(`/share/${token}`);
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(assetPaths, ['/']);
   assert.equal((await call('/backups')).status, 404);
 });
 
