@@ -99,6 +99,13 @@ test('round post settings render and split the materials count by shape', () => 
   assert.equal(materials.roundPosts, 1);
 
   materials = context.calcMaterials([
+    {closed:false, pts:[{x:0,y:0,postShape:'square'}, {x:1,y:0}]},
+    {closed:false, pts:[{x:2,y:0}, {x:1,y:0}]},
+  ], {...mat, ends:1, postShape:'round'});
+  assert.equal(materials.per[0].squarePosts, 0);
+  assert.equal(materials.per[0].roundPosts, 1);
+
+  materials = context.calcMaterials([
     {closed:false, pts:[{x:0,y:0}, {x:1,y:0}]},
     {closed:false, pts:[{x:1,y:0}, {x:2,y:0}],
      mat:{...mat, ends:'auto', postShape:'round'}},

@@ -459,13 +459,18 @@
         <span><select id="iFencePostShape" style="min-height:38px;padding:6px">
           <option value="square">Square</option><option value="round">Round</option>
         </select></span></div>
-      <div class="row" title="Posts at the ends of a run. Auto counts both ends but skips one that already sits on another fence. One end uses the unshared end when possible.">
+      <div class="row" title="Posts at the ends of a run. Auto skips an end already posted by another fence. One end lets you choose the physical end.">
         <span>End posts <span style="opacity:.5">ⓘ</span></span>
         <span><select id="iEnds" style="min-height:38px;padding:6px">
           <option value="auto">Auto</option>
           <option value="2">Both ends</option>
-          <option value="start">Start point only</option><option value="1">End point only</option>
+          <option value="one">One end</option>
           <option value="0">None</option>
+        </select></span></div>
+      <div class="row" id="oneEndWrap" style="display:none">
+        <span>Post at</span>
+        <span><select id="iOneEnd" style="min-height:38px;padding:6px">
+          <option value="start">First end</option><option value="end">Second end</option>
         </select></span></div>
       <div class="row" id="postShapeWrap" style="display:none">
         <span>Selected post shape</span>
@@ -844,12 +849,30 @@ const hrOf = mat => ({ on: !!mat.handrail, w: mat.hrW ?? DEF.m.hrW, t: mat.hrT ?
 
 // How many of an open run's two end posts to count. 'auto' = count both, except an end that
 // already sits on an earlier fence (that junction post is counted once, by the earlier run).
-// 2/1/0 override it by hand when you know the ends are already posted.
+// 2/'start'/1/0 override it by hand when you know the ends are already posted.
 const endsOf = mat => mat.ends == null ? DEF_ENDS : mat.ends;
 const endCount = mat => endsOf(mat) === 'auto' ? 2 : endsOf(mat) === 'start' ? 1 : +endsOf(mat);
-const endsLabel = mat => ({
-  auto:'Auto', 2:'Both ends', start:'Start point only', 1:'End point only', 0:'None',
-})[endsOf(mat)] || 'Auto';
+function physicalEndLabels(pl){
+  if (!pl || pl.closed || pl.pts.length < 2) return {start:'First end',end:'Second end'};
+  const start=pl.pts[0], end=pl.pts[pl.pts.length-1];
+  const dx=end.x-start.x, dy=end.y-start.y, ax=Math.abs(dx), ay=Math.abs(dy);
+  if (ax >= ay*2)
+    return dx >= 0 ? {start:'Left end',end:'Right end'} : {start:'Right end',end:'Left end'};
+  if (ay >= ax*2)
+    return dy >= 0 ? {start:'Top end',end:'Bottom end'} : {start:'Bottom end',end:'Top end'};
+  const label = (horizontal,vertical) =>
+    vertical[0].toUpperCase()+vertical.slice(1)+'-'+horizontal+' end';
+  return {
+    start:label(dx >= 0 ? 'left' : 'right',dy >= 0 ? 'top' : 'bottom'),
+    end:label(dx >= 0 ? 'right' : 'left',dy >= 0 ? 'bottom' : 'top'),
+  };
+}
+function endsLabel(mat,pl){
+  const ends=endsOf(mat);
+  if (ends === 'start' || ends === 1)
+    return physicalEndLabels(pl)[ends === 'start' ? 'start' : 'end'] + ' only';
+  return ({auto:'Auto',2:'Both ends',0:'None'})[ends] || 'Auto';
+}
 
 // How many of this run's two ends land on a point of an earlier run.
 function sharedEnds(polys, idx){
@@ -874,11 +897,6 @@ function materialPostEndFlags(polys, idx, mat){
     return {start:!shared(pl.pts[0],true), end:!shared(pl.pts[pl.pts.length-1],true)};
   if (ends === 'start') return {start:true,end:false};
   const count = +ends;
-  if (count === 1){
-    const startShared = shared(pl.pts[0],false);
-    const endShared = shared(pl.pts[pl.pts.length-1],false);
-    if (startShared !== endShared) return {start:!startShared, end:!endShared};
-  }
   return {start:count === 2, end:count >= 1};
 }
 
@@ -1238,7 +1256,7 @@ function freezeTree(value){
   chk(!ep.start && ep.end, '3D one-end override keeps the far end');
   ep = postEndFlags([{pts:[{x:19.8,y:10.75},{x:18.3,y:10.75}],closed:false},
                      {pts:[{x:17.8,y:10.75},{x:18.3,y:10.75}],closed:false}], 0, {ends:1});
-  chk(ep.start && !ep.end, '3D one-end override prefers the unshared end');
+  chk(!ep.start && ep.end, '3D one-end override keeps the selected physical end');
   ep = postEndFlags(joined, 1, {ends:'auto'});
   chk(!ep.start && ep.end, '3D auto end posts omit an earlier shared post');
   ep = postEndFlags(joined, 1, {ends:2});
@@ -2025,8 +2043,8 @@ function postsAlong(a, b, spacing, gate){
   for (let k = 0; k <= n; k++) out.push({ x: a.x+(b.x-a.x)*k/n, y: a.y+(b.y-a.y)*k/n });
   return out;
 }
-// Which ends of an open run get a post in 3D. "One end" uses the unshared end when only
-// one is already joined; otherwise it keeps the far end. Auto matches calcMaterials/sharedEnds.
+// Which ends of an open run get a post in 3D. Explicit one-end choices keep exactly the
+// selected physical end. Auto matches calcMaterials/sharedEnds.
 function postEndFlags(polys, idx, mat){
   const pl = polys[idx];
   if (pl.closed) return { start:true, end:true };
@@ -2034,12 +2052,6 @@ function postEndFlags(polys, idx, mat){
   if (e !== 'auto'){
     if (e === 'start') return {start:true,end:false};
     const n = +e;
-    if (n === 1){
-      const shared = q => polys.some((other,j) => j !== idx &&
-        other.pts.some(r => Math.hypot(r.x-q.x, r.y-q.y) < 1e-4));
-      const startShared = shared(pl.pts[0]), endShared = shared(pl.pts[pl.pts.length-1]);
-      if (startShared !== endShared) return { start:!startShared, end:!endShared };
-    }
     return { start:n === 2, end:n >= 1 };
   }
   const shared = q => polys.slice(0,idx).some(prev =>
@@ -2547,7 +2559,7 @@ function updateTotals(){
   // per-fence breakdown, once there's more than one line
   const cur = matScope().idx;
   $('perFence').innerHTML = (m.per.length > 1 || m.per.some(f => f.excluded)) ? m.per.map(f =>
-    `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${state.polys[f.i].hidden3d ? 'Hidden in 3D · ' : ''}${f.excluded ? 'Excluded from materials' : `${f.squarePosts} square · ${f.roundPosts} round · ${f.panels} panels · ${f.gates} gates · end posts: ${endsLabel(f.mat)}`}">` +
+    `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${state.polys[f.i].hidden3d ? 'Hidden in 3D · ' : ''}${f.excluded ? 'Excluded from materials' : `${f.squarePosts} square · ${f.roundPosts} round · ${f.panels} panels · ${f.gates} gates · end posts: ${endsLabel(f.mat,state.polys[f.i])}`}">` +
     `<span>${escHTML(f.name)}${state.polys[f.i].hidden3d ? ' ◌' : ''}${f.excluded ? '' : (f.own ? ' ⚙' : '') + (endsOf(f.mat) === 'auto' ? '' : ' ✂')}</span>` +
     `<span>${f.excluded ? 'Not in materials' : `${fmtLen(f.len, u)} · ${f.posts} posts`}</span></div>`).join('') : '';
   $('tLen').textContent = fmtLen(m.fenceLen, u);
@@ -2586,7 +2598,7 @@ function syncReadOnlyDetails(){
     ['Height', fmtLen(M.height,u)],
     ['Post spacing', fmtLen(M.spacing,u)],
     ['Post shape', postShapeOf(M) === 'round' ? 'Round' : 'Square'],
-    ['End posts', endsLabel(M)],
+    ['End posts', endsLabel(M,sc.pl)],
     ['3D visibility', sc.pl.hidden3d ? 'Hidden' : 'Shown'],
     ['Rails per panel', String(M.rails)],
   ];
@@ -2647,7 +2659,15 @@ function syncMatInputs(){
   set('iRails', M.rails);
   if (document.activeElement !== $('iFencePostShape'))
     $('iFencePostShape').value = postShapeOf(M);
-  if (document.activeElement !== $('iEnds')) $('iEnds').value = String(endsOf(M));
+  const ends = endsOf(M), oneEnd = ends === 'start' || ends === 1;
+  if (document.activeElement !== $('iEnds'))
+    $('iEnds').value = oneEnd ? 'one' : String(ends);
+  $('oneEndWrap').style.display = oneEnd ? 'flex' : 'none';
+  const endLabels = physicalEndLabels(sc.pl);
+  $('iOneEnd').options[0].textContent = endLabels.start;
+  $('iOneEnd').options[1].textContent = endLabels.end;
+  if (document.activeElement !== $('iOneEnd'))
+    $('iOneEnd').value = ends === 'start' ? 'start' : 'end';
   const selectedPoint = sel && sel.t === 'pt' && state.polys[sel.p] &&
                         state.polys[sel.p].pts[sel.i];
   $('postShapeWrap').style.display = selectedPoint ? 'flex' : 'none';
@@ -2808,8 +2828,9 @@ function updateSelbox(){
     const isStart = pl && !pl.closed && sel.i === 0;
     const isFinish = pl && !pl.closed && sel.i === pl.pts.length-1;
     const isEnd = isStart || isFinish;
+    const endLabels = physicalEndLabels(pl);
     if (key !== lastSelKey){
-      box.innerHTML = '<h2>Selected '+(isStart ? 'start point' : isFinish ? 'end point' : 'fence point')+'</h2>' +
+      box.innerHTML = '<h2>Selected '+(isStart ? endLabels.start : isFinish ? endLabels.end : 'fence point')+'</h2>' +
         (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
         '<p class="note">Drag to move. Deleting it joins the neighbouring segments.</p>';
       if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
@@ -3330,9 +3351,16 @@ $('iHR').addEventListener('change', e => {
   syncMatInputs(); updateAll();
 });
 $('iEnds').addEventListener('change', e => {
-  const M = curMat(), value = e.target.value === 'auto' || e.target.value === 'start'
-    ? e.target.value : +e.target.value;
+  const M = curMat(), current = endsOf(M);
+  const value = e.target.value === 'one'
+    ? (current === 'start' ? 'start' : 1)
+    : e.target.value === 'auto' ? 'auto' : +e.target.value;
   commitEdit(() => M.ends = value);
+  updateAll();
+});
+$('iOneEnd').addEventListener('change', e => {
+  const M = curMat();
+  commitEdit(() => M.ends = e.target.value === 'start' ? 'start' : 1);
   updateAll();
 });
 $('iFencePostShape').addEventListener('change', e => {
