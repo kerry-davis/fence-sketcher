@@ -32,6 +32,12 @@
        background:var(--bg);display:flex;flex-direction:column}
   #bar h1{font-size:18px;margin:0 6px 0 0;font-weight:650;white-space:nowrap}
   .grp{display:flex;gap:6px;align-items:center}
+  #viewOnlyBadge{display:none;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;
+                 color:var(--accent);background:var(--accent-soft);font-size:12px;font-weight:700}
+  body.readonly #viewOnlyBadge{display:inline-flex}
+  body.readonly .editorOnly{display:none!important}
+  body.readonly canvas{cursor:grab}
+  body.readonly canvas:active{cursor:grabbing}
 
   /* big touch-friendly buttons */
   button,.tog label{min-height:44px}
@@ -158,6 +164,7 @@
   .bkPrimaryActions{display:grid;grid-template-columns:1.15fr 1fr;gap:8px;padding:0 16px 16px}
   .bkPrimaryActions button{width:100%;border-radius:11px}
   #bkSaveAs{background:var(--bg)}
+  #bkShare{display:none;width:calc(100% - 32px);margin:0 16px 16px}
   .bkLibrary{padding:15px 16px 16px;border-top:1px solid var(--line)}
   .bkLibrary>label{margin-bottom:7px}
   #bkList{width:100%;background:var(--bg);border-radius:11px}
@@ -176,6 +183,26 @@
   .bkSync strong{color:var(--ink);font-weight:620}
   #bkStatus[data-kind="error"], #bkDialogError{color:#b91c1c}
   #bkStatus[data-kind="success"]{color:var(--accent)}
+  #readOnlyDetails{display:none}
+  body.readonly #readOnlyDetails{display:block}
+  #readOnlyDetails .empty{color:var(--muted);font-size:13px;margin:0}
+  .shareExpiry{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}
+  .shareExpiry select{flex:0 0 150px}
+  .shareLinkRow{display:flex;gap:8px;margin-top:5px}
+  .shareLinkRow input{min-width:0;flex:1}
+  .shareLinkRow button{flex:none}
+  #shareCreate,#shareUpdate{width:100%}
+  #shareActive{display:none}
+  .shareActions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+  #shareStop{color:#b91c1c;border-color:#e5c4c4}
+  #shareDialogStatus{min-height:18px;font-size:12px;margin:8px 0 0}
+  #shareDialogStatus[data-kind="error"]{color:#b91c1c}
+  #shareDialogStatus[data-kind="success"]{color:var(--accent)}
+  #shareState{position:absolute;inset:0;z-index:30;display:none;place-items:center;padding:20px;
+              background:var(--card)}
+  #shareState .shareStateCard{max-width:380px;text-align:center}
+  #shareState h2{font-size:20px;margin:0 0 8px}
+  #shareState p{color:var(--muted);margin:0}
   dialog{width:min(420px,calc(100vw - 28px));padding:0;color:var(--ink);background:var(--card);
          border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 60px #0006}
   dialog::backdrop{background:#0009}
@@ -204,6 +231,7 @@
     #bar h1{display:none}
     #bar .grp.sec{display:none}
     #bar.open .grp.sec{display:flex}
+    body.readonly #bar .viewTools{display:flex}
     #bar .toolbarEnd{display:contents}
     #bMore{display:inline-block}
     #bkSec{margin-left:auto}
@@ -226,22 +254,23 @@
 <body>
 
 <div id="bar">
-  <h1>Fence sketcher</h1>
-  <div class="grp">
+  <h1 id="appTitle">Fence sketcher</h1>
+  <span id="viewOnlyBadge">◉ View only</span>
+  <div class="grp editorOnly">
     <button id="bUndo">↩<span class="lbl"> Undo</span></button>
     <button id="bRedo">↪<span class="lbl"> Redo</span></button>
     <button id="bDelSel" class="danger" title="Delete selected">🗑<span class="lbl"> Delete</span></button>
   </div>
-  <button id="bMore" aria-expanded="false">⋯ More</button>
-  <div class="grp sec">
+  <button id="bMore" class="editorOnly" aria-expanded="false">⋯ More</button>
+  <div class="grp sec editorOnly">
     <button id="bBuild">＋ Building</button>
     <button id="bClose">Close loop</button>
   </div>
-  <div class="grp sec">
+  <div class="grp sec editorOnly">
     <button id="bClear" class="danger">Clear all</button>
   </div>
   <div class="grp toolbarEnd">
-    <div class="grp sec units">
+    <div class="grp sec units viewTools">
     <button id="b3d" title="Plan / 3D view">🧊 3D</button>
     <div class="seg2" id="unitTog">
       <button data-u="m"  class="on">Metres</button>
@@ -249,7 +278,7 @@
     </div>
     <button id="bTheme" title="Light / dark mode">🌓</button>
     </div>
-  <details id="bkSec" style="display:none">
+  <details id="bkSec" class="editorOnly" style="display:none">
     <summary id="bkMenuButton">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"
@@ -278,6 +307,7 @@
         <button id="bkSave" class="primary">Save changes</button>
         <button id="bkSaveAs" title="Save as a new drawing">Save as new</button>
       </div>
+      <button id="bkShare">↗ Share view</button>
       <div class="bkLibrary">
         <label for="bkList">Saved drawings</label>
         <select id="bkList" aria-label="Saved drawing"></select>
@@ -313,7 +343,7 @@
   <div id="wrap">
     <canvas id="cv"></canvas>
     <div id="hint"></div>
-    <div id="snapover">
+    <div id="snapover" class="editorOnly">
       <label class="chk"><input type="checkbox" id="cSnapGrid" checked> Snap grid</label>
       <label class="chk"><input type="checkbox" id="cSnapBld" checked> Snap objects</label>
     </div>
@@ -336,10 +366,16 @@
     </div>
     <button id="fdel" title="Delete">✕</button>
     <div id="gridcap" title="Grid spacing adapts automatically as you zoom"></div>
+    <div id="shareState" role="status" aria-live="polite">
+      <div class="shareStateCard">
+        <h2 id="shareStateTitle">Loading shared drawing…</h2>
+        <p id="shareStateText">Fetching the view-only snapshot.</p>
+      </div>
+    </div>
   </div>
 
   <aside>
-    <section id="selbox" style="display:none"></section>
+    <section id="selbox" class="editorOnly" style="display:none"></section>
 
     <section>
       <h2>Totals</h2>
@@ -357,7 +393,12 @@
       <p class="note">Gates and buildings are excluded from materials.</p>
     </section>
 
-    <section id="matSec" class="paling">
+    <section id="readOnlyDetails">
+      <h2>Fence details</h2>
+      <div id="readOnlyDetailsBody"><p class="empty">Select a fence label to inspect it.</p></div>
+    </section>
+
+    <section id="matSec" class="paling editorOnly">
       <h2>Materials</h2>
       <label id="fenceNameWrap" style="display:none">Fence or gate name
         <input id="iFenceName" maxlength="64" autocomplete="off">
@@ -398,7 +439,7 @@
 
     <section>
       <button id="copyBtn" class="primary">📋 Copy summary</button>
-      <p class="note">Saved automatically in this browser.</p>
+      <p class="note" id="saveNote">Saved automatically in this browser.</p>
     </section>
 
   </aside>
@@ -420,6 +461,37 @@
       </div>
     </div>
   </form>
+</dialog>
+
+<dialog id="shareDialog" aria-labelledby="shareDialogTitle">
+  <div class="dialogBody">
+    <h2 id="shareDialogTitle">Share view-only drawing</h2>
+    <p id="shareDialogText">Anyone with the link can explore the plan, 3D view and materials without changing the drawing.</p>
+    <label class="shareExpiry" for="shareExpiry">Link expires
+      <select id="shareExpiry">
+        <option value="604800">After 7 days</option>
+        <option value="2592000" selected>After 30 days</option>
+        <option value="0">Never</option>
+      </select>
+    </label>
+    <button id="shareCreate" class="primary">Create and copy link</button>
+    <div id="shareActive">
+      <label for="shareUrl">View-only link</label>
+      <div class="shareLinkRow">
+        <input id="shareUrl" readonly>
+        <button id="shareCopy">Copy</button>
+      </div>
+      <p class="note" id="shareExpiryNote"></p>
+      <div class="shareActions">
+        <button id="shareUpdate">Update shared view</button>
+        <button id="shareStop">Stop sharing</button>
+      </div>
+    </div>
+    <p id="shareDialogStatus" role="status" aria-live="polite"></p>
+    <div class="dialogActions">
+      <button id="shareClose">Close</button>
+    </div>
+  </div>
 </dialog>
 
 <script>
@@ -467,6 +539,8 @@ const CUBE_FACES = [
 ];
 const UNDO_MAX = 100;
 const LS_KEY = 'fenceFable.v1';
+const SHARE_ROUTE = location.pathname.match(/^\/share\/([A-Za-z0-9_-]{43})\/?$/);
+const readOnly = !!SHARE_ROUTE;
 
 /* =====================================================================
    Units: format + parse. Everything is stored in METRES internally;
@@ -537,6 +611,8 @@ const defaultFenceName = (pl, i) => (gateOnly(pl) ? 'Gate ' : 'Fence ') + (i+1);
 const fenceName = (pl, i) => String(pl.name || '').trim() || defaultFenceName(pl, i);
 const fenceCode = (pl, i) => (gateOnly(pl) ? 'G' : 'F') + (i+1);
 const fenceBadgeText = (pl, i) => String(pl.name || '').trim() || fenceCode(pl,i);
+const escHTML = value => String(value).replace(/[&<>"']/g, char =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 
 // Rail fence: rails live in the band between the bottom clearance (ground -> bottom rail)
 // and top clearance (top rail -> fence top). These derivations only pre-fill the editable
@@ -2259,7 +2335,7 @@ function updateTotals(){
   const cur = matScope().idx;
   $('perFence').innerHTML = (m.per.length > 1 || m.per.some(f => f.excluded)) ? m.per.map(f =>
     `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${f.excluded ? 'Excluded from materials' : `${f.panels} panels · ${f.gates} gates · end posts: ${endsOf(f.mat)}`}">` +
-    `<span>${f.name}${f.excluded ? '' : (f.own ? ' ⚙' : '') + (endsOf(f.mat) === 'auto' ? '' : ' ✂')}</span>` +
+    `<span>${escHTML(f.name)}${f.excluded ? '' : (f.own ? ' ⚙' : '') + (endsOf(f.mat) === 'auto' ? '' : ' ✂')}</span>` +
     `<span>${f.excluded ? 'Not in materials' : `${fmtLen(f.len, u)} · ${f.posts} posts`}</span></div>`).join('') : '';
   $('tLen').textContent = fmtLen(m.fenceLen, u);
   $('tSegs').textContent = m.segCount;
@@ -2278,6 +2354,38 @@ function updateTotals(){
   $('rowHR').style.display = m.handrail > 0 ? '' : 'none';
   // keep the palings total visible when ANY fence uses palings, whatever the panel is showing
   $('rowPalings').style.display = (m.palings > 0 || matScope().mat.style !== 'rail') ? '' : 'none';
+}
+function syncReadOnlyDetails(){
+  if (!readOnly) return;
+  const sc = matScope(), body = $('readOnlyDetailsBody');
+  if (!sc.pl){
+    body.innerHTML = '<p class="empty">Select a fence label to inspect it.</p>';
+    return;
+  }
+  const M = sc.mat, u = state.unit, hr = hrOf(M);
+  const rows = [
+    ['Name', fenceName(sc.pl,sc.idx)],
+    ['Style', M.style === 'rail' ? 'Rails only' : 'Palings'],
+    ['Height', fmtLen(M.height,u)],
+    ['Post spacing', fmtLen(M.spacing,u)],
+    ['End posts', String(endsOf(M) === 'auto' ? 'Auto' : endsOf(M))],
+    ['Rails per panel', String(M.rails)],
+  ];
+  if (M.style === 'rail'){
+    rows.push(['Rail width', fmtSmall(M.railW,u)], ['Rail gap', fmtSmall(M.railGap,u)],
+              ['Bottom gap', fmtSmall(M.botOff,u)], ['Top gap', fmtSmall(M.topOff,u)]);
+  } else {
+    rows.push(['Paling width', fmtSmall(M.paling,u)], ['Paling gap', fmtSmall(M.gap,u)]);
+  }
+  rows.push(['Handrail', hr.on ? `${fmtSmall(hr.w,u)} × ${fmtSmall(hr.t,u)}` : 'None'],
+            ['Materials', sc.pl.excludeMaterials ? 'Excluded' : 'Included']);
+  body.replaceChildren(...rows.map(([label,value]) => {
+    const row = document.createElement('div'), name = document.createElement('span');
+    const result = document.createElement('b');
+    row.className = 'row'; name.textContent = label; result.textContent = value;
+    row.append(name,result);
+    return row;
+  }));
 }
 // Which settings object the Materials panel edits: the selected fence's own settings if it
 // has them, otherwise the shared defaults. Fences without their own settings follow defaults.
@@ -2326,13 +2434,15 @@ function syncMatInputs(){
     $('uRailW').textContent = $('uRailGap').textContent =
     $('uHRW').textContent = $('uHRT').textContent =
     $('uBotOff').textContent = $('uTopOff').textContent = (u==='m'?'mm':'in');
-  $('matSec').className = (M.style === 'rail' ? 'rail' : 'paling') + (hr.on ? '' : ' nohr');
+  $('matSec').className = (M.style === 'rail' ? 'rail' : 'paling') +
+                          (hr.on ? '' : ' nohr') + ' editorOnly';
   document.querySelectorAll('#styleTog button').forEach(b =>
     b.classList.toggle('on', b.dataset.s === (M.style === 'rail' ? 'rail' : 'paling')));
 }
 let lastSelKey = '';
 function updateSelbox(){
   const box = $('selbox');
+  if (readOnly){ box.style.display='none'; return; }
   const key = sel ? sel.t + '/' + (sel.p ?? '') + '/' + (sel.i ?? '') +
                     (sel.t==='bld' ? '/' + [...bsel].sort((a,b)=>a-b).join(',') : '') : '';
   if (!sel){ box.style.display='none'; lastSelKey=''; return; }
@@ -2495,7 +2605,7 @@ function updateAll(){
   $('bRedo').disabled = !redoStack.length;
   $('bDelSel').disabled = !sel;
   $('bClose').disabled = !(drawTarget() && drawTarget().pts.length >= 3);
-  updateTotals(); updateSelbox(); paint(); saveSoon();
+  updateTotals(); updateSelbox(); syncReadOnlyDetails(); paint(); saveSoon();
 }
 
 /* =====================================================================
@@ -2558,6 +2668,11 @@ cv.addEventListener('pointerdown', e => {
     pend = null; drag = null;
     return;
   }
+  if (readOnly){
+    pend = { hit:pick(e.offsetX,e.offsetY), x:e.offsetX, y:e.offsetY, moved:false };
+    if (e.button === 2) drag = {t:'pan'};
+    return;
+  }
   if (e.button === 2){ drag = { t:'pan' }; return; }
   pend = { hit: pick(e.offsetX, e.offsetY), x:e.offsetX, y:e.offsetY, moved:false,
            multi: e.shiftKey || e.ctrlKey || e.metaKey };
@@ -2601,6 +2716,7 @@ cv.addEventListener('pointermove', e => {
   if (!pointers.size && e.pointerType !== 'touch'){
     const hit = pick(e.offsetX, e.offsetY);
     cv.classList.toggle('labelhit', !!(hit && hit.label));
+    if (readOnly) return;
     if (hit && hit.label){
       if (hover){ hover = null; paint(); }
       return;
@@ -2624,6 +2740,11 @@ cv.addEventListener('pointermove', e => {
     view.x = w.x - mx/view.s; view.y = w.y - my/view.s;
     pinch = { d, mx, my };
     paint(); return;
+  }
+  if (readOnly && pend && !pend.moved &&
+      Math.hypot(e.offsetX-pend.x,e.offsetY-pend.y) > 6){
+    pend.moved = true;
+    drag = {t:'pan'};
   }
   if (pend && !pend.moved && Math.hypot(e.offsetX-pend.x, e.offsetY-pend.y) > 6){
     pend.moved = true;
@@ -2697,7 +2818,7 @@ function pointerEnd(e){
     if (drag && drag.t === 'cube' && e.type === 'pointerup') goToFace(drag.face);
     else if (drag && drag.t === 'orbit' && !drag.moved && e.type === 'pointerup'){
       const tag = pickFenceLabel3(e.offsetX, e.offsetY);
-      if (tag && drawTarget()) endLine();
+      if (!readOnly && tag && drawTarget()) endLine();
       sel = tag ? {t:'seg', p:tag.p, i:tag.i} : null;
       bsel.clear(); updateAll();
     }
@@ -2705,8 +2826,13 @@ function pointerEnd(e){
     return;
   }
   clearTimeout(holdTimer);
-  if (pend && !pend.moved && !pend.done && e.type === 'pointerup' && e.button !== 2)
-    handleClick(pend.hit, e.offsetX, e.offsetY, pend.multi);
+  if (pend && !pend.moved && !pend.done && e.type === 'pointerup' && e.button !== 2){
+    if (readOnly){
+      const hit = pend.hit;
+      sel = hit && (hit.t === 'pt' || hit.t === 'seg') ? {t:hit.t,p:hit.p,i:hit.i} : null;
+      bsel.clear(); updateAll();
+    } else handleClick(pend.hit, e.offsetX, e.offsetY, pend.multi);
+  }
   if (pointers.size === 0){
     if (drag && drag.t !== 'pan') updateAll();  // commit + save after an object drag
     pend = null; drag = null;
@@ -2735,6 +2861,7 @@ function resumeLine(p, i){
 //   idle + object   -> select it
 //   idle + empty    -> clear the selection, or start a new fence if nothing was selected
 function handleClick(hit, sx, sy, multi){
+  if (readOnly) return;
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
   if (hit && hit.label){
     if (drawTarget()) endLine();
@@ -2784,6 +2911,10 @@ cv.addEventListener('wheel', e => {
 // keyboard: Delete/Backspace, Esc, Undo/Redo
 window.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (readOnly){
+    if (e.key === 'Escape'){ sel = null; updateAll(); }
+    return;
+  }
   if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSelected(); }
   else if (e.key === 'Escape'){
     if ($('bkSec').open && !$('bkDialog').open){ $('bkSec').open = false; return; }
@@ -2810,6 +2941,10 @@ function updateHint(){
                             'right-drag or two fingers to pan · scroll or pinch to zoom.';
     return;
   }
+  if (readOnly){
+    $('hint').textContent = 'Tap a fence label to inspect it · drag to pan · scroll or pinch to zoom.';
+    return;
+  }
   $('hint').textContent = drawing
     ? 'Tap to add fence posts · tap the first post to close the loop · double-tap or Esc to finish this fence.'
     : 'Tap empty space to start a fence · tap any fence, post or building to select it · drag to move · ' +
@@ -2820,6 +2955,11 @@ document.querySelectorAll('#unitTog button').forEach(b =>
   b.addEventListener('click', () => {
     if (state.unit === b.dataset.u) return;
     state.unit = b.dataset.u;
+    if (readOnly){
+      document.querySelectorAll('#unitTog button').forEach(x => x.classList.toggle('on', x === b));
+      syncMatInputs(); updateAll();
+      return;
+    }
     // untouched materials fields jump to the sensible default for the new unit (2.4 m ↔ 8 ft)
     for (const f of ['spacing','paling','gap','height','railW','railGap','botOff','topOff','hrW','hrT'])
       for (const M of [state.mat, ...state.polys.map(p => p.mat).filter(Boolean)])
@@ -3041,6 +3181,7 @@ function applyState(o){
 }
 let saveTimer = 0;
 function saveSoon(){
+  if (readOnly) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try { localStorage.setItem(LS_KEY, JSON.stringify(statePayload())); } catch(e) {}
@@ -3051,6 +3192,24 @@ function load(){
     const o = JSON.parse(localStorage.getItem(LS_KEY));
     if (o && (o.v === 1 || o.v === 2)) applyState(o);
   } catch(e) {}
+}
+async function loadSharedDrawing(){
+  const response = await fetch('/api/shares/' + SHARE_ROUTE[1], {
+    cache:'no-store',
+    headers:{accept:'application/json'},
+  });
+  let value = {};
+  try { value = await response.json(); } catch {}
+  if (!response.ok || !value.snapshot || value.snapshot.v !== 2 ||
+      !Array.isArray(value.snapshot.polys) || !Array.isArray(value.snapshot.builds))
+    throw new Error('This view-only link is invalid, expired, or has been stopped.');
+  applyState(value.snapshot);
+  const title = String(value.title || 'Shared fence plan');
+  document.title = title + ' — View-only fence plan';
+  $('appTitle').textContent = title;
+  $('saveNote').textContent = value.expiresAt
+    ? 'View-only snapshot · Link expires ' + new Date(value.expiresAt).toLocaleDateString()
+    : 'View-only snapshot';
 }
 function syncControls(){   // push state back into the toolbar/panel widgets after load/restore
   document.querySelectorAll('#unitTog button').forEach(b => b.classList.toggle('on', b.dataset.u === state.unit));
@@ -3066,6 +3225,8 @@ const BK_KEY = 'fenceFable.backupName';
 const BK_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 let bkCurrent = '';
 let bkItems = [], bkDialogAction = null, bkBusy = false;
+let shareAvailable = false, currentShare = null, shareSource = '', shareBusy = false;
+let shareRevokeTimer = 0;
 try { bkCurrent = localStorage.getItem(BK_KEY) || ''; } catch(e) {}
 
 function setBkCurrent(name){
@@ -3073,6 +3234,7 @@ function setBkCurrent(name){
   try { localStorage.setItem(BK_KEY, name); } catch(e) {}
   $('bkCur').textContent = name || 'Not saved to server yet';
   $('bkSave').textContent = name ? 'Save changes' : 'Save drawing';
+  syncShareAction();
 }
 function bkAutoName(){
   const d = new Date(), p = n => String(n).padStart(2,'0');
@@ -3091,6 +3253,7 @@ function syncBkActions(){
   $('bkSaveAs').disabled = bkBusy;
   for (const id of ['bkLoad','bkRen','bkDel']) $(id).disabled = bkBusy || !hasSelection;
   $('bkSec').setAttribute('aria-busy', String(bkBusy));
+  syncShareAction();
 }
 function setBkBusy(busy){
   bkBusy = busy;
@@ -3109,6 +3272,134 @@ async function bkRequest(path, options, fallback){
     throw new Error(messages[body.err] || fallback);
   }
   return body;
+}
+function syncShareAction(){
+  $('bkShare').style.display = shareAvailable ? 'block' : 'none';
+  $('bkShare').disabled = bkBusy || !bkCurrent;
+  $('bkShare').title = bkCurrent
+    ? `Share a view-only snapshot of “${bkCurrent}”`
+    : 'Save this drawing before sharing it';
+}
+async function refreshShareConfig(){
+  try {
+    const response = await fetch('share-config', {cache:'no-store'});
+    const value = await response.json();
+    shareAvailable = response.ok && value.configured === true;
+  } catch { shareAvailable = false; }
+  syncShareAction();
+}
+function setShareStatus(message, kind=''){
+  $('shareDialogStatus').textContent = message;
+  $('shareDialogStatus').dataset.kind = kind;
+}
+function setShareBusy(busy){
+  shareBusy = busy;
+  for (const id of ['shareExpiry','shareCreate','shareCopy','shareUpdate','shareStop','shareClose'])
+    $(id).disabled = busy;
+  $('shareDialog').setAttribute('aria-busy', String(busy));
+}
+function expiryText(value){
+  if (!value) return 'This link does not expire. You can stop sharing it at any time.';
+  return 'Available until ' + new Date(value).toLocaleString() + '.';
+}
+function syncShareDialog(){
+  const active = !!currentShare;
+  $('shareCreate').style.display = active ? 'none' : '';
+  $('shareActive').style.display = active ? 'block' : 'none';
+  if (active){
+    $('shareUrl').value = currentShare.url;
+    $('shareExpiryNote').textContent = expiryText(currentShare.expiresAt);
+    if (!currentShare.expiresAt) $('shareExpiry').value = '0';
+    else $('shareExpiry').value =
+      Date.parse(currentShare.expiresAt) - Date.now() <= 8*86400*1000 ? '604800' : '2592000';
+  }
+}
+async function shareRequest(source, options={}){
+  let response;
+  try { response = await fetch('shares/' + encodeURIComponent(source), options); }
+  catch { throw new Error('Could not reach the gbot share service.'); }
+  let value = {};
+  try { value = await response.json(); } catch {}
+  if (response.status === 404 && (!options.method || options.method === 'GET')) return null;
+  if (!response.ok) {
+    const messages = {
+      'not configured':'Public sharing has not been configured yet.',
+      'share service unavailable':'The public share service could not be reached.',
+    };
+    throw new Error(messages[value.err] || 'Could not manage this share link.');
+  }
+  return value;
+}
+async function openShareDialog(){
+  if (!shareAvailable || !bkCurrent) return;
+  shareSource = bkCurrent; currentShare = null;
+  $('bkSec').open = false;
+  $('shareDialogTitle').textContent = `Share “${shareSource}”`;
+  $('shareExpiry').value = '2592000';
+  setShareStatus('Checking for an existing link…');
+  syncShareDialog(); setShareBusy(true);
+  $('shareDialog').showModal();
+  try {
+    currentShare = await shareRequest(shareSource);
+    setShareStatus('');
+  } catch(error) { setShareStatus(error.message, 'error'); }
+  finally { setShareBusy(false); syncShareDialog(); }
+}
+async function publishShare(method){
+  if (!shareSource || shareBusy) return;
+  setShareBusy(true);
+  setShareStatus(method === 'POST' ? 'Creating secure link…' : 'Updating shared view…');
+  try {
+    currentShare = await shareRequest(shareSource, {
+      method,
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify({
+        snapshot:statePayload(),
+        expiresIn:+$('shareExpiry').value,
+      }),
+    });
+    syncShareDialog();
+    if (method === 'POST') await copyShareLink();
+    else setShareStatus('Shared view updated.', 'success');
+  } catch(error) { setShareStatus(error.message, 'error'); }
+  finally { setShareBusy(false); }
+}
+async function copyShareLink(){
+  if (!currentShare) return;
+  try {
+    await navigator.clipboard.writeText(currentShare.url);
+  } catch {
+    const input = $('shareUrl');
+    input.focus(); input.select();
+    if (!document.execCommand('copy')) throw new Error('Copy the link from the field above.');
+  }
+  setShareStatus('View-only link copied.', 'success');
+}
+async function stopSharing(){
+  if (!currentShare || shareBusy) return;
+  if (!$('shareStop').dataset.armed){
+    $('shareStop').dataset.armed = 'true';
+    $('shareStop').textContent = 'Confirm stop sharing';
+    setShareStatus('The link will stop working immediately.');
+    clearTimeout(shareRevokeTimer);
+    shareRevokeTimer = setTimeout(() => {
+      delete $('shareStop').dataset.armed;
+      $('shareStop').textContent = 'Stop sharing';
+      setShareStatus('');
+    }, 5000);
+    return;
+  }
+  clearTimeout(shareRevokeTimer); setShareBusy(true);
+  try {
+    await shareRequest(shareSource, {method:'DELETE'});
+    currentShare = null; syncShareDialog();
+    setShareStatus('Sharing stopped. The old link no longer works.', 'success');
+  } catch(error) { setShareStatus(error.message, 'error'); }
+  finally {
+    delete $('shareStop').dataset.armed;
+    $('shareStop').textContent = 'Stop sharing';
+    setShareBusy(false);
+  }
 }
 async function refreshBackups(preferred=''){
   const wasVisible = $('bkSec').style.display !== 'none';
@@ -3154,7 +3445,7 @@ function openBkDialog(type, name=''){
     create: ['Save as new drawing','Choose a name before creating this saved copy.','Save drawing'],
     rename: ['Rename saved drawing',`Choose a new name for “${name}”.`,'Rename'],
     open:   ['Open saved drawing?',`Open “${name}” and replace the drawing currently on the canvas? You can Undo this change.`,'Open'],
-    delete: ['Delete saved drawing?',`Permanently delete “${name}” from gbot? This cannot be undone.`,'Delete'],
+    delete: ['Delete saved drawing?',`Permanently delete “${name}” from gbot? Any view-only link will also stop working. This cannot be undone.`,'Delete'],
   }[type];
   bkDialogAction = {type, name};
   $('bkDialogTitle').textContent = config[0];
@@ -3248,6 +3539,7 @@ async function deleteBackup(name){
 $('bkSave').addEventListener('click', () =>
   bkCurrent ? saveBackup(bkCurrent) : openBkDialog('create'));
 $('bkSaveAs').addEventListener('click', () => openBkDialog('create'));
+$('bkShare').addEventListener('click', openShareDialog);
 $('bkLoad').addEventListener('click', () => { if (bkSelected()) openBkDialog('open', bkSelected()); });
 $('bkRen').addEventListener('click', () => { if (bkSelected()) openBkDialog('rename', bkSelected()); });
 $('bkDel').addEventListener('click', () => { if (bkSelected()) openBkDialog('delete', bkSelected()); });
@@ -3270,6 +3562,14 @@ $('bkDialogForm').addEventListener('submit', e => {
   if (type === 'open') openBackup(name);
   if (type === 'delete') deleteBackup(name);
 });
+$('shareCreate').addEventListener('click', () => publishShare('POST'));
+$('shareCopy').addEventListener('click', () => copyShareLink().catch(error =>
+  setShareStatus(error.message, 'error')));
+$('shareUpdate').addEventListener('click', () => publishShare('PUT'));
+$('shareStop').addEventListener('click', stopSharing);
+$('shareClose').addEventListener('click', () => {
+  if (!shareBusy) $('shareDialog').close();
+});
 $('bTheme').addEventListener('click', () => {
   const t = document.body.classList.contains('dark') ? 'light' : 'dark';
   try { localStorage.setItem(THEME_KEY, t); } catch(e) {}
@@ -3277,14 +3577,32 @@ $('bTheme').addEventListener('click', () => {
 });
 
 /* ---- init ---- */
-load();
-setTheme(localStorage.getItem(THEME_KEY) ||
-         (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-syncControls();
-resize();                                     // sizes canvas and paints
-if (!localStorage.getItem(LS_KEY)) view = { x:-2, y:-2, s:24 };
-updateAll();
-refreshBackups();
+async function init(){
+  setTheme(localStorage.getItem(THEME_KEY) ||
+           (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  if (readOnly){
+    document.body.classList.add('readonly');
+    $('shareState').style.display = 'grid';
+    syncControls(); resize(); updateAll();
+    try {
+      await loadSharedDrawing();
+      syncControls(); resize(); fitView(); updateAll();
+      $('shareState').style.display = 'none';
+    } catch(error) {
+      $('shareStateTitle').textContent = 'Shared drawing unavailable';
+      $('shareStateText').textContent = error.message;
+    }
+    return;
+  }
+  load();
+  syncControls();
+  resize();                                   // sizes canvas and paints
+  if (!localStorage.getItem(LS_KEY)) view = { x:-2, y:-2, s:24 };
+  updateAll();
+  refreshBackups();
+  refreshShareConfig();
+}
+init();
 </script>
 </body>
 </html>

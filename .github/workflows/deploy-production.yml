@@ -1,0 +1,86 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify application and share service
+        run: npm run verify
+
+      - name: Validate Worker bundle
+        run: npm run share:dry-run
+
+  deploy-production:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.FENCE_SHARE_PUBLIC_URL }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_KV_NAMESPACE_ID: ${{ vars.CLOUDFLARE_KV_NAMESPACE_ID }}
+      FENCE_SHARE_ADMIN_TOKEN: ${{ secrets.FENCE_SHARE_ADMIN_TOKEN }}
+      FENCE_SHARE_PUBLIC_URL: ${{ vars.FENCE_SHARE_PUBLIC_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check production environment configuration
+        shell: bash
+        run: |
+          for key in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_KV_NAMESPACE_ID FENCE_SHARE_ADMIN_TOKEN FENCE_SHARE_PUBLIC_URL; do
+            if [[ -z "${!key}" ]]; then
+              echo "::error::Missing GitHub production environment setting: ${key}"
+              exit 1
+            fi
+          done
+
+      - name: Build public viewer
+        run: npm run build:share
+
+      - name: Configure production KV binding
+        run: node scripts/configure-share-worker.mjs wrangler.share.production.jsonc
+
+      - name: Deploy production Worker
+        run: npx wrangler deploy --config wrangler.share.ci.jsonc
+
+      - name: Configure production management secret
+        run: printf '%s' "$FENCE_SHARE_ADMIN_TOKEN" | npx wrangler secret put SHARE_ADMIN_TOKEN --config wrangler.share.ci.jsonc
