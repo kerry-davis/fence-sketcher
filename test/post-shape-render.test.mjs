@@ -5,8 +5,8 @@ import vm from 'node:vm';
 
 const html = fs.readFileSync(new URL('../fence-fable.html', import.meta.url), 'utf8');
 
-test('a round endpoint renders as one cylindrical post at a shared junction', () => {
-  const helperStart = html.indexOf('const postShapeOf =');
+test('round post settings render and split the materials count by shape', () => {
+  const helperStart = html.indexOf('const ownPostShape =');
   const helperEnd = html.indexOf('const escHTML', helperStart);
   const geometryStart = html.indexOf('function postsAlong(');
   const geometryEnd = html.indexOf('/* ---- camera & projection', geometryStart);
@@ -19,8 +19,12 @@ test('a round endpoint renders as one cylindrical post at a shared junction', ()
     GATE_GAP:.04, GATE_STILE:.09, GATE_BOTTOM:.08,
     WOOD:{post:[1], rail:[2], paling:[3]},
     houseGroups:() => [],
+    fenceName:(pl,i) => `Fence ${i+1}`,
     segLen:(a,b) => Math.hypot(b.x-a.x,b.y-a.y),
-    segsOf:pl => pl.pts.slice(0,-1).map((a,i) => [i,a,pl.pts[i+1]]),
+    segsOf:pl => {
+      const count = pl.closed ? pl.pts.length : pl.pts.length-1;
+      return Array.from({length:count}, (_,i) => [i,pl.pts[i],pl.pts[(i+1)%pl.pts.length]]);
+    },
     endsOf:mat => mat.ends ?? 'auto',
     hrOf:() => ({on:false}),
     norm3:v => {
@@ -58,4 +62,47 @@ test('a round endpoint renders as one cylindrical post at a shared junction', ()
   };
 
   assert.equal(faces(true) - faces(false), 12);
+
+  const materialStart = html.indexOf('function sharedEnds(');
+  const materialEnd = html.indexOf('// Delete point i', materialStart);
+  vm.runInContext(html.slice(materialStart, materialEnd), context);
+  let materials = context.calcMaterials([
+    {closed:false, pts:[{x:0,y:0}, {x:1,y:0}]},
+  ], {...mat, postShape:'round'});
+  assert.equal(materials.posts, 2);
+  assert.equal(materials.squarePosts, 0);
+  assert.equal(materials.roundPosts, 2);
+
+  materials = context.calcMaterials([
+    {closed:false, pts:[{x:0,y:0,postShape:'square'}, {x:1,y:0}]},
+  ], {...mat, postShape:'round'});
+  assert.equal(materials.squarePosts, 1);
+  assert.equal(materials.roundPosts, 1);
+
+  materials = context.calcMaterials([
+    {closed:false, pts:[{x:0,y:0}, {x:1,y:0}]},
+    {closed:false, pts:[{x:1,y:0}, {x:2,y:0}],
+     mat:{...mat, ends:'auto', postShape:'round'}},
+  ], {...mat, ends:'auto', postShape:'square'});
+  assert.equal(materials.posts, 3);
+  assert.equal(materials.squarePosts, 1);
+  assert.equal(materials.roundPosts, 2);
+
+  materials = context.calcMaterials([
+    {closed:false, pts:[{x:0,y:0}, {x:1,y:0}]},
+    {closed:false, excludeMaterials:true, pts:[{x:1,y:0}, {x:2,y:0}],
+     mat:{...mat, postShape:'round'}},
+  ], {...mat, postShape:'square'});
+  assert.equal(materials.posts, 2);
+  assert.equal(materials.squarePosts, 2);
+  assert.equal(materials.roundPosts, 0);
+
+  for (const polys of [
+    [{closed:true, pts:[{x:0,y:0},{x:2,y:0},{x:2,y:2},{x:0,y:2}]}],
+    [{closed:false, pts:[{x:0,y:0,gateAfter:true},{x:1,y:0},{x:4,y:0}]}],
+    [{closed:false, pts:[{x:0,y:0},{x:4,y:0}]}],
+  ]){
+    materials = context.calcMaterials(polys, {...mat, ends:'auto', postShape:'square'});
+    assert.equal(materials.squarePosts + materials.roundPosts, materials.posts);
+  }
 });

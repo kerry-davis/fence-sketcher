@@ -418,6 +418,8 @@
       <hr style="border:0;border-top:1px solid var(--line);margin:8px 0">
       <div class="row" title="A post at every corner, intermediate posts so no panel exceeds the post spacing, and a post each side of every gate. Posts shared between joined fences are counted once."><span>Posts <span style="opacity:.5">ⓘ</span></span><b id="tPosts">0</b></div>
       <p class="note" id="postNote" style="margin:0"></p>
+      <div class="row" id="rowSquarePosts"><span>Square posts</span><b id="tSquarePosts">0</b></div>
+      <div class="row" id="rowRoundPosts"><span>Round posts</span><b id="tRoundPosts">0</b></div>
       <div class="row"><span id="lRails">Rails</span><b id="tRails">0</b></div>
       <div class="row" id="rowPalings"><span>Palings</span><b id="tPalings">0</b></div>
       <div class="row" id="rowHR" style="display:none"><span>Handrail</span><b id="tHR">0</b></div>
@@ -449,6 +451,10 @@
         </div>
       </div>
       <div class="row"><span>Post spacing</span><span><input id="iSpacing" inputmode="decimal"> <span class="unit" id="uSpacing">m</span></span></div>
+      <div class="row"><span>Fence post shape</span>
+        <span><select id="iFencePostShape" style="min-height:38px;padding:6px">
+          <option value="square">Square</option><option value="round">Round</option>
+        </select></span></div>
       <div class="row" title="Posts at the ends of a run. Auto counts both ends but skips one that already sits on another fence. One end uses the unshared end when possible.">
         <span>End posts <span style="opacity:.5">ⓘ</span></span>
         <span><select id="iEnds" style="min-height:38px;padding:6px">
@@ -458,7 +464,8 @@
       <div class="row" id="postShapeWrap" style="display:none">
         <span>Selected post shape</span>
         <span><select id="iPostShape" style="min-height:38px;padding:6px">
-          <option value="square">Square (default)</option><option value="round">Round</option>
+          <option value="inherit">Use fence setting</option>
+          <option value="square">Square</option><option value="round">Round</option>
         </select></span></div>
       <div class="row"><span>Fence height</span><span><input id="iHeight" inputmode="decimal"> <span class="unit" id="uHeight">m</span></span></div>
       <div class="row"><span>Rails per panel</span><span><input id="iRails" inputmode="numeric"> <span class="unit"></span></span></div>
@@ -629,7 +636,8 @@ let state = {
   polys: [],                                  // [{pts:[{x,y,gateAfter?,lockAfter?}], closed, done}]
   builds: [],                                 // [{x,y,w,h}] axis-aligned, metres
   mat: { style: 'paling',                     // 'paling' | 'rail' (post-and-rail, no boards)
-         spacing: DEF.m.spacing, rails: DEF_RAILS, paling: DEF.m.paling, gap: DEF.m.gap,
+         spacing: DEF.m.spacing, postShape: 'square',
+         rails: DEF_RAILS, paling: DEF.m.paling, gap: DEF.m.gap,
          height: DEF.m.height, railW: DEF.m.railW, railGap: DEF.m.railGap,
          botOff: DEF.m.botOff, topOff: DEF.m.topOff, ends: DEF_ENDS,
          handrail: false, hrW: DEF.m.hrW, hrT: DEF.m.hrT,
@@ -655,9 +663,23 @@ const defaultFenceName = (pl, i) => (gateOnly(pl) ? 'Gate ' : 'Fence ') + (i+1);
 const fenceName = (pl, i) => String(pl.name || '').trim() || defaultFenceName(pl, i);
 const fenceCode = (pl, i) => (gateOnly(pl) ? 'G' : 'F') + (i+1);
 const fenceBadgeText = (pl, i) => String(pl.name || '').trim() || fenceCode(pl,i);
-const postShapeOf = point => point && point.postShape === 'round' ? 'round' : 'square';
-const roundPostAt = (polys, point) => polys.some(pl => pl.pts.some(q =>
-  postShapeOf(q) === 'round' && Math.hypot(q.x-point.x, q.y-point.y) < 1e-4));
+const ownPostShape = source => source && (source.postShape === 'round' || source.postShape === 'square')
+  ? source.postShape : null;
+const postShapeOf = source => ownPostShape(source) || 'square';
+function postShapeAt(polys, defMat, point, fallbackMat, include = () => true){
+  const matches = [];
+  polys.forEach(pl => {
+    if (!include(pl)) return;
+    pl.pts.forEach(q => {
+      if (Math.hypot(q.x-point.x, q.y-point.y) < 1e-4)
+        matches.push({point:q, mat:pl.mat || defMat});
+    });
+  });
+  const explicit = matches.map(match => ownPostShape(match.point)).filter(Boolean);
+  if (explicit.length) return explicit.includes('round') ? 'round' : 'square';
+  if (matches.some(match => postShapeOf(match.mat) === 'round')) return 'round';
+  return postShapeOf(fallbackMat);
+}
 const escHTML = value => String(value).replace(/[&<>"']/g, char =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 
@@ -831,6 +853,56 @@ function sharedEnds(polys, idx){
   return n;
 }
 
+function materialPostEndFlags(polys, idx, mat){
+  const pl = polys[idx];
+  if (pl.closed) return {start:true, end:true};
+  const ends = endsOf(mat);
+  const shared = (point, beforeOnly) => polys.some((other,j) =>
+    j !== idx && !other.excludeMaterials && (!beforeOnly || j < idx) &&
+    other.pts.some(q => Math.hypot(q.x-point.x, q.y-point.y) < 1e-4));
+  if (ends === 'auto')
+    return {start:!shared(pl.pts[0],true), end:!shared(pl.pts[pl.pts.length-1],true)};
+  const count = +ends;
+  if (count === 1){
+    const startShared = shared(pl.pts[0],false);
+    const endShared = shared(pl.pts[pl.pts.length-1],false);
+    if (startShared !== endShared) return {start:!startShared, end:!endShared};
+  }
+  return {start:count === 2, end:count >= 1};
+}
+
+function materialPostInventory(polys, defMat){
+  let square=0, round=0;
+  const per = new Map();
+  polys.forEach((pl, idx) => {
+    if (pl.excludeMaterials || pl.pts.length < 2){
+      per.set(idx, {square:0, round:0});
+      return;
+    }
+    const mat = pl.mat || defMat, spacing = Math.max(0.1, mat.spacing);
+    const ends = materialPostEndFlags(polys,idx,mat), run = [];
+    for (const [i,a,b] of segsOf(pl)){
+      const segmentPosts = postsAlong(a,b,spacing,!!a.gateAfter);
+      segmentPosts.forEach((point,k) => {
+        if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
+        if (!pl.closed && i === pl.pts.length-2 &&
+            k === segmentPosts.length-1 && !ends.end) return;
+        const shape = postShapeAt(polys,defMat,point,mat,poly => !poly.excludeMaterials);
+        const existing = run.find(post => Math.hypot(post.x-point.x,post.y-point.y) < 1e-4);
+        if (existing){
+          if (shape === 'round') existing.shape = 'round';
+        } else run.push({...point,shape});
+      });
+    }
+    const shapes = {
+      square:run.filter(post => post.shape === 'square').length,
+      round:run.filter(post => post.shape === 'round').length,
+    };
+    square += shapes.square; round += shapes.round; per.set(idx,shapes);
+  });
+  return {square,round,per};
+}
+
 // Materials across every fence line. Each line uses its OWN settings (pl.mat) when it has
 // them, otherwise the shared defaults. `per` breaks the result down line by line.
 //
@@ -842,13 +914,14 @@ function sharedEnds(polys, idx){
 // and gates force posts that no amount of spacing arithmetic predicts.
 function calcMaterials(polys, defMat){
   let fenceLen=0, panels=0, posts=0, segCount=0, corners=0, rails=0, palings=0, shared=0, handrail=0;
-  const gates = [], per = [];
+  const gates = [], per = [], postInventory = materialPostInventory(polys,defMat);
   polys.forEach((pl, idx) => {
     if (pl.pts.length < 2) return;
     const mat = pl.mat || defMat;
     if (pl.excludeMaterials){
       per.push({ i:idx, name:fenceName(pl,idx), len:0, posts:0, rails:0, palings:0,
-                 panels:0, gates:0, handrail:0, own:!!pl.mat, excluded:true, mat });
+                 squarePosts:0, roundPosts:0, panels:0, gates:0, handrail:0,
+                 own:!!pl.mat, excluded:true, mat });
       return;
     }
     const spacing = Math.max(0.1, mat.spacing);
@@ -881,11 +954,14 @@ function calcMaterials(polys, defMat){
     const pHandrail = mat.handrail ? len : 0;
     fenceLen += len; panels += pPanels; posts += pPosts; rails += pRails; palings += pPalings;
     handrail += pHandrail;
+    const postTypes = postInventory.per.get(idx) || {square:0,round:0};
     per.push({ i: idx, name: fenceName(pl,idx), len, posts: pPosts, rails: pRails,
-               palings: pPalings, panels: pPanels, gates: pGates, handrail: pHandrail,
-               own: !!pl.mat, mat });
+               squarePosts:postTypes.square, roundPosts:postTypes.round, palings: pPalings,
+               panels: pPanels, gates: pGates, handrail: pHandrail, own: !!pl.mat, mat });
   });
-  return { fenceLen, panels, posts, shared, segCount, corners, gates, rails, palings, handrail, per };
+  return { fenceLen, panels, posts, squarePosts:postInventory.square,
+           roundPosts:postInventory.round, shared, segCount, corners,
+           gates, rails, palings, handrail, per };
 }
 
 // Delete point i of polyline p: neighbours join. Mutates polys.
@@ -1797,7 +1873,8 @@ function doPaint(){
       const isSel = sel && sel.t==='pt' && sel.p===p && sel.i===i;
       const r = isSel ? 8 : 5.5;
       ctx.beginPath();
-      if (postShapeOf(q) === 'round') ctx.arc(S.x, S.y, r, 0, 7);
+      if (postShapeAt(state.polys,state.mat,q,pl.mat || state.mat) === 'round')
+        ctx.arc(S.x, S.y, r, 0, 7);
       else ctx.rect(S.x-r, S.y-r, r*2, r*2);
       ctx.fillStyle = isSel ? ACCENT : C.ptFill; ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = isSel ? ACCENT : C.fence; ctx.stroke();
@@ -2137,7 +2214,7 @@ function build3(){
           Math.hypot(post.q.x-q.x, post.q.y-q.y) < 1e-4);
         const key = shared ? shared[0] : q.x.toFixed(4)+','+q.y.toFixed(4);
         const old = shared && shared[1];
-        const shape = roundPostAt(state.polys, q) ? 'round' : 'square';
+        const shape = postShapeAt(state.polys,state.mat,q,mat);
         if (!old || H > old.H)
           posts.set(key, { q, H, ang, shape:old && old.shape === 'round' ? 'round' : shape });
         else if (shape === 'round') old.shape = 'round';
@@ -2444,7 +2521,7 @@ function updateTotals(){
   // per-fence breakdown, once there's more than one line
   const cur = matScope().idx;
   $('perFence').innerHTML = (m.per.length > 1 || m.per.some(f => f.excluded)) ? m.per.map(f =>
-    `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${f.excluded ? 'Excluded from materials' : `${f.panels} panels · ${f.gates} gates · end posts: ${endsOf(f.mat)}`}">` +
+    `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${f.excluded ? 'Excluded from materials' : `${f.squarePosts} square · ${f.roundPosts} round · ${f.panels} panels · ${f.gates} gates · end posts: ${endsOf(f.mat)}`}">` +
     `<span>${escHTML(f.name)}${f.excluded ? '' : (f.own ? ' ⚙' : '') + (endsOf(f.mat) === 'auto' ? '' : ' ✂')}</span>` +
     `<span>${f.excluded ? 'Not in materials' : `${fmtLen(f.len, u)} · ${f.posts} posts`}</span></div>`).join('') : '';
   $('tLen').textContent = fmtLen(m.fenceLen, u);
@@ -2458,6 +2535,10 @@ function updateTotals(){
     ? `${m.panels} panels, ${m.corners} corners, ${m.gates.length} gate${m.gates.length===1?'':'s'}` +
       (m.shared ? `, ${m.shared} shared junction${m.shared===1?'':'s'}` : '')
     : '';
+  $('tSquarePosts').textContent = m.squarePosts;
+  $('tRoundPosts').textContent = m.roundPosts;
+  $('rowSquarePosts').style.display = m.squarePosts ? '' : 'none';
+  $('rowRoundPosts').style.display = m.roundPosts ? '' : 'none';
   $('tRails').textContent = m.rails;
   $('tPalings').textContent = m.palings;
   $('tHR').textContent = fmtLen(m.handrail, u);
@@ -2478,6 +2559,7 @@ function syncReadOnlyDetails(){
     ['Style', M.style === 'rail' ? 'Rails only' : 'Palings'],
     ['Height', fmtLen(M.height,u)],
     ['Post spacing', fmtLen(M.spacing,u)],
+    ['Post shape', postShapeOf(M) === 'round' ? 'Round' : 'Square'],
     ['End posts', String(endsOf(M) === 'auto' ? 'Auto' : endsOf(M))],
     ['Rails per panel', String(M.rails)],
   ];
@@ -2532,12 +2614,14 @@ function syncMatInputs(){
   const small = v => u==='m' ? Math.round(v*1000) : +(v/IN).toFixed(2);
   set('iSpacing', big(M.spacing));  set('iHeight', big(M.height));
   set('iRails', M.rails);
+  if (document.activeElement !== $('iFencePostShape'))
+    $('iFencePostShape').value = postShapeOf(M);
   if (document.activeElement !== $('iEnds')) $('iEnds').value = String(endsOf(M));
   const selectedPoint = sel && sel.t === 'pt' && state.polys[sel.p] &&
                         state.polys[sel.p].pts[sel.i];
   $('postShapeWrap').style.display = selectedPoint ? 'flex' : 'none';
   if (selectedPoint && document.activeElement !== $('iPostShape'))
-    $('iPostShape').value = postShapeOf(selectedPoint);
+    $('iPostShape').value = ownPostShape(selectedPoint) || 'inherit';
   set('iPaling', small(M.paling));  set('iGap', small(M.gap));
   set('iRailW', small(M.railW));    set('iRailGap', small(M.railGap));
   set('iBotOff', small(M.botOff));  set('iTopOff', small(M.topOff));
@@ -3217,12 +3301,18 @@ $('iEnds').addEventListener('change', e => {
   commitEdit(() => M.ends = value);
   updateAll();
 });
+$('iFencePostShape').addEventListener('change', e => {
+  const M = curMat();
+  commitEdit(() => M.postShape = e.target.value === 'round' ? 'round' : 'square');
+  updateAll();
+});
 $('iPostShape').addEventListener('change', e => {
   if (!sel || sel.t !== 'pt') return;
   const point = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
   if (!point) return;
   commitEdit(() => {
-    if (e.target.value === 'round') point.postShape = 'round';
+    if (e.target.value === 'round' || e.target.value === 'square')
+      point.postShape = e.target.value;
     else delete point.postShape;
   });
   updateAll();
@@ -3273,7 +3363,7 @@ $('copyBtn').addEventListener('click', () => {
   L.push('');
   const hrDesc = M => { const h = hrOf(M);
     return h.on ? ', handrail ' + fmtSmall(h.w,u) + ' × ' + fmtSmall(h.t,u) : ''; };
-  const desc = M => (M.style === 'rail'
+  const desc = M => (postShapeOf(M) + ' posts, ') + (M.style === 'rail'
     ? 'post-and-rail: posts every ' + fmtLen(M.spacing,u) + ', ' + M.rails + ' rails/panel, ' +
       fmtSmall(M.railW,u) + ' rails'
     : 'posts every ' + fmtLen(M.spacing,u) + ', ' + M.rails + ' rails/panel, palings ' +
@@ -3282,13 +3372,16 @@ $('copyBtn').addEventListener('click', () => {
     for (const f of m.per){
       if (f.excluded){ L.push(f.name + ' — excluded from materials'); continue; }
       L.push(f.name + ' — ' + fmtLen(f.len,u) + ' (' + desc(f.mat) + ')');
-      L.push('  Posts ' + f.posts + ' · Rails ' + f.rails + (f.palings ? ' · Palings ' + f.palings : '') +
+      L.push('  Posts ' + f.posts + ` (${f.squarePosts} square, ${f.roundPosts} round)` +
+             ' · Rails ' + f.rails + (f.palings ? ' · Palings ' + f.palings : '') +
              (f.handrail ? ' · Handrail ' + fmtLen(f.handrail,u) : ''));
     }
     L.push('');
     L.push('TOTAL:');
   } else L.push('Materials (' + desc(state.mat) + '):');
   L.push('  Posts:   ' + m.posts);
+  if (m.squarePosts) L.push('    Square: ' + m.squarePosts);
+  if (m.roundPosts) L.push('    Round:  ' + m.roundPosts);
   L.push('  Rails:   ' + m.rails);
   if (m.palings) L.push('  Palings: ' + m.palings);
   if (m.handrail) L.push('  Handrail: ' + fmtLen(m.handrail, u));

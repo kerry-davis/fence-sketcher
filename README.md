@@ -68,6 +68,9 @@ spacing:
 - **End posts** default to `Auto` (count both ends, except one already posted by
   an earlier fence). Override with Both / One / None when the ends are already
   posted — fixed to a building, say.
+- **Post shape** can be square or round for a complete fence run. Selecting an
+  individual post allows that one point to inherit the fence setting or override
+  it as square or round. The materials summary counts each shape separately.
 
 So a straight 10 m run at 1.5 m spacing is 7 panels and 8 posts; bend it into
 two 5 m legs and it becomes 8 panels and 9 posts. Rails are `panels × rails per
