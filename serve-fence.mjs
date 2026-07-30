@@ -37,6 +37,20 @@ function writeShareIndex(value){
   fs.writeFileSync(temp, JSON.stringify(value, null, 2), { mode:0o600 });
   fs.renameSync(temp, SH_INDEX);
 }
+function listShares(){
+  const index = readShareIndex(), now = Date.now();
+  let changed = false;
+  const list = Object.entries(index).flatMap(([name, value]) => {
+    if (value.expiresAt && Date.parse(value.expiresAt) <= now) {
+      delete index[name]; changed = true; return [];
+    }
+    return [{
+      name, url:value.url, expiresAt:value.expiresAt, updatedAt:value.updatedAt,
+    }];
+  }).sort((a,b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  if (changed) writeShareIndex(index);
+  return list;
+}
 function shareConfigured(){
   try {
     const url = new URL(SHARE_API);
@@ -93,6 +107,11 @@ http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/share-config')
     return send(200, JSON.stringify({ configured:shareConfigured() }));
+
+  if (req.method === 'GET' && url.pathname === '/shares') {
+    if (!shareConfigured()) return send(503, '{"err":"not configured"}');
+    return send(200, JSON.stringify(listShares()));
+  }
 
   const sm = url.pathname.match(/^\/shares\/([a-zA-Z0-9._-]{1,64})$/);
   if (sm) {

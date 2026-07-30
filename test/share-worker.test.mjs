@@ -209,7 +209,15 @@ test('private server proxies share management and backup deletion revokes the li
   assert.equal(response.status, 200);
   const shared = await response.json();
   assert.match(shared.url, /\/share\/[A-Za-z0-9_-]{43}$/);
+  const token = shared.url.split('/').pop();
   assert.equal(JSON.stringify(shared).includes(fixtureValue.env.SHARE_ADMIN_TOKEN), false);
+  response = await request('/shares');
+  assert.equal(response.status, 200);
+  let listed = await response.json();
+  assert.deepEqual(listed.map(item => item.name), ['Back-fence']);
+  assert.equal(listed[0].url, shared.url);
+  assert.equal(JSON.stringify(listed).includes(token), true);
+  assert.equal(Object.hasOwn(listed[0], 'token'), false);
 
   response = await request('/backups/Back-fence', {
     method:'PATCH',
@@ -217,11 +225,13 @@ test('private server proxies share management and backup deletion revokes the li
     body:JSON.stringify({name:'Rear-fence'}),
   });
   assert.equal(response.status, 200);
-  const token = shared.url.split('/').pop();
   const renamed = await (await fixtureValue.call(`/api/shares/${token}`)).json();
   assert.equal(renamed.title, 'Rear-fence');
+  listed = await (await request('/shares')).json();
+  assert.deepEqual(listed.map(item => item.name), ['Rear-fence']);
 
   response = await request('/backups/Rear-fence', {method:'DELETE'});
   assert.equal(response.status, 200);
   assert.equal((await fixtureValue.call(`/api/shares/${token}`)).status, 404);
+  assert.deepEqual(await (await request('/shares')).json(), []);
 });
