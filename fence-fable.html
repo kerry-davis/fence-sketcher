@@ -195,6 +195,11 @@
   #shareActive{display:none}
   .shareActions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
   #shareStop{color:#b91c1c;border-color:#e5c4c4}
+  #shareStopPanel{margin-top:12px;padding:12px;background:#b91c1c0d;border:1px solid #e5c4c4;
+                  border-radius:10px}
+  #shareStopPanel p{margin:0 0 10px;color:var(--ink);font-size:13px}
+  .shareStopActions{display:flex;justify-content:flex-end;gap:8px}
+  #shareStopConfirm{color:#fff;background:#b91c1c;border-color:#b91c1c}
   #shareDialogStatus{min-height:18px;font-size:12px;margin:8px 0 0}
   #shareDialogStatus[data-kind="error"]{color:#b91c1c}
   #shareDialogStatus[data-kind="success"]{color:var(--accent)}
@@ -364,7 +369,7 @@
       <button id="bOrbitSpeed" title="Orbit speed: 15 degrees per second"
               aria-label="Orbit speed: 15 degrees per second">15°</button>
     </div>
-    <button id="fdel" title="Delete">✕</button>
+    <button id="fdel" class="editorOnly" title="Delete">✕</button>
     <div id="gridcap" title="Grid spacing adapts automatically as you zoom"></div>
     <div id="shareState" role="status" aria-live="polite">
       <div class="shareStateCard">
@@ -484,7 +489,14 @@
       <p class="note" id="shareExpiryNote"></p>
       <div class="shareActions">
         <button id="shareUpdate">Update shared view</button>
-        <button id="shareStop">Stop sharing</button>
+        <button id="shareStop" aria-expanded="false" aria-controls="shareStopPanel">Remove public link</button>
+      </div>
+      <div id="shareStopPanel" hidden>
+        <p><strong>Remove this public link?</strong><br>Anyone using it will immediately lose access. Your saved drawing will not be deleted.</p>
+        <div class="shareStopActions">
+          <button id="shareStopCancel">Cancel</button>
+          <button id="shareStopConfirm">Remove link</button>
+        </div>
       </div>
     </div>
     <p id="shareDialogStatus" role="status" aria-live="polite"></p>
@@ -909,6 +921,12 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   return { d: Math.hypot(px-(ax+t*dx), py-(ay+t*dy)), t };
 }
 
+function freezeTree(value){
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) freezeTree(child);
+  return Object.freeze(value);
+}
+
 /* ---- self-checks: silent unless something fails ---- */
 (function selfTest(){
   let fails = 0;
@@ -923,6 +941,11 @@ function dist2seg(px,py, ax,ay, bx,by){       // point-to-segment distance
   chk(fmtLen(12*FT+6*IN,'ft') === "12' 6\"", 'fmt ft');
   chk(fmtLen(2.4,'m') === '2.4 m', 'fmt m');
   chk(fmtLen(11.999*IN + 11*FT,'ft') === "12' 0\"", 'fmt inch carry');
+  const frozen = freezeTree({items:[{x:1}]});
+  let frozenSplice = false;
+  try { frozen.items.splice(0,1); } catch { frozenSplice = true; }
+  chk(frozenSplice && frozen.items.length === 1 && Object.isFrozen(frozen.items[0]),
+      'read-only drawing tree is immutable');
   const namedGate = {pts:[{x:0,y:0,gateAfter:true},{x:1,y:0}], closed:false};
   const namedFence = {pts:[{x:0,y:0},{x:1,y:0}], closed:false};
   chk(defaultFenceName(namedGate,0) === 'Gate 1' && fenceCode(namedGate,0) === 'G1',
@@ -1506,6 +1529,7 @@ function pushUndo(){
   redoStack = [];
 }
 function undo(){
+  if (readOnly) return;
   const s = undoStack.pop();
   if (!s) return;
   redoStack.push(JSON.stringify({ polys: state.polys, builds: state.builds }));
@@ -1515,6 +1539,7 @@ function undo(){
   sel = null; bsel.clear(); updateAll();
 }
 function redo(){
+  if (readOnly) return;
   const s = redoStack.pop();
   if (!s) return;
   undoStack.push(JSON.stringify({ polys: state.polys, builds: state.builds }));
@@ -1529,6 +1554,7 @@ function drawTarget(){
   return pl && !pl.closed && !pl.done ? pl : null;
 }
 function addPoint(w){
+  if (readOnly) return;
   pushUndo();
   let pl = drawTarget();
   if (!pl){ pl = { pts:[], closed:false }; state.polys.push(pl); }
@@ -1536,16 +1562,19 @@ function addPoint(w){
   updateAll();
 }
 function closeLoop(){
+  if (readOnly) return;
   const pl = drawTarget();
   if (!pl || pl.pts.length < 3) return;
   pushUndo(); pl.closed = true; updateAll();
 }
 function endLine(){
+  if (readOnly) return;
   const pl = drawTarget();
   if (!pl) return;
   pushUndo(); pl.done = true; updateAll();
 }
 function addBuilding(){
+  if (readOnly) return;
   pushUndo();
   const [bw,bh,bz] = DEF_BLD[state.unit];
   const c = snapGridPt(S2W(cw/2, ch/2));
@@ -1555,6 +1584,7 @@ function addBuilding(){
   updateAll();
 }
 function deleteSelected(){
+  if (readOnly) return;
   if (!sel) return;
   pushUndo();
   if (sel.t==='pt')  deletePoint(state.polys, sel.p, sel.i);
@@ -1563,6 +1593,7 @@ function deleteSelected(){
   sel = null; bsel.clear(); updateAll();
 }
 function clearAll(){
+  if (readOnly) return;
   if (!confirm('Clear the whole drawing?')) return;
   pushUndo();
   state.polys = []; state.builds = []; sel = null; bsel.clear();
@@ -1572,6 +1603,7 @@ function clearAll(){
 // ponytail: locks are enforced one neighbour at a time — with BOTH sides locked the first may
 // drift slightly; a real constraint solver is the upgrade if that ever matters.
 function movePoint(p, i, w){
+  if (readOnly) return;
   const pl = state.polys[p], n = pl.pts.length;
   // align against a neighbouring point while dragging, too
   const prevI = pl.closed ? (i-1+n)%n : i-1, nextI = pl.closed ? (i+1)%n : i+1;
@@ -2630,6 +2662,7 @@ function selectBuilding(i, additive){
   return true;
 }
 function groupSelected(){
+  if (readOnly) return;
   if (!sel || sel.t!=='bld') return;
   const ids = [...bsel];
   pushUndo();
@@ -2637,6 +2670,7 @@ function groupSelected(){
   sel.i = ids[0]; updateAll();
 }
 function ungroupSelected(){
+  if (readOnly) return;
   if (!sel || sel.t!=='bld') return;
   const ids = [...bsel];
   pushUndo();
@@ -2847,6 +2881,7 @@ cv.addEventListener('pointerleave', () => {
 
 // Pick drawing a line back up from one of its ends.
 function resumeLine(p, i){
+  if (readOnly) return;
   const pl = state.polys[p], last = pl.pts.length - 1;
   pushUndo();
   if (i === 0 && last > 0) reversePoly(pl);     // continue from the old start
@@ -3204,6 +3239,9 @@ async function loadSharedDrawing(){
       !Array.isArray(value.snapshot.polys) || !Array.isArray(value.snapshot.builds))
     throw new Error('This view-only link is invalid, expired, or has been stopped.');
   applyState(value.snapshot);
+  freezeTree(state.polys);
+  freezeTree(state.builds);
+  freezeTree(state.mat);
   const title = String(value.title || 'Shared fence plan');
   document.title = title + ' — View-only fence plan';
   $('appTitle').textContent = title;
@@ -3226,7 +3264,6 @@ const BK_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 let bkCurrent = '';
 let bkItems = [], bkDialogAction = null, bkBusy = false;
 let shareAvailable = false, currentShare = null, shareSource = '', shareBusy = false;
-let shareRevokeTimer = 0;
 try { bkCurrent = localStorage.getItem(BK_KEY) || ''; } catch(e) {}
 
 function setBkCurrent(name){
@@ -3294,9 +3331,15 @@ function setShareStatus(message, kind=''){
 }
 function setShareBusy(busy){
   shareBusy = busy;
-  for (const id of ['shareExpiry','shareCreate','shareCopy','shareUpdate','shareStop','shareClose'])
+  for (const id of ['shareExpiry','shareCreate','shareCopy','shareUpdate','shareStop',
+                    'shareStopCancel','shareStopConfirm','shareClose'])
     $(id).disabled = busy;
   $('shareDialog').setAttribute('aria-busy', String(busy));
+}
+function setStopSharingOpen(open){
+  $('shareStopPanel').hidden = !open;
+  $('shareStop').setAttribute('aria-expanded', String(open));
+  if (open) $('shareStopConfirm').focus();
 }
 function expiryText(value){
   if (!value) return 'This link does not expire. You can stop sharing it at any time.';
@@ -3304,6 +3347,7 @@ function expiryText(value){
 }
 function syncShareDialog(){
   const active = !!currentShare;
+  setStopSharingOpen(false);
   $('shareCreate').style.display = active ? 'none' : '';
   $('shareActive').style.display = active ? 'block' : 'none';
   if (active){
@@ -3377,29 +3421,14 @@ async function copyShareLink(){
 }
 async function stopSharing(){
   if (!currentShare || shareBusy) return;
-  if (!$('shareStop').dataset.armed){
-    $('shareStop').dataset.armed = 'true';
-    $('shareStop').textContent = 'Confirm stop sharing';
-    setShareStatus('The link will stop working immediately.');
-    clearTimeout(shareRevokeTimer);
-    shareRevokeTimer = setTimeout(() => {
-      delete $('shareStop').dataset.armed;
-      $('shareStop').textContent = 'Stop sharing';
-      setShareStatus('');
-    }, 5000);
-    return;
-  }
-  clearTimeout(shareRevokeTimer); setShareBusy(true);
+  setShareBusy(true);
+  setShareStatus('Removing public link…');
   try {
     await shareRequest(shareSource, {method:'DELETE'});
     currentShare = null; syncShareDialog();
-    setShareStatus('Sharing stopped. The old link no longer works.', 'success');
+    setShareStatus('Public link removed. The old link no longer works.', 'success');
   } catch(error) { setShareStatus(error.message, 'error'); }
-  finally {
-    delete $('shareStop').dataset.armed;
-    $('shareStop').textContent = 'Stop sharing';
-    setShareBusy(false);
-  }
+  finally { setShareBusy(false); }
 }
 async function refreshBackups(preferred=''){
   const wasVisible = $('bkSec').style.display !== 'none';
@@ -3566,7 +3595,11 @@ $('shareCreate').addEventListener('click', () => publishShare('POST'));
 $('shareCopy').addEventListener('click', () => copyShareLink().catch(error =>
   setShareStatus(error.message, 'error')));
 $('shareUpdate').addEventListener('click', () => publishShare('PUT'));
-$('shareStop').addEventListener('click', stopSharing);
+$('shareStop').addEventListener('click', () => {
+  if (currentShare && !shareBusy){ setShareStatus(''); setStopSharingOpen(true); }
+});
+$('shareStopCancel').addEventListener('click', () => setStopSharingOpen(false));
+$('shareStopConfirm').addEventListener('click', stopSharing);
 $('shareClose').addEventListener('click', () => {
   if (!shareBusy) $('shareDialog').close();
 });
