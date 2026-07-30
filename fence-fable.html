@@ -455,6 +455,11 @@
           <option value="auto">Auto</option>
           <option value="2">Both ends</option><option value="1">One end</option><option value="0">None</option>
         </select></span></div>
+      <div class="row" id="postShapeWrap" style="display:none">
+        <span>Selected post shape</span>
+        <span><select id="iPostShape" style="min-height:38px;padding:6px">
+          <option value="square">Square (default)</option><option value="round">Round</option>
+        </select></span></div>
       <div class="row"><span>Fence height</span><span><input id="iHeight" inputmode="decimal"> <span class="unit" id="uHeight">m</span></span></div>
       <div class="row"><span>Rails per panel</span><span><input id="iRails" inputmode="numeric"> <span class="unit"></span></span></div>
       <div class="row onlyPaling"><span>Paling width</span><span><input id="iPaling" inputmode="decimal"> <span class="unit" id="uPaling">mm</span></span></div>
@@ -2524,6 +2529,11 @@ function syncMatInputs(){
   set('iSpacing', big(M.spacing));  set('iHeight', big(M.height));
   set('iRails', M.rails);
   if (document.activeElement !== $('iEnds')) $('iEnds').value = String(endsOf(M));
+  const selectedPoint = sel && sel.t === 'pt' && state.polys[sel.p] &&
+                        state.polys[sel.p].pts[sel.i];
+  $('postShapeWrap').style.display = selectedPoint ? 'flex' : 'none';
+  if (selectedPoint && document.activeElement !== $('iPostShape'))
+    $('iPostShape').value = postShapeOf(selectedPoint);
   set('iPaling', small(M.paling));  set('iGap', small(M.gap));
   set('iRailW', small(M.railW));    set('iRailGap', small(M.railGap));
   set('iBotOff', small(M.botOff));  set('iTopOff', small(M.topOff));
@@ -2675,30 +2685,14 @@ function updateSelbox(){
 
   } else {
     const pl = state.polys[sel.p];
-    const point = pl && pl.pts[sel.i];
     // an end of an open run can be picked back up and drawn from
     const isEnd = pl && !pl.closed && (sel.i === 0 || sel.i === pl.pts.length-1);
     if (key !== lastSelKey){
       box.innerHTML = '<h2>Selected fence point</h2>' +
-        '<div class="row"><span>Post shape</span><span><select id="iPostShape" style="min-height:38px;padding:6px">' +
-          '<option value="square">Square (default)</option><option value="round">Round</option>' +
-        '</select></span></div>' +
         (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
-        '<p class="note">This changes only the post at this point. Drag to move; deleting it joins the neighbouring segments.</p>';
-      $('iPostShape').addEventListener('change', e => {
-        if (!sel || sel.t !== 'pt') return;
-        const q = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
-        if (!q) return;
-        commitEdit(() => {
-          if (e.target.value === 'round') q.postShape = 'round';
-          else delete q.postShape;
-        });
-        updateAll();
-      });
+        '<p class="note">Drag to move. Deleting it joins the neighbouring segments.</p>';
       if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
     }
-    if (point && document.activeElement !== $('iPostShape'))
-      $('iPostShape').value = postShapeOf(point);
   }
   // bring the panel into view when the selection changes (it lives at the top of the sidebar)
   if (key !== lastSelKey) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -3217,6 +3211,16 @@ $('iHR').addEventListener('change', e => {
 $('iEnds').addEventListener('change', e => {
   const M = curMat(), value = e.target.value === 'auto' ? 'auto' : +e.target.value;
   commitEdit(() => M.ends = value);
+  updateAll();
+});
+$('iPostShape').addEventListener('change', e => {
+  if (!sel || sel.t !== 'pt') return;
+  const point = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+  if (!point) return;
+  commitEdit(() => {
+    if (e.target.value === 'round') point.postShape = 'round';
+    else delete point.postShape;
+  });
   updateAll();
 });
 $('matInclude').addEventListener('change', e => {
