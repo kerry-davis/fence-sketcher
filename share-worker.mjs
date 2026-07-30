@@ -164,7 +164,7 @@ async function getShare(env, token) {
 }
 
 async function sharePage(request, env) {
-  const assetUrl = new URL('/index.html', request.url);
+  const assetUrl = new URL('/', request.url);
   const asset = await env.ASSETS.fetch(new Request(assetUrl, request));
   if (!asset.ok) return json({ err: 'viewer unavailable' }, 503);
   const headers = new Headers(asset.headers);
