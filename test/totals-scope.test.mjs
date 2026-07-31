@@ -38,3 +38,34 @@ test('selected totals use one fence entry and the toggle restores the aggregate'
   assert.strictEqual(context.scopeTotals(all, 1, true), all);
   assert.strictEqual(context.scopeTotals(all, -1, false), all);
 });
+
+test('copy summary reports gate leaf materials and follows the totals scope', () => {
+  const helperStart = html.indexOf('function copyGateMaterials(');
+  const helperEnd = html.indexOf('// copy summary', helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(html.slice(helperStart, helperEnd), context);
+
+  assert.equal(
+    context.copyGateMaterials({
+      gates:1, gateRails:2, gatePalings:17,
+      mat:{style:'paling'}, excludeRails:false, excludePalings:false,
+    }),
+    'Gate rails 2 · Gate palings 17',
+  );
+  assert.equal(
+    context.copyGateMaterials({
+      gates:1, gateRails:0, gatePalings:0,
+      mat:{style:'paling'}, excludeRails:true, excludePalings:true,
+    }),
+    'Gate rails excluded · Gate palings excluded',
+  );
+
+  const copyStart = html.indexOf('// copy summary');
+  const copy = html.slice(copyStart, html.indexOf('function fallbackCopy', copyStart));
+  assert.match(copy, /const t = scopeTotals\(m, sc\.idx, showAllTotals\);/);
+  assert.match(copy, /const entries = showAllTotals \|\| !sc\.pl \? m\.per/);
+  assert.match(copy, /if \(sc\.pl && !showAllTotals\) L\.push\('Fence: ' \+ fenceName/);
+  assert.match(copy, /Gate leaf materials: Rails ' \+ t\.gateRails \+ ' · Palings ' \+ t\.gatePalings/);
+});

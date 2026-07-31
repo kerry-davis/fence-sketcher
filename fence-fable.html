@@ -3675,14 +3675,26 @@ document.querySelectorAll('#styleTog button').forEach(b =>
     syncMatInputs(); updateAll();
   }));
 
+function copyGateMaterials(f){
+  if (!f.gates) return '';
+  const parts = [f.excludeRails ? 'Gate rails excluded' : 'Gate rails ' + f.gateRails];
+  if (f.mat.style !== 'rail')
+    parts.push(f.excludePalings ? 'Gate palings excluded' : 'Gate palings ' + f.gatePalings);
+  return parts.join(' · ');
+}
+
 // copy summary
 $('copyBtn').addEventListener('click', () => {
-  const m = calcMaterials(state.polys, state.mat), u = state.unit;
+  const m = calcMaterials(state.polys, state.mat), u = state.unit, sc = matScope();
+  const t = scopeTotals(m, sc.idx, showAllTotals);
+  const entries = showAllTotals || !sc.pl ? m.per : m.per.filter(f => f.i === sc.idx);
+  const detail = entries.some(f => f.own || f.excluded || f.excludeRails || f.excludePalings);
   const L = [];
   L.push('FENCE SUMMARY — ' + new Date().toLocaleDateString());
-  L.push('Fence length (excl. gates): ' + fmtLen(m.fenceLen, u));
-  L.push('Segments: ' + m.segCount + '   Corners: ' + m.corners);
-  L.push('Gates: ' + (m.gates.length ? m.gates.map(g => fmtLen(g,u)).join(', ') : 'none'));
+  if (sc.pl && !showAllTotals) L.push('Fence: ' + fenceName(sc.pl,sc.idx));
+  L.push('Fence length (excl. gates): ' + fmtLen(t.fenceLen, u));
+  L.push('Segments: ' + t.segCount + '   Corners: ' + t.corners);
+  L.push('Gates: ' + (t.gates.length ? t.gates.map(g => fmtLen(g,u)).join(', ') : 'none'));
   if (state.builds.length)
     L.push('Buildings: ' + houseGroups(state.builds).map(g => {
       const hb = houseBox(state.builds, g);
@@ -3701,24 +3713,27 @@ $('copyBtn').addEventListener('click', () => {
       (f && f.excludeRails ? 'rails excluded from BOM' : M.rails + ' rails/panel') + ', ' +
       (f && f.excludePalings ? 'palings excluded from BOM' : 'palings ' +
        fmtSmall(M.paling,u) + ' + ' + fmtSmall(M.gap,u) + ' gap')) + hrDesc(M);
-  if (m.per.some(f => f.own || f.excluded || f.excludeRails || f.excludePalings)){ // fences differ — break the list down per fence
-    for (const f of m.per){
+  if (detail){ // fences differ — break the list down per fence
+    for (const f of entries){
       if (f.excluded){ L.push(f.name + ' — excluded from materials'); continue; }
       L.push(f.name + ' — ' + fmtLen(f.len,u) + ' (' + desc(f.mat, f) + ')');
       L.push('  Posts ' + f.posts + ` (${f.squarePosts} square, ${f.roundPosts} round)` +
              (f.excludeRails ? ' · Rails excluded' : ' · Rails ' + f.rails) +
              (f.excludePalings ? ' · Palings excluded' : (f.palings ? ' · Palings ' + f.palings : '')) +
+             (f.gates ? ' · ' + copyGateMaterials(f) : '') +
             (f.handrail ? ' · Handrail ' + fmtLen(f.handrail,u) : ''));
     }
     L.push('');
     L.push('TOTAL:');
-  } else L.push('Materials (' + desc(state.mat) + '):');
-  L.push('  Posts:   ' + m.posts);
-  if (m.squarePosts) L.push('    Square: ' + m.squarePosts);
-  if (m.roundPosts) L.push('    Round:  ' + m.roundPosts);
-  L.push('  Rails:   ' + m.rails);
-  if (m.palings) L.push('  Palings: ' + m.palings);
-  if (m.handrail) L.push('  Handrail: ' + fmtLen(m.handrail, u));
+  } else L.push('Materials (' + desc(t.mat || state.mat) + '):');
+  if (t.gates.length)
+    L.push('Gate leaf materials: Rails ' + t.gateRails + ' · Palings ' + t.gatePalings);
+  L.push('  Posts:   ' + t.posts);
+  if (t.squarePosts) L.push('    Square: ' + t.squarePosts);
+  if (t.roundPosts) L.push('    Round:  ' + t.roundPosts);
+  L.push('  Rails:   ' + t.rails);
+  if (t.palings) L.push('  Palings: ' + t.palings);
+  if (t.handrail) L.push('  Handrail: ' + fmtLen(t.handrail, u));
   const text = L.join('\n');
   const done = () => {
     $('copyBtn').textContent = '✓ Copied';
