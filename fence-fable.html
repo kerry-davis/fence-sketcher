@@ -1919,7 +1919,6 @@ function doPaint(){
         ctx.restore();
       }
     }
-    const hb = houseBox(state.builds, g);
     if (hasRoof(hb) && roofKind(hb) !== 'skillion'){
       const mid = roofAxis(hb) === 'x' ? hb.x+hb.w/2 : hb.y+hb.h/2;
       const line = roofAxis(hb) === 'x'
