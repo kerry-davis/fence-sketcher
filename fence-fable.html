@@ -165,6 +165,13 @@
   .bkPrimaryActions{display:grid;grid-template-columns:1.15fr 1fr;gap:8px;padding:0 16px 16px}
   .bkPrimaryActions button{width:100%;border-radius:11px}
   #bkSaveAs{background:var(--bg)}
+  .bkLocal{padding:15px 16px 16px;border-top:1px solid var(--line)}
+  .bkLocalHead{margin-bottom:9px}
+  .bkLocalHead span{display:block;font-size:11px;font-weight:700;letter-spacing:.055em;
+                    text-transform:uppercase;color:var(--muted)}
+  .bkLocalHead small{display:block;margin-top:3px;color:var(--muted);font-size:12px}
+  .bkLocalActions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .bkLocalActions button{width:100%;border-radius:11px}
   #bkShare{display:none;width:calc(100% - 32px);margin:0 16px 16px}
   .bkLibrary{padding:15px 16px 16px;border-top:1px solid var(--line)}
   .bkLibrary>label{margin-bottom:7px}
@@ -331,6 +338,17 @@
         <button id="bkSave" class="primary">Save changes</button>
         <button id="bkSaveAs" title="Save as a new drawing">Save as new</button>
       </div>
+      <section class="bkLocal" aria-labelledby="bkLocalTitle">
+        <div class="bkLocalHead">
+          <span id="bkLocalTitle">External backup</span>
+          <small>All saved drawings and the current canvas. Public share links are not included.</small>
+        </div>
+        <div class="bkLocalActions">
+          <button id="bkDownload" class="primary">Download all files</button>
+          <button id="bkRestore">Restore all files</button>
+        </div>
+        <input id="bkRestoreInput" type="file" accept=".json,application/json" hidden>
+      </section>
       <button id="bkShare">↗ Share view</button>
       <div class="bkLibrary">
         <label for="bkList">Saved drawings</label>
@@ -514,6 +532,13 @@
       <label id="bkNameWrap" for="bkName">Drawing name
         <input id="bkName" maxlength="64" autocomplete="off" spellcheck="false">
       </label>
+      <label id="bkRestoreModeWrap" for="bkRestoreMode" style="display:none">Existing drawings
+        <select id="bkRestoreMode">
+          <option value="skip">Keep existing drawings</option>
+          <option value="replace">Replace existing drawings</option>
+        </select>
+      </label>
+      <p class="fieldHint" id="bkRestoreSummary"></p>
       <p class="fieldHint" id="bkNameHint">Use letters, numbers, dots, hyphens, or underscores.</p>
       <p id="bkDialogError" role="alert"></p>
       <div class="dialogActions">
@@ -3678,8 +3703,13 @@ function syncControls(){   // push state back into the toolbar/panel widgets aft
    Save as, Open, Rename, and Delete use confirmed dialog workflows. */
 const BK_KEY = 'fenceFable.backupName';
 const BK_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+const BK_FILE_RE = /^[a-zA-Z0-9._-]{1,64}$/;
+const MAX_BACKUP_BODY = 1_900_000;
+const FULL_EXTERNAL_MAX = 25 * 1024 * 1024;
+const FULL_EXTERNAL_MAX_FILES = 1000;
 let bkCurrent = '';
-let bkItems = [], bkDialogAction = null, bkBusy = false;
+let bkItems = [], bkDialogAction = null, bkBusy = false, bkServerAvailable = false;
+let pendingExternalRestore = null;
 let shareAvailable = false, currentShare = null, shareSource = '', shareBusy = false;
 let sharedItems = [];
 try { bkCurrent = localStorage.getItem(BK_KEY) || ''; } catch(e) {}
@@ -3697,6 +3727,51 @@ function bkAutoName(){
 }
 const bkSelected = () => $('bkList').value;
 const bkPath = name => 'backups/' + encodeURIComponent(name);
+function externalLibraryFileName(){
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  return `fence-sketcher-backup-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.json`;
+}
+function externalSnapshot(value){
+  const envelope = !!(value && value.format === 'fence-sketcher');
+  if (envelope && value.formatVersion !== 1)
+    throw new Error('This Fence Sketcher file version is not supported.');
+  const snapshot = envelope ? value.snapshot : value;
+  if (!snapshot || !Array.isArray(snapshot.polys) || !Array.isArray(snapshot.builds) ||
+      (snapshot.v !== undefined && snapshot.v !== 1 && snapshot.v !== 2))
+    throw new Error('Choose a valid Fence Sketcher JSON file.');
+  return snapshot;
+}
+function externalLibrary(value){
+  if (value && value.format === 'fence-sketcher'){
+    const snapshot = externalSnapshot(value);
+    if (JSON.stringify(snapshot).length > MAX_BACKUP_BODY)
+      throw new Error('A drawing in this backup is too large for the file server.');
+    const name = typeof value.drawingName === 'string' && BK_FILE_RE.test(value.drawingName)
+      ? value.drawingName : 'restored-drawing';
+    return { drawings:[{name, snapshot}], currentDrawing:name, currentSnapshot:snapshot };
+  }
+  if (!value || value.format !== 'fence-sketcher-library' || value.formatVersion !== 1 ||
+      !Array.isArray(value.drawings) || value.drawings.length > FULL_EXTERNAL_MAX_FILES)
+    throw new Error('Choose a valid full Fence Sketcher backup file.');
+  const names = new Set();
+  const drawings = value.drawings.map(entry => {
+    if (!entry || typeof entry.name !== 'string' || !BK_FILE_RE.test(entry.name) || names.has(entry.name))
+      throw new Error('The full backup contains an invalid or duplicate drawing name.');
+    names.add(entry.name);
+    const snapshot = externalSnapshot(entry.snapshot);
+    if (JSON.stringify(snapshot).length > MAX_BACKUP_BODY)
+      throw new Error(`Drawing “${entry.name}” is too large for the file server.`);
+    return {name:entry.name, snapshot};
+  });
+  const currentDrawing = typeof value.currentDrawing === 'string' ? value.currentDrawing : '';
+  if (currentDrawing && !BK_FILE_RE.test(currentDrawing))
+    throw new Error('The full backup contains an invalid current drawing name.');
+  return {
+    drawings,
+    currentDrawing,
+    currentSnapshot: value.currentSnapshot ? externalSnapshot(value.currentSnapshot) : null,
+  };
+}
 function setBkStatus(message, kind=''){
   $('bkStatus').textContent = message;
   $('bkStatus').dataset.kind = kind;
@@ -3704,9 +3779,11 @@ function setBkStatus(message, kind=''){
 function syncBkActions(){
   const hasSelection = !!bkSelected();
   $('bkList').disabled = bkBusy || !bkItems.length;
-  $('bkSave').disabled = bkBusy;
-  $('bkSaveAs').disabled = bkBusy;
-  for (const id of ['bkLoad','bkRen','bkDel']) $(id).disabled = bkBusy || !hasSelection;
+  $('bkSave').disabled = bkBusy || !bkServerAvailable;
+  $('bkSaveAs').disabled = bkBusy || !bkServerAvailable;
+  for (const id of ['bkLoad','bkRen','bkDel']) $(id).disabled = bkBusy || !bkServerAvailable || !hasSelection;
+  $('bkDownload').disabled = bkBusy || !bkServerAvailable;
+  $('bkRestore').disabled = bkBusy || !bkServerAvailable;
   $('bkSec').setAttribute('aria-busy', String(bkBusy));
   syncShareAction();
 }
@@ -3730,7 +3807,7 @@ async function bkRequest(path, options, fallback){
 }
 function syncShareAction(){
   $('bkShare').style.display = shareAvailable ? 'block' : 'none';
-  $('bkShare').disabled = bkBusy || !bkCurrent;
+  $('bkShare').disabled = bkBusy || !bkServerAvailable || !bkCurrent;
   $('bkShare').title = bkCurrent
     ? `Share a view-only snapshot of “${bkCurrent}”`
     : 'Save this drawing before sharing it';
@@ -3904,9 +3981,9 @@ async function stopSharing(){
   finally { setShareBusy(false); }
 }
 async function refreshBackups(preferred=''){
-  const wasVisible = $('bkSec').style.display !== 'none';
   try {
     const list = await bkRequest('backups', {}, 'Could not load saved drawings.');
+    bkServerAvailable = true;
     bkItems = list;
     $('bkSec').style.display = '';
     $('bkList').innerHTML = list.length
@@ -3919,8 +3996,12 @@ async function refreshBackups(preferred=''){
     syncBkActions();
     if (shareAvailable) refreshSharedDrawings();
   } catch(e) {
-    if (wasVisible) setBkStatus(e.message, 'error');
-    else $('bkSec').style.display = 'none'; // local file without the optional server
+    bkServerAvailable = false;
+    bkItems = [];
+    $('bkSec').style.display = '';
+    $('bkList').innerHTML = '<option value="">Server backups unavailable</option>';
+    syncBkActions();
+    setBkStatus(e.message + ' Full external backup requires the file server.', 'error');
   }
 }
 function uniqueBkName(){
@@ -3944,10 +4025,13 @@ function syncBkDialog(){
   $('bkDialogConfirm').disabled = bkBusy || !!error;
 }
 function openBkDialog(type, name=''){
+  const restoreAll = type === 'restoreAll' ? pendingExternalRestore : null;
+  const restoreCount = restoreAll ? restoreAll.library.drawings.length : 0;
   const config = {
     create: ['Save as new drawing','Choose a name before creating this saved copy.','Save drawing'],
     rename: ['Rename saved drawing',`Choose a new name for “${name}”.`,'Rename'],
     open:   ['Open saved drawing?',`Open “${name}” and replace the drawing currently on the canvas? You can Undo this change.`,'Open'],
+    restoreAll:['Restore full backup?',`Restore ${restoreCount} saved drawings from “${name}”? The current canvas will also be replaced.`,'Restore'],
     delete: ['Delete saved drawing?',`Permanently delete “${name}” from gbot? Any view-only link will also stop working. This cannot be undone.`,'Delete'],
   }[type];
   bkDialogAction = {type, name};
@@ -3957,6 +4041,9 @@ function openBkDialog(type, name=''){
   $('bkDialogConfirm').className = type === 'delete' ? 'danger' : 'primary';
   const needsName = type === 'create' || type === 'rename';
   $('bkNameWrap').style.display = $('bkNameHint').style.display = needsName ? '' : 'none';
+  $('bkRestoreModeWrap').style.display = type === 'restoreAll' ? '' : 'none';
+  $('bkRestoreSummary').textContent = type === 'restoreAll'
+    ? `${restoreAll.conflicts.length} existing drawing${restoreAll.conflicts.length === 1 ? '' : 's'} found.` : '';
   $('bkName').value = type === 'create' ? uniqueBkName() : name;
   $('bkDialogError').textContent = '';
   syncBkDialog();
@@ -3967,11 +4054,96 @@ function openBkDialog(type, name=''){
 function setBkDialogBusy(busy){
   $('bkDialogCancel').disabled = busy;
   $('bkName').disabled = busy;
+  $('bkRestoreMode').disabled = busy;
   syncBkDialog();
 }
 function closeBkDialog(){
   if ($('bkDialog').open) $('bkDialog').close();
   bkDialogAction = null;
+  pendingExternalRestore = null;
+  $('bkRestoreModeWrap').style.display = 'none';
+  $('bkRestoreSummary').textContent = '';
+}
+async function collectExternalLibrary(){
+  const list = await bkRequest('backups', {}, 'Could not list saved drawings.');
+  const drawings = [];
+  for (const item of list){
+    if (!item || typeof item.name !== 'string' || !BK_FILE_RE.test(item.name))
+      throw new Error('The server returned an invalid drawing name.');
+    const snapshot = externalSnapshot(await bkRequest(bkPath(item.name), {},
+                                                       'Could not read a saved drawing.'));
+    drawings.push({name:item.name, snapshot});
+  }
+  return { format:'fence-sketcher-library', formatVersion:1,
+           exportedAt:new Date().toISOString(), currentDrawing:bkCurrent,
+           currentSnapshot:statePayload(), drawings };
+}
+async function downloadExternalLibrary(){
+  if (!bkServerAvailable) return;
+  setBkBusy(true); setBkStatus('Preparing full backup…');
+  try {
+    const library = await collectExternalLibrary();
+    const name = externalLibraryFileName();
+    const blob = new Blob([JSON.stringify(library, null, 2) + '\n'],
+                          {type:'application/json'});
+    const url = URL.createObjectURL(blob), link = document.createElement('a');
+    link.href = url; link.download = name; link.rel = 'noopener';
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setBkStatus(`Downloaded ${library.drawings.length} saved drawing${library.drawings.length === 1 ? '' : 's'} as “${name}”.`, 'success');
+  } catch(error) { setBkStatus(error.message || 'Could not create the full backup.', 'error'); }
+  finally { setBkBusy(false); }
+}
+async function chooseExternalLibrary(file){
+  if (!file) return;
+  try {
+    if (file.size > FULL_EXTERNAL_MAX) throw new Error('This file is larger than 25 MB.');
+    if (!bkServerAvailable) throw new Error('Connect to the gbot file server before restoring a full backup.');
+    const library = externalLibrary(JSON.parse(await file.text()));
+    const list = await bkRequest('backups', {}, 'Could not check existing saved drawings.');
+    bkItems = list;
+    const existing = new Set(list.map(item => item.name));
+    const conflicts = library.drawings.filter(item => existing.has(item.name)).map(item => item.name);
+    pendingExternalRestore = { fileName:file.name, library, conflicts };
+    $('bkSec').open = false;
+    openBkDialog('restoreAll', file.name);
+  } catch(error) { setBkStatus(error.message || 'Could not read that full backup.', 'error'); }
+}
+async function restoreExternalLibrary(){
+  const pending = pendingExternalRestore;
+  if (!pending) return;
+  const replace = $('bkRestoreMode').value === 'replace';
+  const conflicts = new Set(pending.conflicts);
+  const entries = pending.library.drawings.filter(item => replace || !conflicts.has(item.name));
+  let restored = 0, skipped = pending.library.drawings.length - entries.length;
+  setBkBusy(true); setBkDialogBusy(true);
+  try {
+    for (const entry of entries){
+      const method = conflicts.has(entry.name) ? 'PUT' : 'POST';
+      await bkRequest(bkPath(entry.name), {
+        method, headers:{'content-type':'application/json'}, body:JSON.stringify(entry.snapshot),
+      }, 'Could not restore a saved drawing.');
+      restored++;
+    }
+    if (pending.library.currentSnapshot){
+      pushUndo();
+      applyState(pending.library.currentSnapshot);
+      sel = null; bsel.clear(); syncControls(); updateAll();
+    }
+    const currentRestored = pending.library.currentDrawing &&
+      pending.library.drawings.some(item => item.name === pending.library.currentDrawing) &&
+      (replace || !conflicts.has(pending.library.currentDrawing));
+    setBkCurrent(currentRestored ? pending.library.currentDrawing : '');
+    await refreshBackups(currentRestored ? pending.library.currentDrawing : '');
+    closeBkDialog();
+    $('bkSec').open = false;
+    const skippedText = skipped ? ` ${skipped} existing drawing${skipped === 1 ? '' : 's'} skipped.` : '';
+    setBkStatus(`Restored ${restored} drawing${restored === 1 ? '' : 's'}.${skippedText}`, 'success');
+  } catch(error) {
+    $('bkDialogError').textContent = `Restored ${restored} drawing${restored === 1 ? '' : 's'} before the error: ${error.message}`;
+  } finally {
+    setBkBusy(false); setBkDialogBusy(false);
+  }
 }
 async function saveBackup(name, create=false){
   setBkBusy(true); setBkDialogBusy(true);
@@ -4043,6 +4215,13 @@ async function deleteBackup(name){
 $('bkSave').addEventListener('click', () =>
   bkCurrent ? saveBackup(bkCurrent) : openBkDialog('create'));
 $('bkSaveAs').addEventListener('click', () => openBkDialog('create'));
+$('bkDownload').addEventListener('click', downloadExternalLibrary);
+$('bkRestore').addEventListener('click', () => { if (!bkBusy) $('bkRestoreInput').click(); });
+$('bkRestoreInput').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  chooseExternalLibrary(file);
+});
 $('bkShare').addEventListener('click', () => openShareDialog());
 $('bkSharesList').addEventListener('click', async e => {
   const button = e.target.closest('button[data-share-action]');
@@ -4088,6 +4267,7 @@ $('bkDialogForm').addEventListener('submit', e => {
   if (type === 'create') saveBackup(to, true);
   if (type === 'rename') renameBackup(name, to);
   if (type === 'open') openBackup(name);
+  if (type === 'restoreAll') restoreExternalLibrary();
   if (type === 'delete') deleteBackup(name);
 });
 $('shareCreate').addEventListener('click', () => publishShare('POST'));
