@@ -1582,6 +1582,24 @@ function snapAlign(w, skip){
   return { x: ax ? ax.x : g.x, y: ay ? ay.y : g.y, ax, ay };
 }
 
+// A point being edited should still line up with the other points in its own fence
+// even when snapping to other objects is disabled. Keep this slightly more forgiving
+// than external edge snapping so a long, nearly vertical run can be made truly straight.
+function snapSelfAlign(w, skip){
+  if (!skip || !state.polys[skip.p]) return null;
+  const tol = Math.max(HIT.edge, ANGLE_TOL) / view.s;
+  let ax = null, ay = null, dx = tol, dy = tol;
+  state.polys[skip.p].pts.forEach((q, i) => {
+    if (i === skip.i) return;
+    const cx = Math.abs(w.x - q.x), cy = Math.abs(w.y - q.y);
+    if (cx < dx){ dx = cx; ax = q; }
+    if (cy < dy){ dy = cy; ay = q; }
+  });
+  if (!ax && !ay) return null;
+  const g = state.snapGrid ? snapGridPt(w) : w;
+  return { x: ax ? ax.x : g.x, y: ay ? ay.y : g.y, ax, ay };
+}
+
 // Project onto the ray from the drawing anchor through a neighbouring post or building
 // corner. This extends object alignment to arbitrary angles, not just matching X or Y.
 function snapObjectRay(w, anchor, skip){
@@ -1617,6 +1635,8 @@ function snapObjectRay(w, anchor, skip){
 // skip = {p,i} point to ignore (the one being dragged / drawn from).
 function snapFence(w, skip, anchor, prevDir){
   guides = null;
+  const self = snapSelfAlign(w, skip);
+  if (self){ guides = self; return self; }
   if (state.snapBld){
     let best = null, bd = HIT.corner / view.s;
     state.polys.forEach((pl, p) => pl.pts.forEach((q, i) => {
@@ -1655,6 +1675,8 @@ function snapFence(w, skip, anchor, prevDir){
     const a = snapAngle(w, anchor, prevDir);   // no object nearby: try 45° off the anchor
     if (a) return a;
   }
+  const a = snapAngle(w, anchor, prevDir);
+  if (a) return a;
   return snapGridPt(w);
 }
 // Where the line being drawn continues from, and the direction it arrives in.
