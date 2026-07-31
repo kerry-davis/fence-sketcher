@@ -844,6 +844,10 @@ function planGroupOutline(builds, g){
   }
   return merged;
 }
+function planGroupRenderOrder(groups, selected){
+  return groups.filter(g => !g.some(i => selected.has(i)))
+    .concat(groups.filter(g => g.some(i => selected.has(i))));
+}
 function scaleBuildings(builds, ids, from, to){
   const sx = to.w/from.w, sy = to.h/from.h;
   for (const i of ids){
@@ -1876,7 +1880,9 @@ function doPaint(){
   $('gridcap').textContent = 'Grid: ' + gridStepLabel(step);
 
   // --- buildings ---
-  for (const g of houseGroups(state.builds)){
+  const selectedBuildings = sel && sel.t === 'bld' ? bsel : new Set();
+  const buildingGroups = planGroupRenderOrder(houseGroups(state.builds), selectedBuildings);
+  for (const g of buildingGroups){
     for (const i of g){
       const b=state.builds[i], A=W2S(b);
       ctx.fillStyle=C.bldFill;
@@ -1913,6 +1919,17 @@ function doPaint(){
         ctx.restore();
       }
     }
+    const hb = houseBox(state.builds, g);
+    if (hasRoof(hb) && roofKind(hb) !== 'skillion'){
+      const mid = roofAxis(hb) === 'x' ? hb.x+hb.w/2 : hb.y+hb.h/2;
+      const line = roofAxis(hb) === 'x'
+        ? [{x:mid, y:hb.y}, {x:mid, y:hb.y+hb.h}]
+        : [{x:hb.x, y:mid}, {x:hb.x+hb.w, y:mid}];
+      const A = W2S(line[0]), B = W2S(line[1]);
+      ctx.setLineDash([6,4]); ctx.strokeStyle = C.bldStroke; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
   if (sel && sel.t==='bld' && bsel.size){
     const b = houseBox(state.builds, [...bsel]);
@@ -1920,24 +1937,6 @@ function doPaint(){
     for (const [hx,hy] of [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]]){
       const H = W2S({x:hx,y:hy}); ctx.fillRect(H.x-5, H.y-5, 10, 10);
     }
-  }
-  // one dashed ridge line per gable-roofed house
-  for (const g of houseGroups(state.builds)){
-    const hb = houseBox(state.builds, g);
-    if (!hasRoof(hb) || roofKind(hb) === 'skillion') continue;
-    const ins = 5/view.s, mid = roofAxis(hb) === 'x' ? hb.x+hb.w/2 : hb.y+hb.h/2;
-    const hi = highSide(hb);
-    const line = roofKind(hb) === 'skillion'
-      ? (hi[0] === 'x'
-          ? [{x:(hi==='x0'?hb.x+ins:hb.x+hb.w-ins), y:hb.y+ins}, {x:(hi==='x0'?hb.x+ins:hb.x+hb.w-ins), y:hb.y+hb.h-ins}]
-          : [{x:hb.x+ins, y:(hi==='z0'?hb.y+ins:hb.y+hb.h-ins)}, {x:hb.x+hb.w-ins, y:(hi==='z0'?hb.y+ins:hb.y+hb.h-ins)}])
-      : roofAxis(hb) === 'x'
-        ? [{x:mid, y:hb.y}, {x:mid, y:hb.y+hb.h}]
-        : [{x:hb.x, y:mid}, {x:hb.x+hb.w, y:mid}];
-    const A = W2S(line[0]), B = W2S(line[1]);
-    ctx.setLineDash([6,4]); ctx.strokeStyle = C.bldStroke; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
-    ctx.setLineDash([]);
   }
 
   // --- fence segments + labels ---

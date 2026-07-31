@@ -46,4 +46,14 @@ test('grouped buildings have one outline with continuous external edge lengths',
     Array.from(steppedOutline,([a,b]) => Math.hypot(b.x-a.x,b.y-a.y)).sort((a,b) => a-b),
     [2,2,2,4,4,6],
   );
+
+  const groups=[[0],[1],[2,3]];
+  assert.deepEqual(
+    Array.from(context.planGroupRenderOrder(groups,new Set([1])),g => Array.from(g)),
+    [[0],[2,3],[1]],
+  );
+  assert.deepEqual(
+    Array.from(context.planGroupRenderOrder(groups,new Set([2,3])),g => Array.from(g)),
+    [[0],[1],[2,3]],
+  );
 });
