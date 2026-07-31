@@ -3958,6 +3958,7 @@ async function openBackup(name){
     sel = null; bsel.clear(); syncControls(); updateAll();
     setBkCurrent(name);
     closeBkDialog();
+    $('bkSec').open = false;
     setBkStatus(`Opened “${name}”.`, 'success');
   } catch(e) {
     $('bkDialogError').textContent = e.message;
