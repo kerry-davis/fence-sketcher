@@ -454,6 +454,12 @@
           <button data-s="rail">Rails only</button>
         </div>
       </div>
+      <div class="row onlyRail" title="Left and right are viewed from the first post toward the last post.">
+        <span>Rail side</span>
+        <span><select id="iRailSide" style="min-height:38px;padding:6px">
+          <option value="left">Left of line</option><option value="right">Right of line</option>
+        </select></span>
+      </div>
       <div class="row"><span>Post spacing</span><span><input id="iSpacing" inputmode="decimal"> <span class="unit" id="uSpacing">m</span></span></div>
       <div class="row"><span>Fence post shape</span>
         <span><select id="iFencePostShape" style="min-height:38px;padding:6px">
@@ -651,6 +657,7 @@ let state = {
          rails: DEF_RAILS, paling: DEF.m.paling, gap: DEF.m.gap,
          height: DEF.m.height, railW: DEF.m.railW, railGap: DEF.m.railGap,
          botOff: DEF.m.botOff, topOff: DEF.m.topOff, ends: DEF_ENDS,
+         railSide: 'left',
          handrail: false, hrW: DEF.m.hrW, hrT: DEF.m.hrT,
          touched: {} },                       // touched.<field> = user edited it; stops unit-switch resets
   snapGrid: true, snapBld: true,
@@ -896,6 +903,8 @@ function wallBands(ha, hb, cuts){
 
 // Handrail cross-section, with defaults for saves made before handrails existed.
 const hrOf = mat => ({ on: !!mat.handrail, w: mat.hrW ?? DEF.m.hrW, t: mat.hrT ?? DEF.m.hrT });
+const railSideOf = mat => mat && mat.railSide === 'right' ? 'right' : 'left';
+const railSideLabel = mat => railSideOf(mat) === 'right' ? 'Right of line' : 'Left of line';
 
 // How many of an open run's two end posts to count. 'auto' = count both, except an end that
 // already sits on an earlier fence (that junction post is counted once, by the earlier run).
@@ -1333,6 +1342,8 @@ function freezeTree(value){
   chk(ry.length===3 && near(ry[0],0.2) && near(ry[2],1.1), '3D rail heights');
   const rm = segmentSideMid({x:0,y:0}, {x:10,y:0}, 0.0725);
   chk(near(rm.x,5) && near(rm.y,0.0725), '3D rails sit against one post face');
+  const rr = segmentSideMid({x:0,y:0}, {x:10,y:0}, 0.0725, 'right');
+  chk(near(rr.x,5) && near(rr.y,-0.0725), '3D rails can attach to the other post face');
   const rb = railBayBounds({x:0,y:0}, {x:2,y:0}, 0.05, 0.05);
   chk(near(rb.a.x,-0.05) && near(rb.b.x,2.05) && near(rb.len,2.1),
       '3D outer rail bay is flush with both post ends');
@@ -2179,10 +2190,11 @@ function railYs(mat){
     ys.push((mat.botOff||0) + k*d + mat.railW/2);
   return ys;
 }
-// Midpoint offset to the left side of a directed segment in plan coordinates.
-function segmentSideMid(a, b, off){
+// Midpoint offset to a chosen side of a directed segment in plan coordinates.
+function segmentSideMid(a, b, off, side='left'){
   const L = segLen(a,b) || 1, ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
-  return { x:(a.x+b.x)/2-uy*off, y:(a.y+b.y)/2+ux*off };
+  const sign = side === 'right' ? -1 : 1;
+  return { x:(a.x+b.x)/2-uy*off*sign, y:(a.y+b.y)/2+ux*off*sign };
 }
 // Extend an outer rail bay to the outside face of an end post. Interior bays use zero
 // overhang, so adjacent rails meet continuously at each intermediate post's centre.
@@ -2306,7 +2318,9 @@ function pushGate(F, a, b, H, mat){
   const leaf = gateLeafBounds(a,b,inset), ang = Math.atan2(b.y-a.y,b.x-a.x);
   const ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
   const bottom = Math.min(GATE_BOTTOM, H*0.15), leafH = Math.max(0.2, H-bottom);
-  const pointOnSide = (q,off) => ({x:q.x-uy*off, y:q.y+ux*off});
+  const side = mat.style === 'rail' && typeof railSideOf === 'function' ? railSideOf(mat) : 'left';
+  const sign = side === 'right' ? -1 : 1;
+  const pointOnSide = (q,off) => ({x:q.x-uy*off*sign, y:q.y+ux*off*sign});
   const frameOff = POST_SIDE/2 + (mat.style === 'rail' ? RAIL_T/2 : PALING_T+RAIL_T/2);
   const A = pointOnSide(leaf.a,frameOff), B = pointOnSide(leaf.b,frameOff);
   const mid = {x:(A.x+B.x)/2, y:(A.y+B.y)/2};
@@ -2347,6 +2361,7 @@ function build3(){
   visiblePolys.forEach((pl, p) => {
     if (pl.pts.length < 2) return;
     const mat = pl.mat || state.mat;
+    const railSide = typeof railSideOf === 'function' ? railSideOf(mat) : 'left';
     const H = Math.max(0.2, mat.height), sp = Math.max(0.1, mat.spacing);
     const ends = postEndFlags(visiblePolys, p, mat);
     for (const [i,a,b] of segsOf(pl)){
@@ -2377,7 +2392,7 @@ function build3(){
           const runEnd = !pl.closed && i === pl.pts.length-2 && last && hasPost(k+1);
           const rail = railBayBounds(segmentPosts[k], segmentPosts[k+1],
                                      runStart ? POST_SIDE/2 : 0, runEnd ? POST_SIDE/2 : 0);
-          const mid = segmentSideMid(rail.a, rail.b, POST_SIDE/2 + RAIL_T/2);
+          const mid = segmentSideMid(rail.a, rail.b, POST_SIDE/2 + RAIL_T/2, railSide);
           for (const ry of railYs(mat)){
             if (ry + mat.railW/2 > H + 1e-6) break;
             pushBox(F, mid.x, ry, mid.y, rail.len/2, mat.railW/2, RAIL_T/2, ang, WOOD.rail,
@@ -2717,7 +2732,8 @@ function syncReadOnlyDetails(){
     ['Rails per panel', String(M.rails)],
   ];
   if (M.style === 'rail'){
-    rows.push(['Rail width', fmtSmall(M.railW,u)], ['Rail gap', fmtSmall(M.railGap,u)],
+    rows.push(['Rail side', railSideLabel(M)],
+              ['Rail width', fmtSmall(M.railW,u)], ['Rail gap', fmtSmall(M.railGap,u)],
               ['Bottom gap', fmtSmall(M.botOff,u)], ['Top gap', fmtSmall(M.topOff,u)]);
   } else {
     rows.push(['Paling width', fmtSmall(M.paling,u)], ['Paling gap', fmtSmall(M.gap,u)]);
@@ -2771,6 +2787,7 @@ function syncMatInputs(){
   const small = v => u==='m' ? Math.round(v*1000) : +(v/IN).toFixed(2);
   set('iSpacing', big(M.spacing));  set('iHeight', big(M.height));
   set('iRails', M.rails);
+  if (document.activeElement !== $('iRailSide')) $('iRailSide').value = railSideOf(M);
   if (document.activeElement !== $('iFencePostShape'))
     $('iFencePostShape').value = postShapeOf(M);
   const ends = endsOf(M), oneEnd = oneEndOf(M, sc.pl);
@@ -3491,6 +3508,11 @@ $('iFencePostShape').addEventListener('change', e => {
   commitEdit(() => M.postShape = e.target.value === 'round' ? 'round' : 'square');
   updateAll();
 });
+$('iRailSide').addEventListener('change', e => {
+  const M = curMat();
+  commitEdit(() => M.railSide = e.target.value === 'right' ? 'right' : 'left');
+  updateAll();
+});
 $('iPostShape').addEventListener('change', e => {
   if (!sel || sel.t !== 'pt') return;
   const point = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
@@ -3554,7 +3576,7 @@ $('copyBtn').addEventListener('click', () => {
   const hrDesc = M => { const h = hrOf(M);
     return h.on ? ', handrail ' + fmtSmall(h.w,u) + ' × ' + fmtSmall(h.t,u) : ''; };
   const desc = M => (postShapeOf(M) + ' posts, ') + (M.style === 'rail'
-    ? 'post-and-rail: posts every ' + fmtLen(M.spacing,u) + ', ' + M.rails + ' rails/panel, ' +
+    ? railSideLabel(M).toLowerCase() + ', post-and-rail: posts every ' + fmtLen(M.spacing,u) + ', ' + M.rails + ' rails/panel, ' +
       fmtSmall(M.railW,u) + ' rails'
     : 'posts every ' + fmtLen(M.spacing,u) + ', ' + M.rails + ' rails/panel, palings ' +
       fmtSmall(M.paling,u) + ' + ' + fmtSmall(M.gap,u) + ' gap') + hrDesc(M);
