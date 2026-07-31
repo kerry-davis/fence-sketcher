@@ -20,6 +20,8 @@ test('splitting a fence preserves its per-fence settings', () => {
     mat:{style:'rail',postShape:'round',ends:1,touched:{style:true}},
     name:'North run',
     excludeMaterials:true,
+    excludeRails:true,
+    excludePalings:true,
     hidden3d:true,
     oneEnd:'end',
   };
@@ -31,6 +33,8 @@ test('splitting a fence preserves its per-fence settings', () => {
     assert.deepEqual(JSON.parse(JSON.stringify(part.mat)), JSON.parse(JSON.stringify(source.mat)));
     assert.equal(part.name, 'North run');
     assert.equal(part.excludeMaterials, true);
+    assert.equal(part.excludeRails, true);
+    assert.equal(part.excludePalings, true);
     assert.equal(part.hidden3d, true);
     assert.equal(part.oneEnd, 'end');
   }
