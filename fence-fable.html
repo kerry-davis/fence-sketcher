@@ -123,15 +123,16 @@
   #selbox label{display:flex;align-items:center;gap:8px;padding:6px 0}
   #selbox input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent)}
   #copyBtn{width:100%}
+  #totalsHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #totalsHead h2{margin-bottom:0}
+  #totalsScopeToggle{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;
+                     cursor:pointer;white-space:nowrap}
+  #totalsScopeToggle input{margin:0}
   label.own{display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:6px;
             background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;
             font-size:13px;cursor:pointer}
   label.own input{width:18px;height:18px;accent-color:var(--accent)}
   #matIncludeWrap.off,#fenceVisibleWrap.off{background:var(--card);border-color:var(--line)}
-  #perFence{border-top:1px solid var(--line);margin-top:8px;padding-top:6px}
-  #perFence .row{font-size:13px;color:var(--muted);padding:2px 0}
-  #perFence .row.cur{color:var(--accent);font-weight:600}
-  #perFence .row.excluded{opacity:.75}
   .note{color:var(--muted);font-size:12px;margin:6px 0 0}
   .srOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
           clip:rect(0,0,0,0);white-space:nowrap;border:0}
@@ -428,12 +429,12 @@
     <section id="selbox" class="editorOnly" style="display:none"></section>
 
     <section>
-      <h2>Totals</h2>
-      <div class="row"><span>Fence length (excl. gates)</span><b class="big" id="tLen">0</b></div>
-      <div class="row"><span>Segments</span><b id="tSegs">0</b></div>
-      <div class="row"><span>Corners</span><b id="tCorners">0</b></div>
-      <div class="row"><span>Gates</span><b id="tGates">—</b></div>
-      <hr style="border:0;border-top:1px solid var(--line);margin:8px 0">
+      <div id="totalsHead">
+        <h2>Totals</h2>
+        <label id="totalsScopeToggle">
+          <input type="checkbox" id="showAllTotals"> Show all fence totals
+        </label>
+      </div>
       <div class="row" title="A post at every corner, intermediate posts so no panel exceeds the post spacing, and a post each side of every gate. Posts shared between joined fences are counted once."><span>Posts <span style="opacity:.5">ⓘ</span></span><b id="tPosts">0</b></div>
       <p class="note" id="postNote" style="margin:0"></p>
       <div class="row" id="rowSquarePosts"><span>Square posts</span><b id="tSquarePosts">0</b></div>
@@ -441,8 +442,11 @@
       <div class="row"><span id="lRails">Rails</span><b id="tRails">0</b></div>
       <div class="row" id="rowPalings"><span>Palings</span><b id="tPalings">0</b></div>
       <div class="row" id="rowHR" style="display:none"><span>Handrail</span><b id="tHR">0</b></div>
-      <div id="perFence"></div>
-      <p class="note">Gates and buildings are excluded from materials.</p>
+      <hr style="border:0;border-top:1px solid var(--line);margin:8px 0">
+      <div class="row"><span>Fence length (excl. gates)</span><b class="big" id="tLen">0</b></div>
+      <div class="row"><span>Segments</span><b id="tSegs">0</b></div>
+      <div class="row"><span>Corners</span><b id="tCorners">0</b></div>
+      <div class="row"><span>Gates</span><b id="tGates">—</b></div>
     </section>
 
     <section id="readOnlyDetails">
@@ -459,6 +463,10 @@
         <input type="checkbox" id="matInclude" checked> Include this fence in materials</label>
       <p class="note" id="matExcludeNote" style="display:none;margin:0 0 8px">
         Still shown in plan and 3D; excluded from totals and the copied summary.</p>
+      <label id="bomRailsWrap" class="own" style="display:none">
+        <input type="checkbox" id="bomRails" checked> Include rails in BOM</label>
+      <label id="bomPalingsWrap" class="own" style="display:none">
+        <input type="checkbox" id="bomPalings" checked> Include palings in BOM</label>
       <label id="fenceVisibleWrap" class="own" style="display:none">
         <input type="checkbox" id="fenceVisible" checked> Show this fence in 3D</label>
       <p class="note" id="fenceHiddenNote" style="display:none;margin:0 0 8px">
@@ -503,7 +511,7 @@
           <option value="square">Square</option><option value="round">Round</option>
         </select></span></div>
       <div class="row"><span>Fence height</span><span><input id="iHeight" inputmode="decimal"> <span class="unit" id="uHeight">m</span></span></div>
-      <div class="row"><span>Rails per panel</span><span><input id="iRails" inputmode="numeric"> <span class="unit"></span></span></div>
+      <div class="row" title="Enter 0 for no rails"><span>Rails per panel</span><span><input id="iRails" inputmode="numeric"> <span class="unit"></span></span></div>
       <div class="row onlyPaling"><span>Paling width</span><span><input id="iPaling" inputmode="decimal"> <span class="unit" id="uPaling">mm</span></span></div>
       <div class="row onlyPaling"><span>Paling gap</span><span><input id="iGap" inputmode="decimal"> <span class="unit" id="uGap">mm</span></span></div>
       <div class="row onlyRail"><span>Bottom gap</span><span><input id="iBotOff" inputmode="decimal"> <span class="unit" id="uBotOff">mm</span></span></div>
@@ -606,6 +614,12 @@ const DEF = {                                 // per-unit material defaults
 };
 const DEF_RAILS   = 2;                        // rails per panel
 const DEF_ENDS    = 'auto';                   // end posts per open run: 'auto' | 2 both | 1 one | 0 none
+const POST_SIDE   = 0.100;                    // 100 mm square posts
+const PALING_T    = 0.020;                    // 20 mm paling thickness
+const RAIL_T      = 0.045;                    // 45 mm rail thickness
+const GATE_GAP    = 0.040;                    // working clearance between a gate leaf and each post
+const GATE_STILE  = 0.090;                    // vertical gate leaf frame members
+const GATE_BOTTOM = 0.080;                    // gate leaf clearance above ground
 // New-building size [width, depth, height] per unit. Height is the 3D (z) dimension —
 // plan drawing ignores it, so a building saved before heights existed falls back to BLD_H.
 const DEF_BLD     = { m:[6,4,3], ft:[20*FT,12*FT,10*FT] };
@@ -690,6 +704,7 @@ let state = {
 let view = { x: 0, y: 0, s: 24 };             // world origin offset (m) + scale (px per m)
 let sel  = null;                              // {t:'pt'|'seg'|'bld', p?, i?}
 let bsel = new Set();                         // selected building members (whole groups expand here)
+let showAllTotals = false;
 let undoStack = [], redoStack = [];
 
 /* =====================================================================
@@ -980,6 +995,37 @@ function sharedEnds(polys, idx){
   return n;
 }
 
+function gateLeafInset(){
+  return POST_SIDE/2 + GATE_GAP + GATE_STILE/2;
+}
+function gateLeafLength(L){
+  return Math.max(0, L - 2*gateLeafInset());
+}
+function gateMaterialQuantities(L, mat, pl){
+  const leafLen = gateLeafLength(L);
+  if (leafLen <= 0) return {rails:0, palings:0};
+  const height = Math.max(0.2, mat.height ?? 1.2);
+  const bottom = Math.min(GATE_BOTTOM, height*0.15);
+  let rails = 2;                           // paling gates have two frame rails
+  if (mat.style === 'rail'){
+    rails = 0;
+    const railW = mat.railW ?? 0.15;
+    const railGap = mat.railGap ?? 0.15;
+    const botOff = mat.botOff ?? 0.15;
+    const count = mat.rails == null ? 1 : Math.max(0, mat.rails|0);
+    const d = railW + railGap;
+    for (let k = 0; k < count; k++){
+      const ry = botOff + k*d + railW/2;
+      if (ry - railW/2 >= bottom - 1e-6 && ry + railW/2 <= height + 1e-6) rails++;
+    }
+  }
+  const paling = mat.paling ?? 0.1, gap = mat.gap ?? 0.005;
+  const palings = !pl.excludePalings && mat.style !== 'rail' && paling > 0.001 &&
+                  leafLen >= paling
+    ? Math.ceil(leafLen / (paling + gap)) : 0;
+  return { rails:pl.excludeRails ? 0 : rails, palings };
+}
+
 function materialPostEndFlags(polys, idx, mat){
   const pl = polys[idx];
   if (pl.closed) return {start:true, end:true};
@@ -1038,7 +1084,8 @@ function materialPostInventory(polys, defMat){
 // runs meet are subtracted once at the end. So posts is NOT simply length/spacing: corners
 // and gates force posts that no amount of spacing arithmetic predicts.
 function calcMaterials(polys, defMat){
-  let fenceLen=0, panels=0, posts=0, segCount=0, corners=0, rails=0, palings=0, shared=0, handrail=0;
+  let fenceLen=0, panels=0, posts=0, segCount=0, corners=0, rails=0, palings=0,
+      gateRails=0, gatePalings=0, shared=0, handrail=0;
   const gates = [], per = [], postInventory = materialPostInventory(polys,defMat);
   polys.forEach((pl, idx) => {
     if (pl.pts.length < 2) return;
@@ -1046,17 +1093,27 @@ function calcMaterials(polys, defMat){
     if (pl.excludeMaterials){
       per.push({ i:idx, name:fenceName(pl,idx), len:0, posts:0, rails:0, palings:0,
                  squarePosts:0, roundPosts:0, panels:0, gates:0, handrail:0,
+                 gateRails:0, gatePalings:0,
+                 segCount:0, corners:0, gateLengths:[], shared:0,
+                 excludeRails:!!pl.excludeRails, excludePalings:!!pl.excludePalings,
                  own:!!pl.mat, excluded:true, mat });
       return;
     }
     const spacing = Math.max(0.1, mat.spacing);
-    let len = 0, pPanels = 0, pPosts = 0, pGates = 0;
+    let len = 0, pPanels = 0, pPosts = 0, pGates = 0, pShared = 0,
+        pGateRails = 0, pGatePalings = 0;
     const ss = segsOf(pl);
     segCount += ss.length;
-    corners  += pl.closed ? pl.pts.length : Math.max(0, pl.pts.length - 2);
+    const pCorners = pl.closed ? pl.pts.length : Math.max(0, pl.pts.length - 2);
+    corners += pCorners;
+    const gateLengths = [];
     for (const [i,a,b] of ss){
       const L = segLen(a,b);
-      if (a.gateAfter){ gates.push(L); pPosts += 1; pGates++; }  // gate: no panels, just its far post
+      if (a.gateAfter){
+        const gate = gateMaterialQuantities(L, mat, pl);
+        gates.push(L); gateLengths.push(L); pPosts += 1;
+        pGateRails += gate.rails; pGatePalings += gate.palings; pGates++;
+      }  // gate: no panels or fence length, but its leaf has materials
       else {
         const n = Math.max(1, Math.ceil(L/spacing - 1e-9));     // panels in this segment
         pPanels += n; pPosts += n; len += L;
@@ -1068,25 +1125,38 @@ function calcMaterials(polys, defMat){
       const e = endsOf(mat);
       if (e === 'auto'){                      // drop only ends already posted by an earlier fence
         const dropped = sharedEnds(polys, idx);
-        pPosts -= dropped; shared += dropped;
+        pPosts -= dropped; shared += dropped; pShared = dropped;
       } else pPosts = Math.max(0, pPosts - (2 - endCount(mat)));
     }
     const pw = mat.paling + mat.gap;
     // rail-style fence (or paling width 0) has no boards to count
-    const pPalings = mat.style !== 'rail' && mat.paling > 0.001 ? Math.ceil(len / pw) : 0;
-    const pRails = pPanels * mat.rails;
+    const fencePalings = !pl.excludePalings && mat.style !== 'rail' && mat.paling > 0.001
+      ? Math.ceil(len / pw) : 0;
+    const fenceRails = pl.excludeRails ? 0 : pPanels * mat.rails;
+    const pRails = pGateRails + fenceRails, pPalings = pGatePalings + fencePalings;
     // handrail runs the length of the fence itself — a linear quantity, not a piece count
     const pHandrail = mat.handrail ? len : 0;
     fenceLen += len; panels += pPanels; posts += pPosts; rails += pRails; palings += pPalings;
+    gateRails += pGateRails; gatePalings += pGatePalings;
     handrail += pHandrail;
     const postTypes = postInventory.per.get(idx) || {square:0,round:0};
     per.push({ i: idx, name: fenceName(pl,idx), len, posts: pPosts, rails: pRails,
                squarePosts:postTypes.square, roundPosts:postTypes.round, palings: pPalings,
-               panels: pPanels, gates: pGates, handrail: pHandrail, own: !!pl.mat, mat });
+               panels: pPanels, gates: pGates, gateRails:pGateRails, gatePalings:pGatePalings,
+               handrail: pHandrail, segCount:ss.length,
+               corners:pCorners, gateLengths, shared:pShared,
+               excludeRails:!!pl.excludeRails, excludePalings:!!pl.excludePalings,
+               own: !!pl.mat, mat });
   });
   return { fenceLen, panels, posts, squarePosts:postInventory.square,
            roundPosts:postInventory.round, shared, segCount, corners,
-           gates, rails, palings, handrail, per };
+           gates, rails, palings, gateRails, gatePalings, handrail, per };
+}
+
+function scopeTotals(m, idx, all){
+  if (all || idx < 0) return m;
+  const f = m.per.find(item => item.i === idx);
+  return f ? {...f, fenceLen:f.len, gates:f.gateLengths || []} : m;
 }
 
 // Delete point i of polyline p: neighbours join. Mutates polys.
@@ -1110,6 +1180,8 @@ function deleteSegment(polys, p, i){
                    hidden3d:pl.hidden3d || undefined,
                    mat:pl.mat ? JSON.parse(JSON.stringify(pl.mat)) : undefined,
                    name:pl.name || undefined,
+                   excludeRails:pl.excludeRails || undefined,
+                   excludePalings:pl.excludePalings || undefined,
                    oneEnd:pl.oneEnd || undefined }));
     polys.splice(p, 1, ...parts);
   }
@@ -1201,13 +1273,16 @@ function freezeTree(value){
   const sq = () => ({ pts:[{x:0,y:0},{x:10,y:0},{x:10,y:10},{x:0,y:10}], closed:true });
   let m = calcMaterials([sq()], {spacing:2.4, rails:2, paling:0.1, gap:0.005});
   chk(m.posts===20 && m.rails===40 && m.palings===381 && near(m.fenceLen,40), 'materials square');
-  // gate excluded
+  // gate opening is excluded from fence length/panels, while its leaf materials are counted
   const g = sq(); g.pts[0].gateAfter = true;
   m = calcMaterials([g], {spacing:2.4, rails:2, paling:0.1, gap:0.005});
-  chk(near(m.fenceLen,30) && m.gates.length===1 && m.posts===16, 'gate excluded');
+  chk(near(m.fenceLen,30) && m.gates.length===1 && m.posts===16 &&
+      m.rails===32 && m.palings===379, 'gate materials');
   // rail-only fence: paling width 0 -> no palings, rails unaffected
   m = calcMaterials([sq()], {spacing:2.4, rails:3, paling:0, gap:0.02});
   chk(m.palings===0 && m.rails===60, 'rail-only fence');
+  m = calcMaterials([sq()], {spacing:2.4, rails:0, paling:0, gap:0.02});
+  chk(m.rails===0, 'zero rails');
   // per-fence settings: line 2 overrides the defaults, totals aggregate both
   const two = [sq(), {pts:[{x:0,y:20},{x:10,y:20}], closed:false,
                       mat:{style:'rail', spacing:5, rails:3, paling:0.1, gap:0.005}}];
@@ -1227,9 +1302,9 @@ function freezeTree(value){
   // a corner forces its own post: two 5 m legs = 4+4 panels -> 9 posts, not 8
   m = calcMaterials([{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}], mat15);
   chk(m.panels===8 && m.posts===9, 'corner adds a post');
-  // a gate needs a post each side and contributes no panels
+  // a gate needs a post each side and contributes no panels, but does contribute its leaf rails
   m = calcMaterials([{pts:[{x:0,y:0,gateAfter:true},{x:1.5,y:0},{x:11.5,y:0}], closed:false}], mat15);
-  chk(m.panels===7 && m.posts===9 && m.gates.length===1, 'gate posts');
+  chk(m.panels===7 && m.posts===9 && m.gates.length===1 && m.rails===24, 'gate posts/materials');
   // two runs meeting at a point share that post: 8 + 8 - 1
   m = calcMaterials([{pts:[{x:0,y:0},{x:10,y:0}], closed:false},
                      {pts:[{x:10,y:0},{x:10,y:10}], closed:false}], mat15);
@@ -1365,6 +1440,8 @@ function freezeTree(value){
   // 3 rails, 100 mm deep, 350 mm gaps, 150 mm off the ground -> centres 200/650/1100 mm
   const ry = railYs({rails:3, railW:0.1, railGap:0.35, botOff:0.15});
   chk(ry.length===3 && near(ry[0],0.2) && near(ry[2],1.1), '3D rail heights');
+  chk(railYs({rails:0, railW:0.1, railGap:0.35, botOff:0.15}).length===0,
+      '3D zero rails');
   const rm = segmentSideMid({x:0,y:0}, {x:10,y:0}, 0.0725);
   chk(near(rm.x,5) && near(rm.y,0.0725), '3D rails sit against one post face');
   const rr = segmentSideMid({x:0,y:0}, {x:10,y:0}, 0.0725, 'right');
@@ -2160,12 +2237,6 @@ function doPaint(){
    the SAME post placement the material counts use, so the picture can't
    disagree with the numbers. Move to WebGL only if this ever drags.
    ===================================================================== */
-const POST_SIDE = 0.100;      // 100 mm square posts
-const PALING_T  = 0.020;      // 20 mm paling thickness
-const RAIL_T    = 0.045;      // 45 mm rail thickness
-const GATE_GAP  = 0.040;      // working clearance between a gate leaf and each post
-const GATE_STILE = 0.090;     // vertical frame members
-const GATE_BOTTOM = 0.080;    // leaf clearance above ground
 const FOV       = 55*Math.PI/180;
 const NEAR      = 0.05;
 const EYE_Y     = 1.0;        // camera looks at eye height, not the ground
@@ -2211,7 +2282,8 @@ function postEndFlags(polys, idx, mat){
 // Rail centre heights, bottom up — the layout derivedRails/derivedGap describe.
 function railYs(mat){
   const d = mat.railW + mat.railGap, ys = [];
-  for (let k = 0; k < Math.max(1, mat.rails|0); k++)
+  const count = mat.rails == null ? 1 : Math.max(0, mat.rails|0);
+  for (let k = 0; k < count; k++)
     ys.push((mat.botOff||0) + k*d + mat.railW/2);
   return ys;
 }
@@ -2335,10 +2407,10 @@ function pushHouse(F, builds, g){
 }
 // A closed gate leaf. Its frame is fixed to the same side of the posts as the fence.
 // Rail gates reuse the fence's rail heights; paling gates add two frame rails behind
-// their boards. The gate remains a visual object only — materials deliberately exclude it.
+// their boards. The BOM uses the same leaf geometry for its rail/paling quantities.
 function pushGate(F, a, b, H, mat){
   const L = segLen(a,b);
-  const inset = POST_SIDE/2 + GATE_GAP + GATE_STILE/2;
+  const inset = gateLeafInset();
   if (L <= 2*inset) return;
   const leaf = gateLeafBounds(a,b,inset), ang = Math.atan2(b.y-a.y,b.x-a.x);
   const ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
@@ -2709,34 +2781,31 @@ function set3d(on){
    Side panels
    ===================================================================== */
 function updateTotals(){
-  const m = calcMaterials(state.polys, state.mat), u = state.unit;
-  // per-fence breakdown, once there's more than one line
-  const cur = matScope().idx;
-  $('perFence').innerHTML = (m.per.length > 1 || m.per.some(f => f.excluded)) ? m.per.map(f =>
-    `<div class="row${f.i === cur ? ' cur' : ''}${f.excluded ? ' excluded' : ''}" title="${state.polys[f.i].hidden3d ? 'Hidden in 3D · ' : ''}${f.excluded ? 'Excluded from materials' : `${f.squarePosts} square · ${f.roundPosts} round · ${f.panels} panels · ${f.gates} gates · end posts: ${endsLabel(f.mat,state.polys[f.i])}`}">` +
-    `<span>${escHTML(f.name)}${state.polys[f.i].hidden3d ? ' ◌' : ''}${f.excluded ? '' : (f.own ? ' ⚙' : '') + (endsOf(f.mat) === 'auto' ? '' : ' ✂')}</span>` +
-    `<span>${f.excluded ? 'Not in materials' : `${fmtLen(f.len, u)} · ${f.posts} posts`}</span></div>`).join('') : '';
-  $('tLen').textContent = fmtLen(m.fenceLen, u);
-  $('tSegs').textContent = m.segCount;
-  $('tCorners').textContent = m.corners;
-  $('tGates').textContent = m.gates.length
-    ? m.gates.length + ' (' + m.gates.map(g => fmtLen(g,u)).join(', ') + ')' : '—';
-  $('tPosts').textContent = m.posts;
+  const m = calcMaterials(state.polys, state.mat), u = state.unit, sc = matScope();
+  const t = scopeTotals(m, sc.idx, showAllTotals);
+  $('showAllTotals').disabled = !sc.pl;
+  $('showAllTotals').checked = !sc.pl || showAllTotals;
+  $('tLen').textContent = fmtLen(t.fenceLen, u);
+  $('tSegs').textContent = t.segCount;
+  $('tCorners').textContent = t.corners;
+  $('tGates').textContent = t.gates.length
+    ? t.gates.length + ' (' + t.gates.map(g => fmtLen(g,u)).join(', ') + ')' : '—';
+  $('tPosts').textContent = t.posts;
   // show the working: panels + gate posts + run ends, minus any shared junctions
-  $('postNote').textContent = m.posts
-    ? `${m.panels} panels, ${m.corners} corners, ${m.gates.length} gate${m.gates.length===1?'':'s'}` +
-      (m.shared ? `, ${m.shared} shared junction${m.shared===1?'':'s'}` : '')
+  $('postNote').textContent = t.posts
+    ? `${t.panels} panels, ${t.corners} corners, ${t.gates.length} gate${t.gates.length===1?'':'s'}` +
+      (t.shared ? `, ${t.shared} shared junction${t.shared===1?'':'s'}` : '')
     : '';
-  $('tSquarePosts').textContent = m.squarePosts;
-  $('tRoundPosts').textContent = m.roundPosts;
-  $('rowSquarePosts').style.display = m.squarePosts ? '' : 'none';
-  $('rowRoundPosts').style.display = m.roundPosts ? '' : 'none';
-  $('tRails').textContent = m.rails;
-  $('tPalings').textContent = m.palings;
-  $('tHR').textContent = fmtLen(m.handrail, u);
-  $('rowHR').style.display = m.handrail > 0 ? '' : 'none';
+  $('tSquarePosts').textContent = t.squarePosts;
+  $('tRoundPosts').textContent = t.roundPosts;
+  $('rowSquarePosts').style.display = t.squarePosts ? '' : 'none';
+  $('rowRoundPosts').style.display = t.roundPosts ? '' : 'none';
+  $('tRails').textContent = t.rails;
+  $('tPalings').textContent = t.palings;
+  $('tHR').textContent = fmtLen(t.handrail, u);
+  $('rowHR').style.display = t.handrail > 0 ? '' : 'none';
   // keep the palings total visible when ANY fence uses palings, whatever the panel is showing
-  $('rowPalings').style.display = (m.palings > 0 || matScope().mat.style !== 'rail') ? '' : 'none';
+  $('rowPalings').style.display = (t.palings > 0 || sc.mat.style !== 'rail') ? '' : 'none';
 }
 function syncReadOnlyDetails(){
   if (!readOnly) return;
@@ -2763,8 +2832,11 @@ function syncReadOnlyDetails(){
   } else {
     rows.push(['Paling width', fmtSmall(M.paling,u)], ['Paling gap', fmtSmall(M.gap,u)]);
   }
+  const materialStatus = sc.pl.excludeMaterials ? 'Excluded' :
+    [sc.pl.excludeRails ? 'Rails omitted' : '', sc.pl.excludePalings ? 'Palings omitted' : '']
+      .filter(Boolean).join(', ') || 'Included';
   rows.push(['Handrail', hr.on ? `${fmtSmall(hr.w,u)} × ${fmtSmall(hr.t,u)}` : 'None'],
-            ['Materials', sc.pl.excludeMaterials ? 'Excluded' : 'Included']);
+            ['Materials', materialStatus]);
   body.replaceChildren(...rows.map(([label,value]) => {
     const row = document.createElement('div'), name = document.createElement('span');
     const result = document.createElement('b');
@@ -2798,6 +2870,11 @@ function syncMatInputs(){
   $('matInclude').checked = !sc.pl || !sc.pl.excludeMaterials;
   $('matIncludeWrap').classList.toggle('off', !!(sc.pl && sc.pl.excludeMaterials));
   $('matExcludeNote').style.display = sc.pl && sc.pl.excludeMaterials ? '' : 'none';
+  const bomParts = !!(sc.pl && !sc.pl.excludeMaterials);
+  $('bomRailsWrap').style.display = bomParts ? 'flex' : 'none';
+  $('bomRails').checked = !sc.pl || !sc.pl.excludeRails;
+  $('bomPalingsWrap').style.display = bomParts && M.style !== 'rail' ? 'flex' : 'none';
+  $('bomPalings').checked = !sc.pl || !sc.pl.excludePalings;
   $('fenceVisibleWrap').style.display = sc.pl ? 'flex' : 'none';
   $('fenceVisible').checked = !sc.pl || !sc.pl.hidden3d;
   $('fenceVisibleWrap').classList.toggle('off', !!(sc.pl && sc.pl.hidden3d));
@@ -3233,6 +3310,7 @@ function pointerEnd(e){
     else if (drag && drag.t === 'orbit' && !drag.moved && e.type === 'pointerup'){
       const tag = pickFenceLabel3(e.offsetX, e.offsetY);
       if (!readOnly && tag && drawTarget()) endLine();
+      if (tag) showAllTotals = false;
       sel = tag ? {t:'seg', p:tag.p, i:tag.i} : null;
       bsel.clear(); updateAll();
     }
@@ -3243,6 +3321,7 @@ function pointerEnd(e){
   if (pend && !pend.moved && !pend.done && e.type === 'pointerup' && e.button !== 2){
     if (readOnly){
       const hit = pend.hit;
+      if (hit && (hit.t === 'pt' || hit.t === 'seg')) showAllTotals = false;
       sel = hit && (hit.t === 'pt' || hit.t === 'seg') ? {t:hit.t,p:hit.p,i:hit.i} : null;
       bsel.clear(); updateAll();
     } else handleClick(pend.hit, e.offsetX, e.offsetY, pend.multi);
@@ -3283,6 +3362,7 @@ function handleClick(hit, sx, sy, multi){
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
   if (hit && hit.label){
     if (drawTarget()) endLine();
+    showAllTotals = false;
     sel = {t:'seg', p:hit.p, i:hit.i}; updateAll(); return;
   }
   if (multi && hit && hit.t === 'bld' && selectBuilding(hit.i, true)) return;
@@ -3409,6 +3489,10 @@ $('c3dLabels').addEventListener('change', e => {
   try { localStorage.setItem(LABELS3_KEY, showFenceLabels3 ? 'on' : 'off'); } catch(err) {}
   fenceLabels3 = []; updateHint(); paint();
 });
+$('showAllTotals').addEventListener('change', e => {
+  showAllTotals = e.target.checked;
+  updateTotals();
+});
 const camZoom = f => { cam.dist *= f; clampCam(); paint(); };
 $('bZoomIn').addEventListener('click', () => mode3d ? camZoom(1/1.3) : zoomAt(cw/2, ch/2, 1.3));
 $('bZoomOut').addEventListener('click', () => mode3d ? camZoom(1.3) : zoomAt(cw/2, ch/2, 1/1.3));
@@ -3455,7 +3539,7 @@ $('iSpacing').addEventListener('change', e => {
 });
 $('iRails').addEventListener('change', e => {
   const v = parseInt(e.target.value, 10);
-  if (v >= 1 && v <= 10){
+  if (v >= 0 && v <= 10){
     const M = curMat();
     commitEdit(() => {
       M.rails = v;
@@ -3556,6 +3640,15 @@ $('matInclude').addEventListener('change', e => {
   sc.pl.excludeMaterials = e.target.checked ? undefined : true;
   updateAll();
 });
+for (const [id, key] of [['bomRails','excludeRails'], ['bomPalings','excludePalings']])
+  $(id).addEventListener('change', e => {
+    const sc = matScope();
+    if (!sc.pl) return;
+    pushUndo();
+    if (e.target.checked) delete sc.pl[key];
+    else sc.pl[key] = true;
+    updateAll();
+  });
 $('fenceVisible').addEventListener('change', e => {
   const sc = matScope();
   if (!sc.pl) return;
@@ -3582,14 +3675,26 @@ document.querySelectorAll('#styleTog button').forEach(b =>
     syncMatInputs(); updateAll();
   }));
 
+function copyGateMaterials(f){
+  if (!f.gates) return '';
+  const parts = [f.excludeRails ? 'Gate rails excluded' : 'Gate rails ' + f.gateRails];
+  if (f.mat.style !== 'rail')
+    parts.push(f.excludePalings ? 'Gate palings excluded' : 'Gate palings ' + f.gatePalings);
+  return parts.join(' · ');
+}
+
 // copy summary
 $('copyBtn').addEventListener('click', () => {
-  const m = calcMaterials(state.polys, state.mat), u = state.unit;
+  const m = calcMaterials(state.polys, state.mat), u = state.unit, sc = matScope();
+  const t = scopeTotals(m, sc.idx, showAllTotals);
+  const entries = showAllTotals || !sc.pl ? m.per : m.per.filter(f => f.i === sc.idx);
+  const detail = entries.some(f => f.own || f.excluded || f.excludeRails || f.excludePalings);
   const L = [];
   L.push('FENCE SUMMARY — ' + new Date().toLocaleDateString());
-  L.push('Fence length (excl. gates): ' + fmtLen(m.fenceLen, u));
-  L.push('Segments: ' + m.segCount + '   Corners: ' + m.corners);
-  L.push('Gates: ' + (m.gates.length ? m.gates.map(g => fmtLen(g,u)).join(', ') : 'none'));
+  if (sc.pl && !showAllTotals) L.push('Fence: ' + fenceName(sc.pl,sc.idx));
+  L.push('Fence length (excl. gates): ' + fmtLen(t.fenceLen, u));
+  L.push('Segments: ' + t.segCount + '   Corners: ' + t.corners);
+  L.push('Gates: ' + (t.gates.length ? t.gates.map(g => fmtLen(g,u)).join(', ') : 'none'));
   if (state.builds.length)
     L.push('Buildings: ' + houseGroups(state.builds).map(g => {
       const hb = houseBox(state.builds, g);
@@ -3600,28 +3705,35 @@ $('copyBtn').addEventListener('click', () => {
   L.push('');
   const hrDesc = M => { const h = hrOf(M);
     return h.on ? ', handrail ' + fmtSmall(h.w,u) + ' × ' + fmtSmall(h.t,u) : ''; };
-  const desc = M => (postShapeOf(M) + ' posts, ') + (M.style === 'rail'
-    ? railSideLabel(M).toLowerCase() + ', post-and-rail: posts every ' + fmtLen(M.spacing,u) + ', ' + M.rails + ' rails/panel, ' +
-      fmtSmall(M.railW,u) + ' rails'
-    : 'posts every ' + fmtLen(M.spacing,u) + ', ' + M.rails + ' rails/panel, palings ' +
-      fmtSmall(M.paling,u) + ' + ' + fmtSmall(M.gap,u) + ' gap') + hrDesc(M);
-  if (m.per.some(f => f.own || f.excluded)){ // fences differ — break the list down per fence
-    for (const f of m.per){
+  const desc = (M, f) => (postShapeOf(M) + ' posts, ') + (M.style === 'rail'
+    ? railSideLabel(M).toLowerCase() + ', post-and-rail: posts every ' + fmtLen(M.spacing,u) + ', ' +
+      (f && f.excludeRails ? 'rails excluded from BOM' : M.rails + ' rails/panel, ' +
+       fmtSmall(M.railW,u) + ' rails')
+    : 'posts every ' + fmtLen(M.spacing,u) + ', ' +
+      (f && f.excludeRails ? 'rails excluded from BOM' : M.rails + ' rails/panel') + ', ' +
+      (f && f.excludePalings ? 'palings excluded from BOM' : 'palings ' +
+       fmtSmall(M.paling,u) + ' + ' + fmtSmall(M.gap,u) + ' gap')) + hrDesc(M);
+  if (detail){ // fences differ — break the list down per fence
+    for (const f of entries){
       if (f.excluded){ L.push(f.name + ' — excluded from materials'); continue; }
-      L.push(f.name + ' — ' + fmtLen(f.len,u) + ' (' + desc(f.mat) + ')');
+      L.push(f.name + ' — ' + fmtLen(f.len,u) + ' (' + desc(f.mat, f) + ')');
       L.push('  Posts ' + f.posts + ` (${f.squarePosts} square, ${f.roundPosts} round)` +
-             ' · Rails ' + f.rails + (f.palings ? ' · Palings ' + f.palings : '') +
-             (f.handrail ? ' · Handrail ' + fmtLen(f.handrail,u) : ''));
+             (f.excludeRails ? ' · Rails excluded' : ' · Rails ' + f.rails) +
+             (f.excludePalings ? ' · Palings excluded' : (f.palings ? ' · Palings ' + f.palings : '')) +
+             (f.gates ? ' · ' + copyGateMaterials(f) : '') +
+            (f.handrail ? ' · Handrail ' + fmtLen(f.handrail,u) : ''));
     }
     L.push('');
     L.push('TOTAL:');
-  } else L.push('Materials (' + desc(state.mat) + '):');
-  L.push('  Posts:   ' + m.posts);
-  if (m.squarePosts) L.push('    Square: ' + m.squarePosts);
-  if (m.roundPosts) L.push('    Round:  ' + m.roundPosts);
-  L.push('  Rails:   ' + m.rails);
-  if (m.palings) L.push('  Palings: ' + m.palings);
-  if (m.handrail) L.push('  Handrail: ' + fmtLen(m.handrail, u));
+  } else L.push('Materials (' + desc(t.mat || state.mat) + '):');
+  if (t.gates.length)
+    L.push('Gate leaf materials: Rails ' + t.gateRails + ' · Palings ' + t.gatePalings);
+  L.push('  Posts:   ' + t.posts);
+  if (t.squarePosts) L.push('    Square: ' + t.squarePosts);
+  if (t.roundPosts) L.push('    Round:  ' + t.roundPosts);
+  L.push('  Rails:   ' + t.rails);
+  if (t.palings) L.push('  Palings: ' + t.palings);
+  if (t.handrail) L.push('  Handrail: ' + fmtLen(t.handrail, u));
   const text = L.join('\n');
   const done = () => {
     $('copyBtn').textContent = '✓ Copied';

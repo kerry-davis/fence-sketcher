@@ -5,6 +5,10 @@ import vm from 'node:vm';
 
 const html = fs.readFileSync(new URL('../fence-fable.html', import.meta.url), 'utf8');
 
+test('zero rails can be entered', () => {
+  assert.match(html, /const v = parseInt\(e\.target\.value, 10\);\s+if \(v >= 0 && v <= 10\)/);
+});
+
 test('round post settings render and split the materials count by shape', () => {
   const helperStart = html.indexOf('const ownPostShape =');
   const helperEnd = html.indexOf('const escHTML', helperStart);
@@ -69,6 +73,7 @@ test('round post settings render and split the materials count by shape', () => 
   assert.equal(context.build3().length - squareFaces, 12);
   context.state.polys.forEach(poly => poly.hidden3d = true);
   assert.equal(context.build3().length, 0);
+  assert.equal(context.railYs({...mat, rails:0}).length, 0);
 
   const materialStart = html.indexOf('function sharedEnds(');
   const materialEnd = html.indexOf('// Delete point i', materialStart);
@@ -79,6 +84,12 @@ test('round post settings render and split the materials count by shape', () => 
   assert.equal(materials.posts, 2);
   assert.equal(materials.squarePosts, 0);
   assert.equal(materials.roundPosts, 2);
+
+  materials = context.calcMaterials([
+    {closed:false, pts:[{x:0,y:0}, {x:1,y:0}]},
+  ], {...mat, rails:0});
+  assert.equal(materials.rails, 0);
+  assert.equal(materials.per[0].rails, 0);
 
   materials = context.calcMaterials([
     {closed:false, pts:[{x:0,y:0,postShape:'square'}, {x:1,y:0}]},

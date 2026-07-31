@@ -63,9 +63,10 @@ screens.
   tick "This fence has its own settings", then it can keep its own name,
   spacing, style, height, rail side, post shapes, end-post rule, handrail and
   materials inclusion. Totals aggregate across all included fences.
-- **Gates.** Mark any segment as a gate: it is excluded from fence length and
-  panel totals, but renders as a gate leaf with posts at its opening. Gate-only
-  runs are named `Gate 1`, `Gate 2`, and so on by default and can be renamed.
+- **Gates.** Mark any segment as a gate: its opening is excluded from fence length
+  and panel totals, while its support posts and leaf rails/palings are included in
+  materials unless those BOM components are excluded. Gate-only runs are named
+  `Gate 1`, `Gate 2`, and so on by default and can be renamed.
 - **Handrail.** An optional capping rail along the tops of the posts, with its
   own cross-section. Counted in linear metres, and it skips gate openings.
 - **Posts.** Choose square or round posts for a complete run, then override an
@@ -89,9 +90,10 @@ screens.
   display and parsing. `12'6"`, `12 ft 6 in`, `6"` and bare numbers all parse.
   Fields you haven't touched jump to the sensible default for the new unit
   (2.4 m ↔ 8 ft); fields you have typed into stay put.
-- **Live materials controls.** Exclude an individual fence from the bill of
-  materials without hiding it from the plan, and copy a detailed plain-text
-  takeoff with the current names, lengths, post shapes and settings.
+- **Live materials controls.** Exclude an individual fence, or just its rails or
+  palings, from the bill of materials without hiding it from the plan, and copy a
+  detailed plain-text takeoff with the current names, lengths, post shapes and
+  settings.
 - **Light / dark theme**, remembered.
 - **Autosave** to `localStorage`, plus named server backups managed from the
   top-right **Files** menu.
@@ -111,7 +113,8 @@ spacing:
 - Plus intermediate posts so **no panel exceeds the post spacing**: each
   segment contributes `ceil(length / spacing)` panels, and that many posts (its
   far end plus the intermediates).
-- Plus a post **each side of every gate**; a gate contributes no panels.
+- Plus a post **each side of every gate**; a gate contributes no fence panels or
+  fence length, but its rendered leaf rails and palings are counted unless excluded.
 - An open run adds **one more** for its starting post.
 - Where two runs meet at a point, that **junction post is counted once**.
 - **End posts** default to `Auto` (count both ends, except one already posted by
@@ -123,9 +126,10 @@ spacing:
   it as square or round. The materials summary counts each shape separately.
 
 So a straight 10 m run at 1.5 m spacing is 7 panels and 8 posts; bend it into
-two 5 m legs and it becomes 8 panels and 9 posts. Rails are `panels × rails per
-panel`. Palings are `ceil(fence length / (paling width + gap))`. Handrail is a
-length, not a count.
+two 5 m legs and it becomes 8 panels and 9 posts. Fence rails are `panels × rails
+per panel`; a rail gate uses its fitted rails and a paling gate uses two frame
+rails. Palings are `ceil(length / (paling width + gap))` for the fence or gate
+leaf. Handrail is a length, not a count.
 
 For post-and-rail, the rail count and gap derive from each other inside the
 band left between the bottom and top clearances — edit either and the other
