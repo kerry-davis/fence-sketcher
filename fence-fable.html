@@ -848,6 +848,9 @@ function planGroupRenderOrder(groups, selected){
   return groups.filter(g => !g.some(i => selected.has(i)))
     .concat(groups.filter(g => g.some(i => selected.has(i))));
 }
+function planGroupPickOrder(groups, selected){
+  return planGroupRenderOrder(groups, selected).slice().reverse();
+}
 function scaleBuildings(builds, ids, from, to){
   const sx = to.w/from.w, sy = to.h/from.h;
   for (const i of ids){
@@ -906,18 +909,28 @@ function physicalEndLabels(pl){
   if (ax >= ay*2)
     return dx >= 0 ? {start:'Left end',end:'Right end'} : {start:'Right end',end:'Left end'};
   if (ay >= ax*2)
-    return dy >= 0 ? {start:'Top end',end:'Bottom end'} : {start:'Bottom end',end:'Top end'};
+    return dy >= 0 ? {start:'Bottom end',end:'Top end'} : {start:'Top end',end:'Bottom end'};
   const label = (horizontal,vertical) =>
     vertical[0].toUpperCase()+vertical.slice(1)+'-'+horizontal+' end';
   return {
-    start:label(dx >= 0 ? 'left' : 'right',dy >= 0 ? 'top' : 'bottom'),
-    end:label(dx >= 0 ? 'right' : 'left',dy >= 0 ? 'bottom' : 'top'),
+    start:label(dx >= 0 ? 'left' : 'right',dy >= 0 ? 'bottom' : 'top'),
+    end:label(dx >= 0 ? 'right' : 'left',dy >= 0 ? 'top' : 'bottom'),
   };
 }
+function oneEndOf(mat, pl){
+  const ends = endsOf(mat);
+  if (ends !== 'start' && ends !== 1) return null;
+  return pl && (pl.oneEnd === 'start' || pl.oneEnd === 'end')
+    ? pl.oneEnd : ends === 'start' ? 'start' : 'end';
+}
+function flipPhysicalOneEnd(pl, mat){
+  const oneEnd = oneEndOf(mat, pl);
+  if (oneEnd) pl.oneEnd = oneEnd === 'start' ? 'end' : 'start';
+}
 function endsLabel(mat,pl){
+  const oneEnd = oneEndOf(mat,pl);
+  if (oneEnd) return physicalEndLabels(pl)[oneEnd] + ' only';
   const ends=endsOf(mat);
-  if (ends === 'start' || ends === 1)
-    return physicalEndLabels(pl)[ends === 'start' ? 'start' : 'end'] + ' only';
   return ({auto:'Auto',2:'Both ends',0:'None'})[ends] || 'Auto';
 }
 
@@ -937,6 +950,8 @@ function materialPostEndFlags(polys, idx, mat){
   const pl = polys[idx];
   if (pl.closed) return {start:true, end:true};
   const ends = endsOf(mat);
+  const oneEnd = typeof oneEndOf === 'function' ? oneEndOf(mat,pl) : null;
+  if (oneEnd) return {start:oneEnd === 'start', end:oneEnd === 'end'};
   const shared = (point, beforeOnly) => polys.some((other,j) =>
     j !== idx && !other.excludeMaterials && (!beforeOnly || j < idx) &&
     other.pts.some(q => Math.hypot(q.x-point.x, q.y-point.y) < 1e-4));
@@ -1058,7 +1073,10 @@ function deleteSegment(polys, p, i){
       .filter(q => q.length >= 2)
       .map(q => ({ pts:q, closed:false, done:true,
                    excludeMaterials:pl.excludeMaterials || undefined,
-                   hidden3d:pl.hidden3d || undefined }));
+                   hidden3d:pl.hidden3d || undefined,
+                   mat:pl.mat ? JSON.parse(JSON.stringify(pl.mat)) : undefined,
+                   name:pl.name || undefined,
+                   oneEnd:pl.oneEnd || undefined }));
     polys.splice(p, 1, ...parts);
   }
 }
@@ -1704,9 +1722,14 @@ function pick(sx, sy){
       const A = W2S(a), B = W2S(b);
       if (dist2seg(sx,sy, A.x,A.y, B.x,B.y).d < HIT.seg) return { t:'seg', p, i };
     }
-  for (let i = state.builds.length-1; i >= 0; i--){
-    const b = state.builds[i], w = S2W(sx,sy);
-    if (w.x>=b.x && w.x<=b.x+b.w && w.y>=b.y && w.y<=b.y+b.h) return { t:'bld', i };
+  const selectedBuildings = sel && sel.t === 'bld' ? bsel : new Set();
+  const w = S2W(sx,sy);
+  for (const g of planGroupPickOrder(houseGroups(state.builds), selectedBuildings)){
+    for (const i of [...g].reverse()){
+      const b = state.builds[i];
+      if (w.x>=b.x && w.x<=b.x+b.w && w.y>=b.y && w.y<=b.y+b.h)
+        return {t:'bld', i};
+    }
   }
   return null;
 }
@@ -2115,6 +2138,8 @@ function postsAlong(a, b, spacing, gate){
 function postEndFlags(polys, idx, mat){
   const pl = polys[idx];
   if (pl.closed) return { start:true, end:true };
+  const oneEnd = typeof oneEndOf === 'function' ? oneEndOf(mat, pl) : null;
+  if (oneEnd) return {start:oneEnd === 'start', end:oneEnd === 'end'};
   const e = endsOf(mat);
   if (e !== 'auto'){
     if (e === 'start') return {start:true,end:false};
@@ -2726,7 +2751,7 @@ function syncMatInputs(){
   set('iRails', M.rails);
   if (document.activeElement !== $('iFencePostShape'))
     $('iFencePostShape').value = postShapeOf(M);
-  const ends = endsOf(M), oneEnd = ends === 'start' || ends === 1;
+  const ends = endsOf(M), oneEnd = oneEndOf(M, sc.pl);
   if (document.activeElement !== $('iEnds'))
     $('iEnds').value = oneEnd ? 'one' : String(ends);
   $('oneEndWrap').style.display = oneEnd ? 'flex' : 'none';
@@ -2734,7 +2759,7 @@ function syncMatInputs(){
   $('iOneEnd').options[0].textContent = endLabels.start;
   $('iOneEnd').options[1].textContent = endLabels.end;
   if (document.activeElement !== $('iOneEnd'))
-    $('iOneEnd').value = ends === 'start' ? 'start' : 'end';
+    $('iOneEnd').value = oneEnd || 'end';
   const selectedPoint = sel && sel.t === 'pt' && state.polys[sel.p] &&
                         state.polys[sel.p].pts[sel.i];
   $('postShapeWrap').style.display = selectedPoint ? 'flex' : 'none';
@@ -3175,7 +3200,10 @@ function resumeLine(p, i){
   if (readOnly) return;
   const pl = state.polys[p], last = pl.pts.length - 1;
   pushUndo();
-  if (i === 0 && last > 0) reversePoly(pl);     // continue from the old start
+  if (i === 0 && last > 0){
+    flipPhysicalOneEnd(pl, pl.mat || state.mat);
+    reversePoly(pl);
+  }                                             // continue from the old start
   pl.done = false;
   state.polys.splice(p, 1);
   state.polys.push(pl);                         // last open poly = the drawing target
@@ -3418,16 +3446,22 @@ $('iHR').addEventListener('change', e => {
   syncMatInputs(); updateAll();
 });
 $('iEnds').addEventListener('change', e => {
-  const M = curMat(), current = endsOf(M);
+  const sc = matScope(), M = sc.mat, current = endsOf(M);
   const value = e.target.value === 'one'
     ? (current === 'start' ? 'start' : 1)
     : e.target.value === 'auto' ? 'auto' : +e.target.value;
-  commitEdit(() => M.ends = value);
+  commitEdit(() => {
+    M.ends = value;
+    if (value !== 'start' && value !== 1 && sc.pl) delete sc.pl.oneEnd;
+  });
   updateAll();
 });
 $('iOneEnd').addEventListener('change', e => {
-  const M = curMat();
-  commitEdit(() => M.ends = e.target.value === 'start' ? 'start' : 1);
+  const sc = matScope(), M = sc.mat;
+  commitEdit(() => {
+    M.ends = e.target.value === 'start' ? 'start' : 1;
+    if (sc.pl) sc.pl.oneEnd = e.target.value;
+  });
   updateAll();
 });
 $('iFencePostShape').addEventListener('change', e => {

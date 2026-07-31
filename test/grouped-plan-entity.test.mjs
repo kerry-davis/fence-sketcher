@@ -56,4 +56,8 @@ test('grouped buildings have one outline with continuous external edge lengths',
     Array.from(context.planGroupRenderOrder(groups,new Set([2,3])),g => Array.from(g)),
     [[0],[1],[2,3]],
   );
+  assert.deepEqual(
+    Array.from(context.planGroupPickOrder(groups,new Set([0])),g => Array.from(g)),
+    [[0],[2,3],[1]],
+  );
 });
