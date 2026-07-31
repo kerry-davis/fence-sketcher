@@ -818,19 +818,31 @@ function planGroupOutline(builds, g){
     if (!covered(i,j-1)) edges.push([{x:xs[i],y:ys[j]},{x:xs[i+1],y:ys[j]}]);
     if (!covered(i,j+1)) edges.push([{x:xs[i],y:ys[j+1]},{x:xs[i+1],y:ys[j+1]}]);
   }
-  return edges;
-}
-function planGroupLabelPoint(builds,g){
-  const hb=houseBox(builds,g), point={x:hb.x+hb.w/2,y:hb.y+hb.h/2};
-  if (g.some(i => {
-    const b=builds[i];
-    return point.x >= b.x && point.x <= b.x+b.w &&
-           point.y >= b.y && point.y <= b.y+b.h;
-  })) return point;
-  const largest=g.reduce((best,i) =>
-    builds[i].w*builds[i].h > builds[best].w*builds[best].h ? i : best,g[0]);
-  const b=builds[largest];
-  return {x:b.x+b.w/2,y:b.y+b.h/2};
+  const lines=new Map();
+  for (const [a,b] of edges){
+    const horizontal=Math.abs(a.y-b.y) < 1e-9;
+    const fixed=horizontal ? a.y : a.x;
+    const start=Math.min(horizontal ? a.x : a.y,horizontal ? b.x : b.y);
+    const end=Math.max(horizontal ? a.x : a.y,horizontal ? b.x : b.y);
+    const key=(horizontal ? 'h:' : 'v:')+fixed.toFixed(9);
+    if (!lines.has(key)) lines.set(key,{horizontal,fixed,intervals:[]});
+    lines.get(key).intervals.push([start,end]);
+  }
+  const merged=[];
+  for (const line of lines.values()){
+    line.intervals.sort((a,b) => a[0]-b[0]);
+    const spans=[];
+    for (const interval of line.intervals){
+      const last=spans[spans.length-1];
+      if (last && interval[0] <= last[1]+1e-9) last[1]=Math.max(last[1],interval[1]);
+      else spans.push([...interval]);
+    }
+    for (const [start,end] of spans)
+      merged.push(line.horizontal
+        ? [{x:start,y:line.fixed},{x:end,y:line.fixed}]
+        : [{x:line.fixed,y:start},{x:line.fixed,y:end}]);
+  }
+  return merged;
 }
 function scaleBuildings(builds, ids, from, to){
   const sx = to.w/from.w, sy = to.h/from.h;
@@ -1871,8 +1883,9 @@ function doPaint(){
       ctx.fillRect(A.x,A.y,b.w*view.s,b.h*view.s);
     }
     const isSel=sel && sel.t==='bld' && g.some(i => bsel.has(i));
+    const outline=planGroupOutline(state.builds,g);
     ctx.beginPath();
-    for (const [a,b] of planGroupOutline(state.builds,g)){
+    for (const [a,b] of outline){
       const A=W2S(a), B=W2S(b);
       ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y);
     }
@@ -1880,10 +1893,25 @@ function doPaint(){
     ctx.lineWidth=isSel ? 2 : 1.5;
     ctx.stroke();
     const hb=houseBox(state.builds,g), sw=hb.w*view.s, sh=hb.h*view.s;
-    if (sw > 54 && sh > 22){
-      const label=W2S(planGroupLabelPoint(state.builds,g));
+    if (g.length === 1 && sw > 54 && sh > 22){
+      const label=W2S({x:hb.x+hb.w/2,y:hb.y+hb.h/2});
       ctx.fillStyle = C.bldText; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
       ctx.fillText(fmtLen(hb.w,state.unit)+' × '+fmtLen(hb.h,state.unit),label.x,label.y+4);
+    } else if (g.length > 1){
+      for (const [a,b] of outline){
+        const A=W2S(a), B=W2S(b);
+        if (Math.hypot(B.x-A.x,B.y-A.y) <= 44) continue;
+        let angle=Math.atan2(B.y-A.y,B.x-A.x);
+        if (angle > Math.PI/2 || angle < -Math.PI/2) angle+=Math.PI;
+        ctx.save();
+        ctx.translate((A.x+B.x)/2,(A.y+B.y)/2); ctx.rotate(angle);
+        ctx.font='12px system-ui'; ctx.textAlign='center';
+        ctx.lineWidth=4; ctx.strokeStyle=C.halo;
+        ctx.strokeText(fmtLen(segLen(a,b),state.unit),0,-7);
+        ctx.fillStyle=C.bldText;
+        ctx.fillText(fmtLen(segLen(a,b),state.unit),0,-7);
+        ctx.restore();
+      }
     }
   }
   if (sel && sel.t==='bld' && bsel.size){

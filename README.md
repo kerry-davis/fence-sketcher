@@ -38,8 +38,8 @@ with the list.
   own cross-section. Counted in linear metres, and it skips gate openings.
 - **Buildings.** Drop a rectangle, drag it, resize from the corners. Fences snap
   to its corners and edges. Grouped shapes become one composite plan/3D entity
-  with one outer outline and overall measurement; Ungroup restores the parts.
-  Excluded from materials.
+  with one outer outline and a derived length on every continuous external
+  edge; Ungroup restores the parts. Excluded from materials.
 - **Exact lengths.** Type a segment length and the far end moves along its line;
   lock it so dragging a neighbouring post can't change it.
 - **Per-fence 3D visibility.** Hide a fence from the 3D scene while retaining a
