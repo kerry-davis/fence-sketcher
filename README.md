@@ -14,8 +14,8 @@ created view-only snapshots without exposing the private backup API.
 **Draw the fence.** Tap to drop posts, tap the first post to close a loop,
 double-tap or `Esc` to finish a run. Drag anything to move it. Points snap to
 existing posts and building corners, then to fence lines and building edges,
-then to 45°/90° rays off the last post, then to alignment with any existing
-post (with dashed guides), then to the grid — first match wins.
+then to alignment with any existing post (with dashed guides), then to
+45°/90° rays off the last post, then to the grid — first match wins.
 
 **Get the quantities.** Live totals for posts, rails, palings, handrail metres,
 gates and corners, with the working shown ("13 panels, 1 corner, 1 gate").
@@ -37,9 +37,13 @@ with the list.
 - **Handrail.** An optional capping rail along the tops of the posts, with its
   own cross-section. Counted in linear metres, and it skips gate openings.
 - **Buildings.** Drop a rectangle, drag it, resize from the corners. Fences snap
-  to its corners and edges. Excluded from materials.
+  to its corners and edges. Grouped shapes become one composite plan/3D entity
+  with one outer outline and a derived length on every continuous external
+  edge; Ungroup restores the parts. Excluded from materials.
 - **Exact lengths.** Type a segment length and the far end moves along its line;
   lock it so dragging a neighbouring post can't change it.
+- **Per-fence 3D visibility.** Hide a fence from the 3D scene while retaining a
+  muted dotted, selectable reference in plan and keeping its materials counted.
 - **Metric or imperial.** Everything is stored in metres; units only affect
   display and parsing. `12'6"`, `12 ft 6 in`, `6"` and bare numbers all parse.
   Fields you haven't touched jump to the sensible default for the new unit
@@ -66,8 +70,12 @@ spacing:
 - An open run adds **one more** for its starting post.
 - Where two runs meet at a point, that **junction post is counted once**.
 - **End posts** default to `Auto` (count both ends, except one already posted by
-  an earlier fence). Override with Both / One / None when the ends are already
-  posted — fixed to a building, say.
+  an earlier fence). Override with Both / One end / None when the ends are
+  already posted — fixed to a building, say. One end adds a second spatial
+  choice such as Left/Right or Top/Bottom, matching the endpoint labels in plan.
+- **Post shape** can be square or round for a complete fence run. Selecting an
+  individual post allows that one point to inherit the fence setting or override
+  it as square or round. The materials summary counts each shape separately.
 
 So a straight 10 m run at 1.5 m spacing is 7 panels and 8 posts; bend it into
 two 5 m legs and it becomes 8 panels and 9 posts. Rails are `panels × rails per
