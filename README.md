@@ -37,7 +37,9 @@ with the list.
 - **Handrail.** An optional capping rail along the tops of the posts, with its
   own cross-section. Counted in linear metres, and it skips gate openings.
 - **Buildings.** Drop a rectangle, drag it, resize from the corners. Fences snap
-  to its corners and edges. Excluded from materials.
+  to its corners and edges. Grouped shapes become one composite plan/3D entity
+  with one outer outline and overall measurement; Ungroup restores the parts.
+  Excluded from materials.
 - **Exact lengths.** Type a segment length and the far end moves along its line;
   lock it so dragging a neighbouring post can't change it.
 - **Per-fence 3D visibility.** Hide a fence from the 3D scene while retaining a

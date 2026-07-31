@@ -801,6 +801,37 @@ function houseBox(builds, g){
   return { x:x0, y:y0, w:x1-x0, h:y1-y0,
            z:bldH(own), roof:own.roof, pitch:own.pitch, ridge:own.ridge, high:own.high };
 }
+function planGroupOutline(builds, g){
+  const boxes=g.map(i => builds[i]);
+  const xs=[...new Set(boxes.flatMap(b => [b.x,b.x+b.w]))].sort((a,b) => a-b);
+  const ys=[...new Set(boxes.flatMap(b => [b.y,b.y+b.h]))].sort((a,b) => a-b);
+  const covered = (i,j) => {
+    if (i < 0 || j < 0 || i >= xs.length-1 || j >= ys.length-1) return false;
+    const x=(xs[i]+xs[i+1])/2, y=(ys[j]+ys[j+1])/2;
+    return boxes.some(b => x >= b.x && x <= b.x+b.w && y >= b.y && y <= b.y+b.h);
+  };
+  const edges=[];
+  for (let i=0;i<xs.length-1;i++) for (let j=0;j<ys.length-1;j++){
+    if (!covered(i,j)) continue;
+    if (!covered(i-1,j)) edges.push([{x:xs[i],y:ys[j]},{x:xs[i],y:ys[j+1]}]);
+    if (!covered(i+1,j)) edges.push([{x:xs[i+1],y:ys[j]},{x:xs[i+1],y:ys[j+1]}]);
+    if (!covered(i,j-1)) edges.push([{x:xs[i],y:ys[j]},{x:xs[i+1],y:ys[j]}]);
+    if (!covered(i,j+1)) edges.push([{x:xs[i],y:ys[j+1]},{x:xs[i+1],y:ys[j+1]}]);
+  }
+  return edges;
+}
+function planGroupLabelPoint(builds,g){
+  const hb=houseBox(builds,g), point={x:hb.x+hb.w/2,y:hb.y+hb.h/2};
+  if (g.some(i => {
+    const b=builds[i];
+    return point.x >= b.x && point.x <= b.x+b.w &&
+           point.y >= b.y && point.y <= b.y+b.h;
+  })) return point;
+  const largest=g.reduce((best,i) =>
+    builds[i].w*builds[i].h > builds[best].w*builds[best].h ? i : best,g[0]);
+  const b=builds[largest];
+  return {x:b.x+b.w/2,y:b.y+b.h/2};
+}
 function scaleBuildings(builds, ids, from, to){
   const sx = to.w/from.w, sy = to.h/from.h;
   for (const i of ids){
@@ -1833,18 +1864,28 @@ function doPaint(){
   $('gridcap').textContent = 'Grid: ' + gridStepLabel(step);
 
   // --- buildings ---
-  state.builds.forEach((b, i) => {
-    const A = W2S(b), sw = b.w*view.s, sh = b.h*view.s;
-    ctx.fillStyle = C.bldFill; ctx.fillRect(A.x, A.y, sw, sh);
-    const isSel = sel && sel.t==='bld' && bsel.has(i);
-    ctx.strokeStyle = isSel ? ACCENT : C.bldStroke;
-    ctx.lineWidth = isSel ? 2 : 1.5;
-    ctx.strokeRect(A.x, A.y, sw, sh);
-    if (sw > 54 && sh > 22){
-      ctx.fillStyle = C.bldText; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText(fmtLen(b.w, state.unit) + ' × ' + fmtLen(b.h, state.unit), A.x+sw/2, A.y+sh/2+4);
+  for (const g of houseGroups(state.builds)){
+    for (const i of g){
+      const b=state.builds[i], A=W2S(b);
+      ctx.fillStyle=C.bldFill;
+      ctx.fillRect(A.x,A.y,b.w*view.s,b.h*view.s);
     }
-  });
+    const isSel=sel && sel.t==='bld' && g.some(i => bsel.has(i));
+    ctx.beginPath();
+    for (const [a,b] of planGroupOutline(state.builds,g)){
+      const A=W2S(a), B=W2S(b);
+      ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y);
+    }
+    ctx.strokeStyle=isSel ? ACCENT : C.bldStroke;
+    ctx.lineWidth=isSel ? 2 : 1.5;
+    ctx.stroke();
+    const hb=houseBox(state.builds,g), sw=hb.w*view.s, sh=hb.h*view.s;
+    if (sw > 54 && sh > 22){
+      const label=W2S(planGroupLabelPoint(state.builds,g));
+      ctx.fillStyle = C.bldText; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText(fmtLen(hb.w,state.unit)+' × '+fmtLen(hb.h,state.unit),label.x,label.y+4);
+    }
+  }
   if (sel && sel.t==='bld' && bsel.size){
     const b = houseBox(state.builds, [...bsel]);
     ctx.fillStyle = ACCENT;
@@ -2735,8 +2776,9 @@ function updateSelbox(){
   } else if (sel.t === 'bld'){
     const b = state.builds[sel.i];
     const ids = [...bsel], hb = houseBox(state.builds, ids);
+    const objects = new Set(ids.map(i => state.builds[i].g == null ? 'b'+i : 'g'+state.builds[i].g));
     if (key !== lastSelKey){
-      box.innerHTML = '<h2>Selected building'+(ids.length>1?'s':'')+'</h2>' +
+      box.innerHTML = '<h2>Selected building'+(objects.size>1?'s':'')+'</h2>' +
         '<div class="grp"><button id="bGroup" class="primary" style="flex:1">Group</button>' +
           '<button id="bUngroup" style="flex:1">Ungroup</button></div>' +
         '<div class="row"><span>Width</span><span><input id="iBW" inputmode="text"></span></div>' +
@@ -2793,15 +2835,14 @@ function updateSelbox(){
         if (v >= 1 && v <= 75) applyHouse(bl => bl.pitch = v); else updateSelbox();
       });
     }
-    const objects = new Set(ids.map(i => state.builds[i].g == null ? 'b'+i : 'g'+state.builds[i].g));
     $('bGroup').disabled = objects.size < 2;
     $('bUngroup').disabled = !ids.some(i => state.builds[i].g != null);
     $('bJoinNote').textContent =
       (objects.size > 1
         ? `${objects.size} objects selected. Choose Group to combine them. `
         : ids.length > 1
-        ? `Grouped with ${ids.length-1} other building${ids.length>2?'s':''} — one object ` +
-          `${fmtLen(hb.w,u)} × ${fmtLen(hb.h,u)} overall, sharing this height and roof. `
+        ? `One grouped object — ${fmtLen(hb.w,u)} × ${fmtLen(hb.h,u)} overall, ` +
+          `sharing this height and roof. `
         : 'One object selected. ') +
       'Shift-click or press and hold to add or remove whole objects from the selection.';
     box.classList.toggle('noroof', !hasRoof(hb));
@@ -3423,8 +3464,7 @@ $('copyBtn').addEventListener('click', () => {
   if (state.builds.length)
     L.push('Buildings: ' + houseGroups(state.builds).map(g => {
       const hb = houseBox(state.builds, g);
-      return g.map(i => fmtLen(state.builds[i].w,u)+' × '+fmtLen(state.builds[i].h,u)).join(' + ') +
-        ', ' + fmtLen(bldH(hb),u) + ' high' +
+      return fmtLen(hb.w,u)+' × '+fmtLen(hb.h,u)+', '+fmtLen(bldH(hb),u)+' high' +
         (hasRoof(hb) ? ` (${roofKind(hb) === 'skillion' ? 'single pitch' : 'gable'} ${roofPitch(hb)}°, ` +
                        `top ${fmtLen(roofTop(hb),u)})` : '');
     }).join('; '));
