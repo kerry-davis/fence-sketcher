@@ -4,36 +4,68 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fence sketcher</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
-  /* ---- style: light background, one accent colour ---- */
+  /* ---- design system: emerald/slate, Figtree + Sora (TrySolar-derived) ---- */
   :root{
-    --accent:#15803d;        /* the one accent colour — change here */
-    --accent-soft:#dcf3e4;
-    --ink:#1f2937;
-    --muted:#6b7280;
-    --line:#d6d3ce;
-    --bg:#fafaf8;
-    --card:#ffffff;          /* panels, buttons, canvas background */
-    --chip:#ffffffe6;        /* translucent overlays on the canvas */
+    --accent:#059669;          /* the one accent colour — canvas reads this var */
+    --accent-strong:#047857;
+    --accent-soft:#d1fae5;     /* rings, active borders */
+    --accent-faint:#ecfdf5;    /* tinted card backgrounds */
+    --ink:#0f172a;
+    --muted:#64748b;
+    --line:#e2e8f0;
+    --bg:#f6f8fb;
+    --card:#ffffff;            /* panels, buttons, canvas background */
+    --chip:#ffffffef;          /* translucent overlays on the canvas */
+    --field:#f1f5f9;           /* input / select fill */
+    --danger:#e11d48;
+    --danger-soft:#fecdd3;
+    --danger-faint:#fff1f2;
+    --shadow-1:0 1px 2px rgb(15 23 42/.05);
+    --shadow-2:0 8px 18px rgb(15 23 42/.08);
+    --shadow-3:0 24px 60px rgb(15 23 42/.25);
+    --font:"Figtree",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    --display:"Sora","Figtree",ui-sans-serif,system-ui,sans-serif;
   }
   body.dark{
-    --accent:#1fa055;
-    --accent-soft:#14301f;
-    --ink:#e5e7eb;
-    --muted:#9ca3af;
-    --line:#33373d;
-    --bg:#131518;
-    --card:#1d2024;
-    --chip:#1d2024e6;
+    --accent:#10b981;
+    --accent-strong:#34d399;
+    --accent-soft:#10b98140;
+    --accent-faint:#10b98114;
+    --ink:#e2e8f0;
+    --muted:#94a3b8;
+    --line:#ffffff1c;
+    --bg:#020617;
+    --card:#0f172a;
+    --chip:#0f172aef;
+    --field:#1e293b;
+    --danger:#fb7185;
+    --danger-soft:#fb718552;
+    --danger-faint:#fb71851a;
+    --shadow-1:0 1px 2px rgb(0 0 0/.3);
+    --shadow-2:0 8px 18px rgb(0 0 0/.35);
+    --shadow-3:0 24px 60px rgb(0 0 0/.55);
   }
   *{box-sizing:border-box}
   html,body{height:100%}
-  body{margin:0;font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);
-       background:var(--bg);display:flex;flex-direction:column}
-  #bar h1{font-size:18px;margin:0 6px 0 0;font-weight:650;white-space:nowrap}
+  body{margin:0;font:14px/1.5 var(--font);letter-spacing:-0.006em;color:var(--ink);
+       background:var(--bg);display:flex;flex-direction:column;
+       -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  ::-webkit-scrollbar{width:6px;height:6px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#94a3b840;border-radius:10px}
+  ::-webkit-scrollbar-thumb:hover{background:#94a3b873}
+  @keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+  @keyframes modalIn{from{opacity:0;transform:scale(.96) translateY(10px)}to{opacity:1;transform:none}}
+  #bar h1{font:700 15px/1.2 var(--display);letter-spacing:-0.01em;margin:0 8px 0 2px;white-space:nowrap}
   .grp{display:flex;gap:6px;align-items:center}
-  #viewOnlyBadge{display:none;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;
-                 color:var(--accent);background:var(--accent-soft);font-size:12px;font-weight:700}
+  #viewOnlyBadge{display:none;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
+                 color:var(--accent);background:var(--accent-faint);border:1px solid var(--accent-soft);
+                 font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase}
+  #viewOnlyBadge svg{width:12px;height:12px;stroke:currentColor}
   body.readonly #viewOnlyBadge{display:inline-flex}
   body.readonly .editorOnly{display:none!important}
   body.readonly canvas{cursor:grab}
@@ -41,149 +73,195 @@
 
   /* big touch-friendly buttons */
   button,.tog label{min-height:44px}
-  button{font:inherit;font-weight:550;color:var(--ink);background:var(--card);border:1px solid var(--line);
-         border-radius:10px;padding:8px 14px;cursor:pointer;user-select:none;-webkit-user-select:none}
-  button:hover:not(:disabled):not(.primary):not(.on){border-color:var(--muted);filter:brightness(0.97)}
-  button:active{transform:translateY(1px)}
-  button:disabled{opacity:.4;cursor:default}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-  button.danger{color:#b91c1c;border-color:#e5c4c4}
+  button{display:inline-flex;align-items:center;justify-content:center;gap:7px;
+         font:inherit;font-size:13px;font-weight:600;white-space:nowrap;
+         color:var(--ink);background:var(--card);border:1px solid var(--line);
+         border-radius:12px;padding:8px 14px;cursor:pointer;user-select:none;-webkit-user-select:none;
+         transition:background .15s,border-color .15s,box-shadow .15s,color .15s}
+  button svg{width:16px;height:16px;stroke:currentColor;flex:none}
+  button:hover:not(:disabled):not(.primary):not(.on):not(.danger){background:var(--field);border-color:#cbd5e1}
+  body.dark button:hover:not(:disabled):not(.primary):not(.on):not(.danger){border-color:#475569}
+  button:active:not(:disabled){transform:translateY(1px)}
+  button:disabled{opacity:.45;cursor:default}
+  button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;
+                 box-shadow:0 1px 2px rgb(5 150 105/.4)}
+  button.primary:hover:not(:disabled){background:var(--accent-strong);border-color:var(--accent-strong)}
+  button.danger{color:var(--danger);border-color:var(--danger-soft)}
+  button.danger:hover:not(:disabled){background:var(--danger-faint);border-color:var(--danger)}
 
-  .seg2{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  .seg2 button{border:0;border-radius:0;min-width:70px}
-  .seg2 button.on{background:var(--accent);color:#fff}
+  .seg2{display:inline-flex;padding:3px;gap:2px;background:var(--field);
+        border:1px solid var(--line);border-radius:12px}
+  .seg2 button{border:0;border-radius:9px;min-width:64px;min-height:36px;
+               background:transparent;color:var(--muted)}
+  .seg2 button.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow-2)}
 
-  #bar{position:relative;display:flex;gap:10px;row-gap:8px;align-items:center;
+  #bar{position:relative;z-index:40;display:flex;gap:10px;row-gap:8px;align-items:center;
        padding:9px 14px;flex-wrap:wrap;
-       background:var(--card);border-bottom:1px solid var(--line);user-select:none;-webkit-user-select:none}
+       background:var(--chip);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+       border-bottom:1px solid var(--line);user-select:none;-webkit-user-select:none}
   #bar .toolbarEnd{margin-left:auto;gap:8px;flex-wrap:nowrap}
   /* snap toggles live on the canvas as compact chips */
-  #snapover{position:absolute;top:8px;right:10px;display:flex;gap:6px}
-  #label3ctl{position:absolute;top:56px;right:10px;display:inline-flex;min-height:44px}
-  label.chk{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:var(--chip);
+  #snapover{position:absolute;top:10px;right:12px;display:flex;gap:6px}
+  #label3ctl{position:absolute;top:58px;right:12px;display:inline-flex;min-height:44px}
+  label.chk{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;background:var(--chip);
+            backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
             border:1px solid var(--line);border-radius:999px;cursor:pointer;min-height:36px;
-            font-size:13px;box-shadow:0 1px 3px #00000012;user-select:none;-webkit-user-select:none}
-  input[type=checkbox]{width:17px;height:17px;accent-color:var(--accent)}
+            font-size:12px;font-weight:600;box-shadow:var(--shadow-1);user-select:none;-webkit-user-select:none}
+  input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
   /* hint + zoom controls float over the canvas instead of taking toolbar/page space */
-  #hint{position:absolute;top:8px;left:10px;max-width:55%;font-size:12px;
-        color:var(--muted);background:var(--chip);padding:4px 10px;border-radius:8px;pointer-events:none}
-  #zoomctl{position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:6px}
-  #zoomctl button{width:46px;height:46px;padding:0;font-size:20px;box-shadow:0 1px 4px #0002}
+  #hint{position:absolute;top:10px;left:12px;max-width:55%;font-size:12px;
+        color:var(--muted);background:var(--chip);padding:5px 11px;border-radius:9px;pointer-events:none;
+        box-shadow:var(--shadow-1)}
+  #zoomctl{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:6px}
+  #zoomctl button{width:46px;height:46px;padding:0;font-size:19px;box-shadow:var(--shadow-2);
+                  background:var(--chip);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
   #bFull{display:none}
-  body.d3 #bFull{display:block}
-  #orbitctl{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:none;
+  body.d3 #bFull{display:flex}
+  #orbitctl{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:none;
             align-items:center;gap:6px;padding:6px;background:var(--chip);border:1px solid var(--line);
-            border-radius:12px;box-shadow:0 1px 4px #0002}
+            backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+            border-radius:14px;box-shadow:var(--shadow-2)}
   body.d3 #orbitctl{display:flex}
   #orbitctl button{height:40px;min-height:40px;padding:6px 10px}
   #orbitctl label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
   #orbitctl input{width:100px;accent-color:var(--accent)}
-  #orbitSpeed{width:40px;color:var(--ink)}
+  #orbitSpeed{width:40px;color:var(--ink);font-variant-numeric:tabular-nums}
   #bOrbitSpeed{display:none}
   #wrap:fullscreen{border:0;border-radius:0}
 
-  main{flex:1;display:flex;min-height:0;gap:10px;padding:0 10px 10px}
-  #wrap{flex:1;position:relative;min-width:0;border:1px solid var(--line);border-radius:12px;
-        overflow:hidden;background:var(--card);-webkit-touch-callout:none}
+  main{flex:1;display:flex;min-height:0;gap:12px;padding:12px}
+  #wrap{flex:1;position:relative;min-width:0;border:1px solid var(--line);border-radius:16px;
+        overflow:hidden;background:var(--card);box-shadow:var(--shadow-1);-webkit-touch-callout:none}
   canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}
   canvas.selmode{cursor:default}
   canvas.labelhit{cursor:pointer}
-  #gridcap{position:absolute;left:10px;bottom:8px;font-size:12px;color:var(--muted);
-           background:var(--chip);padding:3px 8px;border-radius:6px;pointer-events:none}
+  #gridcap{position:absolute;left:12px;bottom:10px;font-size:12px;color:var(--muted);
+           background:var(--chip);padding:3px 9px;border-radius:7px;pointer-events:none}
   /* floating delete button next to the selected object (works with touch) */
   #fdel{position:absolute;display:none;width:44px;height:44px;border-radius:50%;padding:0;
-        background:#b91c1c;color:#fff;border:0;font-size:20px;line-height:44px;box-shadow:0 2px 8px #0003}
+        background:var(--danger);color:#fff;border:0;font-size:18px;line-height:44px;
+        box-shadow:0 4px 12px rgb(225 29 72/.4)}
 
-  aside{width:300px;flex-shrink:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
-  aside section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;
-                box-shadow:0 1px 3px #00000008}
-  main{padding-top:10px}
-  aside h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 8px}
-  .row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0}
-  .row b{font-weight:650}
+  aside{width:312px;flex-shrink:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+  aside section,aside details.acc{background:var(--card);border:1px solid var(--line);
+                border-radius:16px;box-shadow:var(--shadow-1)}
+  aside section{padding:14px 16px}
+  aside h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+           color:var(--muted);margin:0 0 10px}
+  aside hr{border:0;border-top:1px solid var(--line);margin:8px 0}
+  details.acc>summary{display:flex;align-items:center;gap:8px;padding:13px 16px;cursor:pointer;
+                      list-style:none;font:700 13px/1.3 var(--display);letter-spacing:-0.01em}
+  details.acc>summary::-webkit-details-marker{display:none}
+  details.acc>summary::after{content:"";width:7px;height:7px;margin-left:auto;margin-right:2px;
+                             border-right:1.5px solid;border-bottom:1.5px solid;color:var(--muted);
+                             transform:rotate(45deg) translateY(-2px);transition:transform .3s ease}
+  details.acc[open]>summary::after{transform:rotate(225deg) translate(-1px,-1px)}
+  details.acc .accBody{padding:2px 16px 14px}
+  .subhead{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+           color:var(--muted);margin:16px 0 4px}
+  .subhead:first-child{margin-top:0}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;font-size:13px}
+  .row b{font-weight:700;font-variant-numeric:tabular-nums}
   .row>span:last-child{display:flex;align-items:center;gap:6px}  /* input + unit form one aligned column */
-  .row input{width:84px;font:inherit;color:var(--ink);background:var(--card);padding:8px;
-             border:1px solid var(--line);border-radius:8px;text-align:right}
-  select{font:inherit;color:var(--ink);padding:8px;border:1px solid var(--line);border-radius:8px;
-         background:var(--card);min-height:44px;flex:1;min-width:0}
-  .row .unit{color:var(--muted);font-size:13px;width:26px;flex:none}
-  .big{font-size:20px;font-weight:700;color:var(--accent)}
+  .row input{width:84px;font:inherit;font-size:13px;color:var(--ink);background:var(--field);padding:9px 10px;
+             border:1px solid var(--line);border-radius:10px;text-align:right}
+  .row input:focus{outline:0;background:var(--card);border-color:var(--accent);
+                   box-shadow:0 0 0 3px var(--accent-soft)}
+  select{font:inherit;font-size:13px;font-weight:600;color:var(--ink);padding:9px 10px;
+         border:1px solid var(--line);border-radius:10px;
+         background:var(--field);min-height:44px;flex:1;min-width:0}
+  select:focus{outline:0;background:var(--card);border-color:var(--accent);
+               box-shadow:0 0 0 3px var(--accent-soft)}
+  .row select{min-height:38px;padding:6px 8px}
+  .row .unit{color:var(--muted);font-size:12px;width:26px;flex:none}
+  .big{font:700 22px/1.1 var(--display);letter-spacing:-0.02em;color:var(--accent);
+       font-variant-numeric:tabular-nums}
   #matSec.rail .onlyPaling{display:none}
   #matSec.paling .onlyRail{display:none}
   #matSec.nohr .onlyHR{display:none}
-  #fenceNameWrap{display:flex;flex-direction:column;gap:5px;margin:0 0 10px;font-size:12px;color:var(--muted)}
-  #iFenceName{width:100%;box-sizing:border-box;font:inherit;font-size:14px;color:var(--ink);
-              background:var(--card);padding:9px 10px;border:1px solid var(--line);border-radius:8px}
-  #iFenceName:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
-  #selbox{border-color:var(--accent);background:var(--accent-soft)}
+  #fenceNameWrap{display:flex;flex-direction:column;gap:5px;margin:0 0 10px;
+                 font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+                 color:var(--muted)}
+  #iFenceName{width:100%;box-sizing:border-box;font:inherit;font-size:14px;font-weight:600;
+              letter-spacing:normal;text-transform:none;color:var(--ink);
+              background:var(--field);padding:10px 11px;border:1px solid var(--line);border-radius:10px}
+  #iFenceName:focus{outline:0;background:var(--card);border-color:var(--accent);
+                    box-shadow:0 0 0 3px var(--accent-soft)}
+  #selbox{border-color:var(--accent-soft);background:var(--accent-faint)}
   #selbox.noroof .roofOnly{display:none}
   #selbox:not(.gableroof) .gableOnly{display:none}
   #selbox:not(.skillroof) .skillOnly{display:none}
   #selbox label{display:flex;align-items:center;gap:8px;padding:6px 0}
-  #selbox input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent)}
+  #selbox input[type=checkbox]{width:19px;height:19px;accent-color:var(--accent)}
+  #postShapeWrap{border-color:var(--accent-soft);background:var(--accent-faint);align-items:center}
+  #postShapeWrap .row{flex:1;padding:0}
   #copyBtn{width:100%}
   #totalsHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
   #totalsHead h2{margin-bottom:0}
   #totalsScopeToggle{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;
-                     cursor:pointer;white-space:nowrap}
+                     font-weight:600;cursor:pointer;white-space:nowrap}
   #totalsScopeToggle input{margin:0}
-  label.own{display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:6px;
-            background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;
-            font-size:13px;cursor:pointer}
-  label.own input{width:18px;height:18px;accent-color:var(--accent)}
-  #matIncludeWrap.off,#fenceVisibleWrap.off{background:var(--card);border-color:var(--line)}
+  label.own{display:flex;align-items:center;gap:9px;padding:9px 11px;margin-bottom:8px;
+            background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:10px;
+            font-size:12.5px;font-weight:600;cursor:pointer}
+  label.own input{width:16px;height:16px;accent-color:var(--accent)}
+  #matIncludeWrap.off,#fenceVisibleWrap.off{background:var(--field);border-color:var(--line)}
   .note{color:var(--muted);font-size:12px;margin:6px 0 0}
   .srOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
           clip:rect(0,0,0,0);white-space:nowrap;border:0}
   #bkSec{position:relative}
   #bkSec>summary{display:flex;align-items:center;gap:8px;min-height:44px;padding:8px 13px;color:var(--ink);
-                 background:var(--card);border:1px solid var(--line);border-radius:11px;
-                 box-shadow:0 1px 2px #0000000d;font-weight:650;cursor:pointer;list-style:none}
+                 background:var(--card);border:1px solid var(--line);border-radius:12px;
+                 box-shadow:var(--shadow-1);font-size:13px;font-weight:600;cursor:pointer;list-style:none;
+                 transition:border-color .15s,box-shadow .15s}
+  #bkSec>summary:hover{border-color:#cbd5e1}
+  body.dark #bkSec>summary:hover{border-color:#475569}
   #bkSec>summary::-webkit-details-marker{display:none}
-  #bkSec>summary svg{width:18px;height:18px;stroke:currentColor}
+  #bkSec>summary svg{width:17px;height:17px;stroke:currentColor}
   #bkSec>summary::after{content:"";width:7px;height:7px;margin-left:2px;border-right:1.5px solid;
                         border-bottom:1.5px solid;transform:rotate(45deg) translateY(-2px);
                         color:var(--muted);transition:transform .18s ease}
   #bkSec[open]>summary{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   #bkSec[open]>summary::after{transform:rotate(225deg) translate(-1px,-1px)}
-  #bkMenuPanel{position:absolute;top:calc(100% + 9px);right:0;z-index:20;width:370px;
+  #bkMenuPanel{position:absolute;top:calc(100% + 9px);right:0;z-index:20;width:372px;
                max-height:calc(100dvh - 84px);overflow-y:auto;
-               background:var(--card);border:1px solid var(--line);border-radius:18px;
-               box-shadow:0 20px 50px #0004,0 4px 12px #0002}
+               background:var(--card);border:1px solid var(--line);border-radius:16px;
+               box-shadow:var(--shadow-3);
+               animation:slideDown .25s cubic-bezier(.16,1,.3,1)}
   .bkHead{display:flex;align-items:center;gap:11px;padding:18px 18px 14px}
-  .bkHeadIcon{display:grid;place-items:center;width:38px;height:38px;flex:none;color:var(--accent);
-              background:var(--accent-soft);border-radius:11px}
+  .bkHeadIcon{display:grid;place-items:center;width:40px;height:40px;flex:none;color:var(--accent);
+              background:var(--accent-faint);border-radius:12px}
   .bkHeadIcon svg{width:20px;height:20px;stroke:currentColor}
-  #bkMenuPanel h2{font-size:16px;line-height:1.2;margin:0}
+  #bkMenuPanel h2{font:700 15px/1.2 var(--display);letter-spacing:-0.01em;margin:0}
   .bkHead p{font-size:12px;color:var(--muted);margin:2px 0 0}
   .bkCurrent{margin:0 16px 12px;padding:11px 13px;background:var(--bg);
              border:1px solid var(--line);border-radius:12px}
-  .bkCurrent span,.bkLibrary>label{display:block;font-size:11px;font-weight:700;letter-spacing:.055em;
+  .bkCurrent span,.bkLibrary>label{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;
                                   text-transform:uppercase;color:var(--muted)}
-  #bkCur{margin:3px 0 0;font-size:14px;font-weight:620;color:var(--ink);
+  #bkCur{margin:3px 0 0;font-size:14px;font-weight:600;color:var(--ink);
          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bkPrimaryActions{display:grid;grid-template-columns:1.15fr 1fr;gap:8px;padding:0 16px 16px}
-  .bkPrimaryActions button{width:100%;border-radius:11px}
-  #bkSaveAs{background:var(--bg)}
+  .bkPrimaryActions button{width:100%}
+  #bkSaveAs{background:var(--field)}
   .bkLocal{padding:15px 16px 16px;border-top:1px solid var(--line)}
   .bkLocalHead{margin-bottom:9px}
-  .bkLocalHead span{display:block;font-size:11px;font-weight:700;letter-spacing:.055em;
+  .bkLocalHead span{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;
                     text-transform:uppercase;color:var(--muted)}
   .bkLocalHead small{display:block;margin-top:3px;color:var(--muted);font-size:12px}
   .bkLocalActions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .bkLocalActions button{width:100%;border-radius:11px}
+  .bkLocalActions button{width:100%}
   #bkShare{display:none;width:calc(100% - 32px);margin:0 16px 16px}
   .bkLibrary{padding:15px 16px 16px;border-top:1px solid var(--line)}
   .bkLibrary>label{margin-bottom:7px}
-  #bkList{width:100%;background:var(--bg);border-radius:11px}
+  #bkList{width:100%}
   .bkFileActions{display:grid;grid-template-columns:1fr 44px 44px;gap:8px;margin-top:8px}
-  .bkFileActions button{border-radius:11px}
   .bkFileActions .iconBtn{display:grid;place-items:center;width:44px;padding:0}
-  .bkFileActions svg{width:18px;height:18px;stroke:currentColor}
+  .bkFileActions svg{width:17px;height:17px;stroke:currentColor}
   #bkDel{background:transparent}
   .bkShares{padding:15px 16px 16px;border-top:1px solid var(--line)}
   .bkSharesHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
-  .bkSharesHead span{font-size:11px;font-weight:700;letter-spacing:.055em;text-transform:uppercase;
+  .bkSharesHead span{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
                      color:var(--muted)}
   #bkSharesCount{font-size:11px;color:var(--muted)}
   #bkSharesList{display:grid;gap:9px}
@@ -200,54 +278,68 @@
   #bkSharesEmpty{margin:0;color:var(--muted);font-size:12px}
   #bkStatus{margin:0;padding:10px 16px;border-top:1px solid var(--line)}
   #bkStatus:empty{display:none}
-  #bkStatus[data-kind="success"]{background:var(--accent-soft)}
+  #bkStatus[data-kind="success"]{background:var(--accent-faint);color:var(--accent)}
   .bkSync{display:flex;align-items:center;gap:8px;padding:11px 16px;color:var(--muted);
           background:var(--bg);border-top:1px solid var(--line);font-size:11px}
   .bkSyncDot{width:7px;height:7px;flex:none;background:var(--accent);border-radius:50%;
              box-shadow:0 0 0 3px var(--accent-soft)}
-  .bkSync strong{color:var(--ink);font-weight:620}
-  #bkStatus[data-kind="error"], #bkDialogError{color:#b91c1c}
-  #bkStatus[data-kind="success"]{color:var(--accent)}
+  .bkSync strong{color:var(--ink);font-weight:600}
+  #bkStatus[data-kind="error"], #bkDialogError{color:var(--danger)}
   #readOnlyDetails{display:none}
   body.readonly #readOnlyDetails{display:block}
   #readOnlyDetails .empty{color:var(--muted);font-size:13px;margin:0}
-  .shareExpiry{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}
+  .dlgHead{display:flex;gap:12px;align-items:flex-start;margin-bottom:16px}
+  .dlgIcon{display:grid;place-items:center;width:42px;height:42px;flex:none;border-radius:12px;
+           background:var(--accent-faint);color:var(--accent)}
+  .dlgIcon svg{width:20px;height:20px;stroke:currentColor}
+  .dlgHead h2{margin:0 0 3px}
+  .dlgHead p{margin:0!important}
+  #shareCard{padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:14px;
+             transition:background .2s,border-color .2s}
+  #shareCard.live{background:var(--accent-faint);border-color:var(--accent-soft)}
+  .shareLive{display:flex;align-items:center;gap:7px;margin:0 0 10px;
+             font:700 13px var(--display);color:var(--accent)}
+  .shareLive svg{width:16px;height:16px;stroke:currentColor;flex:none}
+  .shareExpiry{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;
+               font-size:12.5px;font-weight:600}
   .shareExpiry select{flex:0 0 150px}
   .shareLinkRow{display:flex;gap:8px;margin-top:5px}
-  .shareLinkRow input{min-width:0;flex:1}
+  .shareLinkRow input{min-width:0;flex:1;font:inherit;font-size:12.5px;color:var(--muted);
+                      background:var(--card);padding:9px 10px;border:1px solid var(--line);border-radius:10px}
   .shareLinkRow button{flex:none}
   #shareCreate,#shareUpdate{width:100%}
   #shareActive{display:none}
   .shareActions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
   #shareActive.manageOnly .shareActions{grid-template-columns:1fr}
-  #shareStop{color:#b91c1c;border-color:#e5c4c4}
-  #shareStopPanel{margin-top:12px;padding:12px;background:#b91c1c0d;border:1px solid #e5c4c4;
-                  border-radius:10px}
+  #shareStopPanel{margin-top:12px;padding:12px;background:var(--danger-faint);
+                  border:1px solid var(--danger-soft);border-radius:12px}
   #shareStopPanel p{margin:0 0 10px;color:var(--ink);font-size:13px}
   .shareStopActions{display:flex;justify-content:flex-end;gap:8px}
-  #shareStopConfirm{color:#fff;background:#b91c1c;border-color:#b91c1c}
-  #shareDialogStatus{min-height:18px;font-size:12px;margin:8px 0 0}
-  #shareDialogStatus[data-kind="error"]{color:#b91c1c}
+  #shareStopConfirm{color:#fff;background:var(--danger);border-color:var(--danger)}
+  #shareDialogStatus{min-height:18px;font-size:12px;margin:10px 0 0}
+  #shareDialogStatus[data-kind="error"]{color:var(--danger)}
   #shareDialogStatus[data-kind="success"]{color:var(--accent)}
   #shareState{position:absolute;inset:0;z-index:30;display:none;place-items:center;padding:20px;
               background:var(--card)}
   #shareState .shareStateCard{max-width:380px;text-align:center}
-  #shareState h2{font-size:20px;margin:0 0 8px}
+  #shareState h2{font:700 19px var(--display);letter-spacing:-0.01em;margin:0 0 8px}
   #shareState p{color:var(--muted);margin:0}
-  dialog{width:min(420px,calc(100vw - 28px));padding:0;color:var(--ink);background:var(--card);
-         border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 60px #0006}
-  dialog::backdrop{background:#0009}
-  .dialogBody{padding:18px}
-  .dialogBody h2{font-size:18px;margin:0 0 8px}
-  .dialogBody>p{margin:0 0 14px;color:var(--muted)}
-  .dialogBody label{display:block;font-size:13px;font-weight:600}
-  .dialogBody input{width:100%;margin-top:5px;padding:10px;font:inherit;color:var(--ink);
-                    background:var(--card);border:1px solid var(--line);border-radius:8px}
-  .dialogBody .fieldHint{font-size:12px;margin:5px 0 0}
+  dialog{width:min(440px,calc(100vw - 28px));padding:0;color:var(--ink);background:var(--card);
+         border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-3)}
+  dialog[open]{animation:modalIn .3s cubic-bezier(.16,1,.3,1)}
+  dialog::backdrop{background:rgb(2 6 23/.55);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+  .dialogBody{padding:20px}
+  .dialogBody h2{font:700 17px/1.25 var(--display);letter-spacing:-0.01em;margin:0 0 8px}
+  .dialogBody>p{margin:0 0 14px;color:var(--muted);font-size:13px}
+  .dialogBody label{display:block;font-size:12.5px;font-weight:600}
+  .dialogBody input{width:100%;margin-top:5px;padding:10px 11px;font:inherit;color:var(--ink);
+                    background:var(--field);border:1px solid var(--line);border-radius:10px}
+  .dialogBody input:focus{outline:0;background:var(--card);border-color:var(--accent);
+                          box-shadow:0 0 0 3px var(--accent-soft)}
+  .dialogBody .fieldHint{font-size:12px;color:var(--muted);margin:5px 0 0}
   #bkDialogError{min-height:18px;font-size:12px;margin:5px 0 0}
-  .dialogActions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+  .dialogActions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 
-  button{white-space:nowrap}
   /* 3D view: the plan-only overlays have nothing to say */
   body.d3 #snapover, body.d3 #fdel, body.d3 #gridcap{display:none}
   #bMore{display:none}         /* only shown on small screens */
@@ -264,7 +356,7 @@
     #bar.open .grp.sec{display:flex}
     body.readonly #bar .viewTools{display:flex}
     #bar .toolbarEnd{display:contents}
-    #bMore{display:inline-block}
+    #bMore{display:inline-flex}
     #bkSec{margin-left:auto}
     .lbl{display:none}         /* icon-only Undo / Redo / Delete */
     button{padding:8px 12px}
@@ -277,7 +369,7 @@
     #orbitctl button{width:46px;height:46px;min-height:46px;padding:0;font-size:20px;
                      background:var(--chip)}
     #orbitctl .orbitWord, #orbitctl label{display:none}
-    #orbitctl #bOrbitSpeed{display:block;font-size:13px}
+    #orbitctl #bOrbitSpeed{display:flex;font-size:13px}
     #bkMenuPanel{position:fixed;top:66px;right:10px;width:calc(100vw - 20px);max-width:380px}
   }
 </style>
@@ -286,15 +378,37 @@
 
 <div id="bar">
   <h1 id="appTitle">Fence sketcher</h1>
-  <span id="viewOnlyBadge">◉ View only</span>
+  <span id="viewOnlyBadge">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="5" y="11" width="14" height="10" rx="2" stroke-width="2"/>
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    View only</span>
   <div class="grp editorOnly">
-    <button id="bUndo">↩<span class="lbl"> Undo</span></button>
-    <button id="bRedo">↪<span class="lbl"> Redo</span></button>
-    <button id="bDelSel" class="danger" title="Delete selected">🗑<span class="lbl"> Delete</span></button>
+    <button id="bUndo" title="Undo">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg><span class="lbl">Undo</span></button>
+    <button id="bRedo" title="Redo">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg><span class="lbl">Redo</span></button>
+    <button id="bDelSel" class="danger" title="Delete selected">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4.5 7h15M9 7V4.5h6V7m-8.5 0 .8 13h9.4l.8-13M10 11v5M14 11v5"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg><span class="lbl">Delete</span></button>
   </div>
   <button id="bMore" class="editorOnly" aria-expanded="false">⋯ More</button>
   <div class="grp sec editorOnly">
-    <button id="bBuild">＋ Building</button>
+    <button id="bBuild">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="4" y="8" width="16" height="12.5" rx="1.5" stroke-width="1.8"/>
+        <path d="M4 8l8-4.5L20 8M9.5 20.5v-5h5v5" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>Building</button>
     <button id="bClose">Close loop</button>
   </div>
   <div class="grp sec editorOnly">
@@ -302,12 +416,16 @@
   </div>
   <div class="grp toolbarEnd">
     <div class="grp sec units viewTools">
-    <button id="b3d" title="Plan / 3D view">🧊 3D</button>
+    <button id="b3d" title="Plan / 3D view">3D</button>
     <div class="seg2" id="unitTog">
       <button data-u="m"  class="on">Metres</button>
       <button data-u="ft">Feet</button>
     </div>
-    <button id="bTheme" title="Light / dark mode">🌓</button>
+    <button id="bTheme" title="Light / dark mode" aria-label="Light / dark mode">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg></button>
     </div>
   <details id="bkSec" class="editorOnly" style="display:none">
     <summary id="bkMenuButton">
@@ -349,7 +467,13 @@
         </div>
         <input id="bkRestoreInput" type="file" accept=".json,application/json" hidden>
       </section>
-      <button id="bkShare">↗ Share view</button>
+      <button id="bkShare">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="18" cy="5" r="3" stroke-width="1.8"/>
+          <circle cx="6" cy="12" r="3" stroke-width="1.8"/>
+          <circle cx="18" cy="19" r="3" stroke-width="1.8"/>
+          <path d="m8.7 13.5 6.6 3.9M15.3 6.6 8.7 10.5" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>Share view</button>
       <div class="bkLibrary">
         <label for="bkList">Saved drawings</label>
         <select id="bkList" aria-label="Saved drawing"></select>
@@ -401,10 +525,24 @@
       <input type="checkbox" id="c3dLabels" checked> Fence labels
     </label>
     <div id="zoomctl">
-      <button id="bFull" title="Full screen" aria-label="Full screen">⛶</button>
-      <button id="bZoomIn" title="Zoom in">＋</button>
-      <button id="bZoomOut" title="Zoom out">−</button>
-      <button id="bFit" title="Fit to drawing">⤢</button>
+      <button id="bFull" title="Full screen" aria-label="Full screen">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M8 3.5H5.5a2 2 0 0 0-2 2V8m17 0V5.5a2 2 0 0 0-2-2H16m0 17h2.5a2 2 0 0 0 2-2V16m-17 0v2.5a2 2 0 0 0 2 2H8"
+                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg></button>
+      <button id="bZoomIn" title="Zoom in" aria-label="Zoom in">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" stroke-width="2" stroke-linecap="round"/>
+        </svg></button>
+      <button id="bZoomOut" title="Zoom out" aria-label="Zoom out">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M5 12h14" stroke-width="2" stroke-linecap="round"/>
+        </svg></button>
+      <button id="bFit" title="Fit to drawing" aria-label="Fit to drawing">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M15 3.5h5.5V9M9 20.5H3.5V15M20.5 3.5 14 10M3.5 20.5 10 14"
+                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg></button>
     </div>
     <div id="orbitctl">
       <button id="bOrbit" title="Start orbit" aria-label="Start orbit">▶<span class="orbitWord"> Orbit</span></button>
@@ -427,6 +565,15 @@
   <aside>
     <section id="selbox" class="editorOnly" style="display:none"></section>
 
+    <section id="postShapeWrap" class="editorOnly" style="display:none">
+      <div class="row">
+        <span>Selected post shape</span>
+        <span><select id="iPostShape">
+          <option value="inherit">Use fence setting</option>
+          <option value="square">Square</option><option value="round">Round</option>
+        </select></span></div>
+    </section>
+
     <section>
       <div id="totalsHead">
         <h2>Totals</h2>
@@ -441,11 +588,19 @@
       <div class="row"><span id="lRails">Rails</span><b id="tRails">0</b></div>
       <div class="row" id="rowPalings"><span>Palings</span><b id="tPalings">0</b></div>
       <div class="row" id="rowHR" style="display:none"><span>Handrail</span><b id="tHR">0</b></div>
-      <hr style="border:0;border-top:1px solid var(--line);margin:8px 0">
+      <hr>
       <div class="row"><span>Fence length (excl. gates)</span><b class="big" id="tLen">0</b></div>
       <div class="row"><span>Segments</span><b id="tSegs">0</b></div>
       <div class="row"><span>Corners</span><b id="tCorners">0</b></div>
       <div class="row"><span>Gates</span><b id="tGates">—</b></div>
+      <hr>
+      <button id="copyBtn" class="primary">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="12" rx="2" stroke-width="1.8"/>
+          <path d="M5 15H4a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 4 3h9A1.5 1.5 0 0 1 14.5 4.5V5"
+                stroke-width="1.8" stroke-linecap="round"/>
+        </svg>Copy summary</button>
+      <p class="note" id="saveNote">Saved automatically in this browser.</p>
     </section>
 
     <section id="readOnlyDetails">
@@ -453,87 +608,88 @@
       <div id="readOnlyDetailsBody"><p class="empty">Select a fence label to inspect it.</p></div>
     </section>
 
-    <section id="matSec" class="paling editorOnly">
-      <h2>Materials</h2>
-      <label id="fenceNameWrap" style="display:none">Fence or gate name
-        <input id="iFenceName" maxlength="64" autocomplete="off">
-      </label>
-      <label id="matIncludeWrap" class="own" style="display:none">
-        <input type="checkbox" id="matInclude" checked> Include this fence in materials</label>
-      <p class="note" id="matExcludeNote" style="display:none;margin:0 0 8px">
-        Still shown in plan and 3D; excluded from totals and the copied summary.</p>
-      <label id="bomRailsWrap" class="own" style="display:none">
-        <input type="checkbox" id="bomRails" checked> Include rails in BOM</label>
-      <label id="bomPalingsWrap" class="own" style="display:none">
-        <input type="checkbox" id="bomPalings" checked> Include palings in BOM</label>
-      <label id="fenceVisibleWrap" class="own" style="display:none">
-        <input type="checkbox" id="fenceVisible" checked> Show this fence in 3D</label>
-      <p class="note" id="fenceHiddenNote" style="display:none;margin:0 0 8px">
-        Hidden from 3D; retained as a dotted line in the plan and included in materials.</p>
-      <label id="matOwnWrap" class="own" style="display:none">
-        <input type="checkbox" id="matOwn"> This fence has its own settings</label>
-      <p class="note" id="matWho" style="margin:0 0 8px"></p>
-      <div class="row"><span>Fence style</span>
-        <div class="seg2" id="styleTog">
-          <button data-s="paling" class="on">Palings</button>
-          <button data-s="rail">Rails only</button>
-        </div>
+    <details class="acc editorOnly" id="fenceSec" open>
+      <summary>Fence</summary>
+      <div class="accBody">
+        <label id="fenceNameWrap" style="display:none">Fence or gate name
+          <input id="iFenceName" maxlength="64" autocomplete="off">
+        </label>
+        <p class="note" id="matWho" style="margin:0 0 8px"></p>
+        <label id="matOwnWrap" class="own" style="display:none">
+          <input type="checkbox" id="matOwn"> This fence has its own settings</label>
+        <label id="matIncludeWrap" class="own" style="display:none">
+          <input type="checkbox" id="matInclude" checked> Include this fence in materials</label>
+        <p class="note" id="matExcludeNote" style="display:none;margin:0 0 8px">
+          Still shown in plan and 3D; excluded from totals and the copied summary.</p>
+        <label id="bomRailsWrap" class="own" style="display:none">
+          <input type="checkbox" id="bomRails" checked> Include rails in BOM</label>
+        <label id="bomPalingsWrap" class="own" style="display:none">
+          <input type="checkbox" id="bomPalings" checked> Include palings in BOM</label>
+        <label id="fenceVisibleWrap" class="own" style="display:none">
+          <input type="checkbox" id="fenceVisible" checked> Show this fence in 3D</label>
+        <p class="note" id="fenceHiddenNote" style="display:none;margin:0 0 8px">
+          Hidden from 3D; retained as a dotted line in the plan and included in materials.</p>
       </div>
-      <div class="row onlyRail" title="Left and right are viewed from the first post toward the last post.">
-        <span>Rail side</span>
-        <span><select id="iRailSide" style="min-height:38px;padding:6px">
-          <option value="left">Left of line</option><option value="right">Right of line</option>
-        </select></span>
-      </div>
-      <div class="row"><span>Post spacing</span><span><input id="iSpacing" inputmode="decimal"> <span class="unit" id="uSpacing">m</span></span></div>
-      <div class="row" title="Length of each rail available to buy. The BOM compares this stock length with each post-to-post span.">
-        <span>Rail length</span><span><input id="iRailLength" inputmode="decimal"> <span class="unit" id="uRailLength">m</span></span></div>
-      <div class="row"><span>Fence post shape</span>
-        <span><select id="iFencePostShape" style="min-height:38px;padding:6px">
-          <option value="square">Square</option><option value="round">Round</option>
-        </select></span></div>
-      <div class="row" title="Posts at the ends of a run. Auto skips an end already posted by another fence. One end lets you choose the physical end.">
-        <span>End posts <span style="opacity:.5">ⓘ</span></span>
-        <span><select id="iEnds" style="min-height:38px;padding:6px">
-          <option value="auto">Auto</option>
-          <option value="2">Both ends</option>
-          <option value="one">One end</option>
-          <option value="0">None</option>
-        </select></span></div>
-      <div class="row" id="oneEndWrap" style="display:none">
-        <span>Post at</span>
-        <span><select id="iOneEnd" style="min-height:38px;padding:6px">
-          <option value="start">First end</option><option value="end">Second end</option>
-        </select></span></div>
-      <div class="row" id="postShapeWrap" style="display:none">
-        <span>Selected post shape</span>
-        <span><select id="iPostShape" style="min-height:38px;padding:6px">
-          <option value="inherit">Use fence setting</option>
-          <option value="square">Square</option><option value="round">Round</option>
-        </select></span></div>
-      <div class="row" title="Total length of each fence post. Above-ground fence height is this length minus the post depth in ground."><span>Post length (total)</span><span><input id="iHeight" inputmode="decimal"> <span class="unit" id="uHeight">m</span></span></div>
-      <div class="row" title="The part of each post installed below finished ground level. The 3D view shows the remaining above-ground height.">
-        <span>Hole depth</span><span><input id="iPostDepth" inputmode="decimal"> <span class="unit" id="uPostDepth">mm</span></span></div>
-      <div class="row"><span>Height above ground</span><b id="iAboveGroundHeight">0</b></div>
-      <div class="row" title="Enter 0 for no rails"><span>Rails per panel</span><span><input id="iRails" inputmode="numeric"> <span class="unit"></span></span></div>
-      <div class="row onlyPaling"><span>Paling width</span><span><input id="iPaling" inputmode="decimal"> <span class="unit" id="uPaling">mm</span></span></div>
-      <div class="row onlyPaling"><span>Paling gap</span><span><input id="iGap" inputmode="decimal"> <span class="unit" id="uGap">mm</span></span></div>
-      <div class="row onlyRail"><span>Bottom gap</span><span><input id="iBotOff" inputmode="decimal"> <span class="unit" id="uBotOff">mm</span></span></div>
-      <div class="row onlyRail"><span>Top gap</span><span><input id="iTopOff" inputmode="decimal"> <span class="unit" id="uTopOff">mm</span></span></div>
-      <div class="row onlyRail"><span>Rail width</span><span><input id="iRailW" inputmode="decimal"> <span class="unit" id="uRailW">mm</span></span></div>
-      <div class="row onlyRail"><span>Rail gap</span><span><input id="iRailGap" inputmode="decimal"> <span class="unit" id="uRailGap">mm</span></span></div>
-      <label class="own" style="margin:8px 0 0" title="A capping / hand rail laid along the tops of the posts. It sits on top, so it adds its own thickness above the fence height.">
-        <input type="checkbox" id="iHR"> Handrail on top of posts</label>
-      <div class="row onlyHR"><span>Handrail width</span><span><input id="iHRW" inputmode="decimal"> <span class="unit" id="uHRW">mm</span></span></div>
-      <div class="row onlyHR"><span>Handrail thickness</span><span><input id="iHRT" inputmode="decimal"> <span class="unit" id="uHRT">mm</span></span></div>
-      <div class="row onlyHR" title="Length of each handrail available to buy. The BOM compares this stock length with each post-bay span.">
-        <span>Handrail length</span><span><input id="iHRLength" inputmode="decimal"> <span class="unit" id="uHRLength">m</span></span></div>
-    </section>
+    </details>
 
-    <section>
-      <button id="copyBtn" class="primary">📋 Copy summary</button>
-      <p class="note" id="saveNote">Saved automatically in this browser.</p>
-    </section>
+    <details class="acc paling editorOnly" id="matSec" open>
+      <summary>Construction</summary>
+      <div class="accBody">
+        <h3 class="subhead">Style</h3>
+        <div class="row"><span>Fence style</span>
+          <div class="seg2" id="styleTog">
+            <button data-s="paling" class="on">Palings</button>
+            <button data-s="rail">Rails only</button>
+          </div>
+        </div>
+        <div class="row onlyRail" title="Left and right are viewed from the first post toward the last post.">
+          <span>Rail side</span>
+          <span><select id="iRailSide">
+            <option value="left">Left of line</option><option value="right">Right of line</option>
+          </select></span>
+        </div>
+        <h3 class="subhead">Posts</h3>
+        <div class="row"><span>Post spacing</span><span><input id="iSpacing" inputmode="decimal"> <span class="unit" id="uSpacing">m</span></span></div>
+        <div class="row"><span>Post shape</span>
+          <span><select id="iFencePostShape">
+            <option value="square">Square</option><option value="round">Round</option>
+          </select></span></div>
+        <div class="row" title="Posts at the ends of a run. Auto skips an end already posted by another fence. One end lets you choose the physical end.">
+          <span>End posts <span style="opacity:.5">ⓘ</span></span>
+          <span><select id="iEnds">
+            <option value="auto">Auto</option>
+            <option value="2">Both ends</option>
+            <option value="one">One end</option>
+            <option value="0">None</option>
+          </select></span></div>
+        <div class="row" id="oneEndWrap" style="display:none">
+          <span>Post at</span>
+          <span><select id="iOneEnd">
+            <option value="start">First end</option><option value="end">Second end</option>
+          </select></span></div>
+        <div class="row" title="Total length of each fence post. Above-ground fence height is this length minus the post depth in ground."><span>Post length (total)</span><span><input id="iHeight" inputmode="decimal"> <span class="unit" id="uHeight">m</span></span></div>
+        <div class="row" title="The part of each post installed below finished ground level. The 3D view shows the remaining above-ground height.">
+          <span>Hole depth</span><span><input id="iPostDepth" inputmode="decimal"> <span class="unit" id="uPostDepth">mm</span></span></div>
+        <div class="row"><span>Height above ground</span><b id="iAboveGroundHeight">0</b></div>
+        <h3 class="subhead">Panel</h3>
+        <div class="row" title="Enter 0 for no rails"><span>Rails per panel</span><span><input id="iRails" inputmode="numeric"> <span class="unit"></span></span></div>
+        <div class="row" title="Length of each rail available to buy. The BOM compares this stock length with each post-to-post span.">
+          <span>Rail length</span><span><input id="iRailLength" inputmode="decimal"> <span class="unit" id="uRailLength">m</span></span></div>
+        <div class="row onlyPaling"><span>Paling width</span><span><input id="iPaling" inputmode="decimal"> <span class="unit" id="uPaling">mm</span></span></div>
+        <div class="row onlyPaling"><span>Paling gap</span><span><input id="iGap" inputmode="decimal"> <span class="unit" id="uGap">mm</span></span></div>
+        <div class="row onlyRail"><span>Bottom gap</span><span><input id="iBotOff" inputmode="decimal"> <span class="unit" id="uBotOff">mm</span></span></div>
+        <div class="row onlyRail"><span>Top gap</span><span><input id="iTopOff" inputmode="decimal"> <span class="unit" id="uTopOff">mm</span></span></div>
+        <div class="row onlyRail"><span>Rail width</span><span><input id="iRailW" inputmode="decimal"> <span class="unit" id="uRailW">mm</span></span></div>
+        <div class="row onlyRail"><span>Rail gap</span><span><input id="iRailGap" inputmode="decimal"> <span class="unit" id="uRailGap">mm</span></span></div>
+        <h3 class="subhead">Handrail</h3>
+        <label class="own" style="margin:4px 0 0" title="A capping / hand rail laid along the tops of the posts. It sits on top, so it adds its own thickness above the fence height.">
+          <input type="checkbox" id="iHR"> Handrail on top of posts</label>
+        <div class="row onlyHR"><span>Handrail width</span><span><input id="iHRW" inputmode="decimal"> <span class="unit" id="uHRW">mm</span></span></div>
+        <div class="row onlyHR"><span>Handrail thickness</span><span><input id="iHRT" inputmode="decimal"> <span class="unit" id="uHRT">mm</span></span></div>
+        <div class="row onlyHR" title="Length of each handrail available to buy. The BOM compares this stock length with each post-bay span.">
+          <span>Handrail length</span><span><input id="iHRLength" inputmode="decimal"> <span class="unit" id="uHRLength">m</span></span></div>
+      </div>
+    </details>
 
   </aside>
 </main>
@@ -565,32 +721,52 @@
 
 <dialog id="shareDialog" aria-labelledby="shareDialogTitle">
   <div class="dialogBody">
-    <h2 id="shareDialogTitle">Share view-only drawing</h2>
-    <p id="shareDialogText">Anyone with the link can explore the plan, 3D view and materials without changing the drawing.</p>
-    <label class="shareExpiry" for="shareExpiry">Link expires
-      <select id="shareExpiry">
-        <option value="604800">After 7 days</option>
-        <option value="2592000" selected>After 30 days</option>
-        <option value="0">Never</option>
-      </select>
-    </label>
-    <button id="shareCreate" class="primary">Create and copy link</button>
-    <div id="shareActive">
-      <label for="shareUrl">View-only link</label>
-      <div class="shareLinkRow">
-        <input id="shareUrl" readonly>
-        <button id="shareCopy">Copy</button>
+    <div class="dlgHead">
+      <span class="dlgIcon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <circle cx="18" cy="5" r="3" stroke-width="1.8"/>
+          <circle cx="6" cy="12" r="3" stroke-width="1.8"/>
+          <circle cx="18" cy="19" r="3" stroke-width="1.8"/>
+          <path d="m8.7 13.5 6.6 3.9M15.3 6.6 8.7 10.5" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <div>
+        <h2 id="shareDialogTitle">Share view-only drawing</h2>
+        <p id="shareDialogText">Anyone with the link can explore the plan, 3D view and materials — nothing they do changes your drawing.</p>
       </div>
-      <p class="note" id="shareExpiryNote"></p>
-      <div class="shareActions">
-        <button id="shareUpdate">Update shared view</button>
-        <button id="shareStop" aria-expanded="false" aria-controls="shareStopPanel">Remove public link</button>
-      </div>
-      <div id="shareStopPanel" hidden>
-        <p><strong>Remove this public link?</strong><br>Anyone using it will immediately lose access. Your saved drawing will not be deleted.</p>
-        <div class="shareStopActions">
-          <button id="shareStopCancel">Cancel</button>
-          <button id="shareStopConfirm">Remove link</button>
+    </div>
+    <div id="shareCard">
+      <label class="shareExpiry" for="shareExpiry">Link expires
+        <select id="shareExpiry">
+          <option value="604800">After 7 days</option>
+          <option value="2592000" selected>After 30 days</option>
+          <option value="0">Never</option>
+        </select>
+      </label>
+      <button id="shareCreate" class="primary">Create &amp; copy link</button>
+      <div id="shareActive">
+        <p class="shareLive">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke-width="1.8"/>
+            <path d="m8.5 12.2 2.4 2.4 4.6-5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Link active</p>
+        <label for="shareUrl" class="srOnly">View-only link</label>
+        <div class="shareLinkRow">
+          <input id="shareUrl" readonly>
+          <button id="shareCopy">Copy</button>
+        </div>
+        <p class="note" id="shareExpiryNote"></p>
+        <div class="shareActions">
+          <button id="shareUpdate">Update snapshot</button>
+          <button id="shareStop" class="danger" aria-expanded="false" aria-controls="shareStopPanel">Remove link</button>
+        </div>
+        <div id="shareStopPanel" hidden>
+          <p><strong>Remove this public link?</strong><br>Anyone using it will immediately lose access. Your saved drawing will not be deleted.</p>
+          <div class="shareStopActions">
+            <button id="shareStopCancel">Cancel</button>
+            <button id="shareStopConfirm">Remove link</button>
+          </div>
         </div>
       </div>
     </div>
@@ -2812,7 +2988,11 @@ async function toggleFullscreen(){
 }
 function syncFullscreen(){
   const on = wrapIsFullscreen(), b = $('bFull');
-  b.textContent = on ? '↙' : '⛶';
+  const arms = on
+    ? 'M8 3.5V6a2 2 0 0 1-2 2H3.5m17 0H18a2 2 0 0 1-2-2V3.5m0 17V18a2 2 0 0 1 2-2h2.5m-17 0H6a2 2 0 0 1 2 2v2.5'
+    : 'M8 3.5H5.5a2 2 0 0 0-2 2V8m17 0V5.5a2 2 0 0 0-2-2H16m0 17h2.5a2 2 0 0 0 2-2V16m-17 0v2.5a2 2 0 0 0 2 2H8';
+  b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="' + arms +
+    '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   b.title = b.ariaLabel = on ? 'Exit full screen' : 'Full screen';
   resize();
 }
@@ -2823,7 +3003,7 @@ function set3d(on){
   if (!on){ setAutoOrbit(false); fenceLabels3 = []; }
   document.body.classList.toggle('d3', on);
   $('b3d').classList.toggle('primary', on);
-  $('b3d').textContent = on ? '🗺 Plan' : '🧊 3D';
+  $('b3d').textContent = on ? 'Plan' : '3D';
   hover = null; scene3 = null;
   updateHint();
   if (on) fit3(); else paint();
@@ -2977,7 +3157,7 @@ function syncMatInputs(){
     $('uRailW').textContent = $('uRailGap').textContent =
     $('uHRW').textContent = $('uHRT').textContent =
     $('uBotOff').textContent = $('uTopOff').textContent = (u==='m'?'mm':'in');
-  $('matSec').className = (M.style === 'rail' ? 'rail' : 'paling') +
+  $('matSec').className = 'acc ' + (M.style === 'rail' ? 'rail' : 'paling') +
                           (hr.on ? '' : ' nohr') + ' editorOnly';
   document.querySelectorAll('#styleTog button').forEach(b =>
     b.classList.toggle('on', b.dataset.s === (M.style === 'rail' ? 'rail' : 'paling')));
@@ -4012,6 +4192,7 @@ function copyBomTable(rows,u){
 }
 
 // copy summary
+const copyBtnIdleHTML = $('copyBtn').innerHTML;
 $('copyBtn').addEventListener('click', () => {
   const m = calcMaterials(state.polys, state.mat), u = state.unit, sc = matScope();
   const t = scopeTotals(m, sc.idx, showAllTotals);
@@ -4049,7 +4230,7 @@ $('copyBtn').addEventListener('click', () => {
   const text = L.join('\n');
   const done = () => {
     $('copyBtn').textContent = '✓ Copied';
-    setTimeout(() => $('copyBtn').textContent = '📋 Copy summary', 1500);
+    setTimeout(() => $('copyBtn').innerHTML = copyBtnIdleHTML, 1500);
   };
   if (navigator.clipboard && navigator.clipboard.writeText)
     navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
@@ -4311,6 +4492,7 @@ function syncShareDialog(){
   setStopSharingOpen(false);
   $('shareCreate').style.display = !active && current ? '' : 'none';
   $('shareActive').style.display = active ? 'block' : 'none';
+  $('shareCard').classList.toggle('live', active);
   $('shareActive').classList.toggle('manageOnly', !current);
   $('shareUpdate').style.display = current ? '' : 'none';
   $('shareExpiry').closest('label').style.display = current ? 'flex' : 'none';
