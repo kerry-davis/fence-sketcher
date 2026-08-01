@@ -50,6 +50,7 @@ test('copy summary renders a consolidated store-ready BOM', () => {
     PALING_T: .02,
     RAIL_T: .045,
     postSizeOf: mat => (mat && mat.postSize != null ? Number(mat.postSize) : .1),
+    postTOf: mat => (mat && mat.postT != null ? Number(mat.postT) : .1),
     palingTOf: mat => (mat && mat.palingT != null ? Number(mat.palingT) : .02),
     railTOf: mat => (mat && mat.railT != null ? Number(mat.railT) : .045),
     timberSize: (w, t) => `${Math.round(w*1000)}mm x ${Math.round(t*1000)}mm`,
@@ -163,6 +164,16 @@ test('copy summary renders a consolidated store-ready BOM', () => {
   ], 'm');
   assert.deepEqual(JSON.parse(JSON.stringify(postRows.map(row => [row.item, row.qty, row.description]))), [
     ['POSTS', 19, '100mm x 100mm square fence posts; 1800 mm total length (installations: 10 × 1200 mm above ground + 600 mm in ground; 9 × 1800 mm above ground + 0 mm in ground)'],
+  ]);
+
+  const roundRows = context.copyBomRows([
+    {name:'Round fence A', roundPosts:2,
+     mat:{style:'paling', postShape:'round', postSize:.1, postT:.1, height:1.8, postDepth:.6}},
+    {name:'Round fence B', roundPosts:3,
+     mat:{style:'paling', postShape:'round', postSize:.1, postT:.25, height:1.8, postDepth:.6}},
+  ], 'm');
+  assert.deepEqual(JSON.parse(JSON.stringify(roundRows.map(row => [row.item, row.qty, row.description]))), [
+    ['POSTS', 5, 'Ø100 mm round fence posts; 1800 mm total length (1200 mm above ground + 600 mm in ground)'],
   ]);
 
   context.state.mat.hrLength = 3.6;

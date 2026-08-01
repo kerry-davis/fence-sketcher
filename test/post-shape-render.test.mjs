@@ -21,6 +21,7 @@ test('round post settings render and split the materials count by shape', () => 
     Math, Map,
     POST_SIDE:.1, PALING_T:.02, RAIL_T:.045,
     postSizeOf:mat => (mat && mat.postSize != null ? Number(mat.postSize) : .1),
+    postTOf:mat => (mat && mat.postT != null ? Number(mat.postT) : .1),
     palingTOf:mat => (mat && mat.palingT != null ? Number(mat.palingT) : .02),
     railTOf:mat => (mat && mat.railT != null ? Number(mat.railT) : .045),
     GATE_GAP:.04, GATE_STILE:.09, GATE_BOTTOM:.08,
@@ -78,6 +79,17 @@ test('round post settings render and split the materials count by shape', () => 
   context.state.polys.forEach(poly => poly.hidden3d = true);
   assert.equal(context.build3().length, 0);
   assert.equal(context.railYs({...mat, rails:0}).length, 0);
+
+  context.state = {
+    builds:[],
+    mat:{...mat, rails:0, postSize:.2, postT:.06},
+    polys:[{closed:false, pts:[{x:0,y:0}, {x:1,y:0}]}],
+  };
+  const rectangularPosts = context.build3().filter(face => face.col[0] === 1);
+  const rectangularPoints = rectangularPosts.flatMap(face => face.p);
+  const xValues = rectangularPoints.map(point => point[0]), zValues = rectangularPoints.map(point => point[2]);
+  assert.ok(Math.abs(Math.max(...xValues) - Math.min(...xValues) - 1.2) < 1e-9);
+  assert.ok(Math.abs(Math.max(...zValues) - Math.min(...zValues) - .06) < 1e-9);
 
   const materialStart = html.indexOf('function sharedEnds(');
   const materialEnd = html.indexOf('// Delete point i', materialStart);

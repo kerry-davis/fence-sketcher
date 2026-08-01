@@ -2669,7 +2669,7 @@ function pushGate(F, a, b, H, mat){
   const side = mat.style === 'rail' && typeof railSideOf === 'function' ? railSideOf(mat) : 'left';
   const sign = side === 'right' ? -1 : 1;
   const pointOnSide = (q,off) => ({x:q.x-uy*off*sign, y:q.y+ux*off*sign});
-  const frameOff = postSizeOf(mat)/2 + (mat.style === 'rail' ? railTOf(mat)/2 : palingTOf(mat)+railTOf(mat)/2);
+  const frameOff = postTOf(mat)/2 + (mat.style === 'rail' ? railTOf(mat)/2 : palingTOf(mat)+railTOf(mat)/2);
   const A = pointOnSide(leaf.a,frameOff), B = pointOnSide(leaf.b,frameOff);
   const mid = {x:(A.x+B.x)/2, y:(A.y+B.y)/2};
   // two vertical stiles make the opening read as a gate from every camera angle
@@ -2684,7 +2684,7 @@ function pushGate(F, a, b, H, mat){
   }
   // paling leaf: boards on the post face, with two rails immediately behind them
   if (mat.paling > 0.001){
-    const pitch = mat.paling + mat.gap, palingOff = postSizeOf(mat)/2 + palingTOf(mat)/2;
+    const pitch = mat.paling + mat.gap, palingOff = postTOf(mat)/2 + palingTOf(mat)/2;
     for (let t = mat.paling/2; t <= leaf.len-mat.paling/2+1e-9; t += pitch){
       const q = pointOnSide({x:leaf.a.x+ux*t,y:leaf.a.y+uy*t},palingOff);
       pushBox(F,q.x,bottom+leafH/2,q.y,mat.paling/2,leafH/2,palingTOf(mat)/2,ang,WOOD.paling);
@@ -2728,8 +2728,10 @@ function build3(){
         const old = shared && shared[1];
         const explicitShape = explicitPostShapeAt(visiblePolys,q);
         const shape = explicitShape || (old ? old.shape : postShapeOf(mat));
-        if (!old || H > old.H)
-          posts.set(key, { q, H, ang, shape, size: postSizeOf(mat), t: postTOf(mat) });
+        if (!old || H > old.H){
+          const size = postSizeOf(mat), t = shape === 'round' ? size : postTOf(mat);
+          posts.set(key, { q, H, ang, shape, size, t });
+        }
         else if (explicitShape) old.shape = explicitShape;
       });
       if (a.gateAfter){ pushGate(F,a,b,H,mat); continue; }
@@ -2740,7 +2742,7 @@ function build3(){
           const runEnd = !pl.closed && i === pl.pts.length-2 && last && hasPost(k+1);
           const rail = railBayBounds(segmentPosts[k], segmentPosts[k+1],
                                      runStart ? postSizeOf(mat)/2 : 0, runEnd ? postSizeOf(mat)/2 : 0);
-          const mid = segmentSideMid(rail.a, rail.b, postSizeOf(mat)/2 + railTOf(mat)/2, railSide);
+          const mid = segmentSideMid(rail.a, rail.b, postTOf(mat)/2 + railTOf(mat)/2, railSide);
           for (const ry of railYs(mat)){
             if (ry + mat.railW/2 > H + 1e-6) break;
             pushBox(F, mid.x, ry, mid.y, rail.len/2, mat.railW/2, railTOf(mat)/2, ang, WOOD.rail,
@@ -2772,9 +2774,9 @@ function build3(){
   // Post depth is a purchase length below the ground plane; only the above-ground
   // portion is drawn so the visible fence height remains H.
   for (const { q, H, ang, shape, size, t } of posts.values()){
-    const hs = (size || POST_SIDE)/2, ht = (t || size || POST_SIDE)/2;
-    if (shape === 'round') pushCylinder(F, q.x, H/2, q.y, hs, H, WOOD.post);
-    else pushBox(F, q.x, H/2, q.y, ht, H/2, hs, ang, WOOD.post);
+    const hw = (size || POST_SIDE)/2, hd = (t || size || POST_SIDE)/2;
+    if (shape === 'round') pushCylinder(F, q.x, H/2, q.y, hw, H, WOOD.post);
+    else pushBox(F, q.x, H/2, q.y, hw, H/2, hd, ang, WOOD.post);
   }
   return F;
 }
@@ -4014,7 +4016,7 @@ function copyBomRows(entries,u){
     : timberSize(size, t, u);
   const order = {POSTS:0, RAILS:1, 'GATE RAILS':2, PALINGS:3, 'GATE PALINGS':4, HANDRAIL:5};
   const addPost = (qty, shape, M, source) => {
-    const postLength = postLengthOf(M), size = postSizeOf(M), t = postTOf(M),
+    const postLength = postLengthOf(M), size = postSizeOf(M), t = shape === 'round' ? size : postTOf(M),
           key = shape + '|' + size.toFixed(6) + '|' + t.toFixed(6) + '|' + postLength.toFixed(6);
     let row = postPurchases.get(key);
     if (!row){
@@ -4122,8 +4124,9 @@ function copyBomRows(entries,u){
           ' gate rails for ' + gateSize + '; cut to leaf lengths'
         : fmtSmall(railT,u) + ' thick gate frame rails for ' + gateSize +
           '; cut to leaf lengths';
+      const gateWidth = M.style === 'rail' ? (M.railW ?? DEF.m.railW) : '';
       add(gateRails, 'count', 'GATE RAILS', description,
-          'rail|gate|' + M.style + '|' + (M.railW ?? DEF.m.railW) + '|' + railTOf(M) + '|' + gateSize);
+          'rail|gate|' + M.style + '|' + gateWidth + '|' + railTOf(M) + '|' + gateSize);
     }
     if (gatePalings)
       add(gatePalings, 'count', 'GATE PALINGS', timberSize(paling, palingT, u) +
