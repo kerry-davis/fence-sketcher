@@ -175,6 +175,8 @@
                box-shadow:0 0 0 3px var(--accent-soft)}
   .row select{min-height:38px;padding:6px 8px}
   .row .unit{color:var(--muted);font-size:12px;width:26px;flex:none}
+  .sizePair input{width:56px;padding:9px 8px}
+  .sizePair .times{color:var(--muted);font-weight:600;flex:none}
   .big{font:700 22px/1.1 var(--display);letter-spacing:-0.02em;color:var(--accent);
        font-variant-numeric:tabular-nums}
   #matSec.rail .onlyPaling{display:none}
@@ -654,7 +656,7 @@
           <span><select id="iFencePostShape">
             <option value="square">Square</option><option value="round">Round</option>
           </select></span></div>
-        <div class="row" title="Square post side, or round post diameter. A 100x100 post is size 100."><span>Post size</span><span><input id="iPostSize" inputmode="decimal"> <span class="unit" id="uPostSize">mm</span></span></div>
+        <div class="row sizePair" title="Square post width × depth, or round post diameter. A 100x100 post is width 100, depth 100."><span>Post</span><span><span class="times" id="postSizePrefix" style="display:none">Ø</span><input id="iPostSize" inputmode="decimal" title="Post width"> <b class="times" id="postTimes">×</b> <input id="iPostSizeD" inputmode="decimal" title="Post depth"> <span class="unit" id="uPostSize">mm</span></span></div>
         <div class="row" title="Posts at the ends of a run. Auto skips an end already posted by another fence. One end lets you choose the physical end.">
           <span>End posts <span style="opacity:.5">ⓘ</span></span>
           <span><select id="iEnds">
@@ -676,19 +678,16 @@
         <div class="row" title="Enter 0 for no rails"><span>Rails per panel</span><span><input id="iRails" inputmode="numeric"> <span class="unit"></span></span></div>
         <div class="row" title="Length of each rail available to buy. The BOM compares this stock length with each post-to-post span.">
           <span>Rail length</span><span><input id="iRailLength" inputmode="decimal"> <span class="unit" id="uRailLength">m</span></span></div>
-        <div class="row onlyPaling"><span>Paling width</span><span><input id="iPaling" inputmode="decimal"> <span class="unit" id="uPaling">mm</span></span></div>
-        <div class="row onlyPaling"><span>Paling thickness</span><span><input id="iPalingT" inputmode="decimal"> <span class="unit" id="uPalingT">mm</span></span></div>
+        <div class="row onlyPaling sizePair" title="Paling width × thickness"><span>Paling</span><span><input id="iPaling" inputmode="decimal" title="Paling width"> <b class="times">×</b> <input id="iPalingT" inputmode="decimal" title="Paling thickness"> <span class="unit" id="uPaling">mm</span></span></div>
         <div class="row onlyPaling"><span>Paling gap</span><span><input id="iGap" inputmode="decimal"> <span class="unit" id="uGap">mm</span></span></div>
         <div class="row onlyRail"><span>Bottom gap</span><span><input id="iBotOff" inputmode="decimal"> <span class="unit" id="uBotOff">mm</span></span></div>
         <div class="row onlyRail"><span>Top gap</span><span><input id="iTopOff" inputmode="decimal"> <span class="unit" id="uTopOff">mm</span></span></div>
-        <div class="row onlyRail"><span>Rail width</span><span><input id="iRailW" inputmode="decimal"> <span class="unit" id="uRailW">mm</span></span></div>
-        <div class="row onlyRail"><span>Rail thickness</span><span><input id="iRailT" inputmode="decimal"> <span class="unit" id="uRailT">mm</span></span></div>
+        <div class="row onlyRail sizePair" title="Rail width × thickness"><span>Rail</span><span><input id="iRailW" inputmode="decimal" title="Rail width"> <b class="times">×</b> <input id="iRailT" inputmode="decimal" title="Rail thickness"> <span class="unit" id="uRailW">mm</span></span></div>
         <div class="row onlyRail"><span>Rail gap</span><span><input id="iRailGap" inputmode="decimal"> <span class="unit" id="uRailGap">mm</span></span></div>
         <h3 class="subhead">Handrail</h3>
         <label class="own" style="margin:4px 0 0" title="A capping / hand rail laid along the tops of the posts. It sits on top, so it adds its own thickness above the fence height.">
           <input type="checkbox" id="iHR"> Handrail on top of posts</label>
-        <div class="row onlyHR"><span>Handrail width</span><span><input id="iHRW" inputmode="decimal"> <span class="unit" id="uHRW">mm</span></span></div>
-        <div class="row onlyHR"><span>Handrail thickness</span><span><input id="iHRT" inputmode="decimal"> <span class="unit" id="uHRT">mm</span></span></div>
+        <div class="row onlyHR sizePair" title="Handrail width × thickness"><span>Handrail</span><span><input id="iHRW" inputmode="decimal" title="Handrail width"> <b class="times">×</b> <input id="iHRT" inputmode="decimal" title="Handrail thickness"> <span class="unit" id="uHRW">mm</span></span></div>
         <div class="row onlyHR" title="Length of each handrail available to buy. The BOM compares this stock length with each post-bay span.">
           <span>Handrail length</span><span><input id="iHRLength" inputmode="decimal"> <span class="unit" id="uHRLength">m</span></span></div>
       </div>
@@ -788,13 +787,13 @@
 const FT = 0.3048, IN = 0.0254;              // metres per foot / inch
 const DEF = {                                 // per-unit material defaults
   m : { spacing: 2.4,  railLength: 2.4, postDepth: 0.600, paling: 0.100, gap: 0.005, // 2.4 m stock rails, 600 mm in ground
-        postSize: 0.100, palingT: 0.020, railT: 0.045,     // timber cross-sections: post 100x100, paling 20 thick, rail 45 thick
+        postSize: 0.100, postT: 0.100, palingT: 0.020, railT: 0.045,     // timber cross-sections: post 100x100, paling 20 thick, rail 45 thick
         height: 1.8,   railW: 0.150,   railGap: 0.150,     // 1.8 m total posts -> 1.2 m above ground
         botOff: 0.150, topOff: 0,                          // ground->bottom rail, top rail->fence top
         hrW: 0.100,    hrT: 0.045, hrLength: 2.4 },         // handrail cross-section: 100 wide, 45 thick; 2.4 m stock
 
   ft: { spacing: 8*FT, railLength: 8*FT, postDepth: 0.600, paling: 3.5*IN, gap: 0.25*IN,
-        postSize: 4*IN, palingT: 0.75*IN, railT: 2*IN,
+        postSize: 4*IN, postT: 4*IN, palingT: 0.75*IN, railT: 2*IN,
         height: 6*FT,  railW: 6*IN,    railGap: 6*IN,
         botOff: 6*IN,  topOff: 0,
         hrW: 4*IN,     hrT: 2*IN, hrLength: 8*FT },
@@ -806,8 +805,12 @@ const DEF_ENDS    = 'auto';                   // end posts per open run: 'auto' 
 const POST_SIDE   = 0.100;                    // 100 mm square posts
 const PALING_T    = 0.020;                    // 20 mm paling thickness
 const RAIL_T      = 0.045;                    // 45 mm rail thickness
-function postSizeOf(mat){                     // square side / round diameter, metres
+function postSizeOf(mat){                     // square post width / round diameter, metres
   const v = mat && mat.postSize != null ? Number(mat.postSize) : NaN;
+  return Number.isFinite(v) && v > 0 ? v : POST_SIDE;
+}
+function postTOf(mat){                        // square post depth, metres
+  const v = mat && mat.postT != null ? Number(mat.postT) : NaN;
   return Number.isFinite(v) && v > 0 ? v : POST_SIDE;
 }
 function palingTOf(mat){
@@ -923,7 +926,7 @@ let state = {
   mat: { style: 'paling',                     // 'paling' | 'rail' (post-and-rail, no boards)
          spacing: DEF.m.spacing, railLength: DEF.m.railLength, postShape: 'square',
          rails: DEF_RAILS, paling: DEF.m.paling, gap: DEF.m.gap,
-         postSize: DEF.m.postSize, palingT: DEF.m.palingT, railT: DEF.m.railT,
+         postSize: DEF.m.postSize, postT: DEF.m.postT, palingT: DEF.m.palingT, railT: DEF.m.railT,
          height: DEF.m.height, postDepth: DEF.m.postDepth,
          railW: DEF.m.railW, railGap: DEF.m.railGap,
          botOff: DEF.m.botOff, topOff: DEF.m.topOff, ends: DEF_ENDS,
@@ -2726,7 +2729,7 @@ function build3(){
         const explicitShape = explicitPostShapeAt(visiblePolys,q);
         const shape = explicitShape || (old ? old.shape : postShapeOf(mat));
         if (!old || H > old.H)
-          posts.set(key, { q, H, ang, shape, size: postSizeOf(mat) });
+          posts.set(key, { q, H, ang, shape, size: postSizeOf(mat), t: postTOf(mat) });
         else if (explicitShape) old.shape = explicitShape;
       });
       if (a.gateAfter){ pushGate(F,a,b,H,mat); continue; }
@@ -2768,10 +2771,10 @@ function build3(){
   });
   // Post depth is a purchase length below the ground plane; only the above-ground
   // portion is drawn so the visible fence height remains H.
-  for (const { q, H, ang, shape, size } of posts.values()){
-    const hs = (size || POST_SIDE)/2;
+  for (const { q, H, ang, shape, size, t } of posts.values()){
+    const hs = (size || POST_SIDE)/2, ht = (t || size || POST_SIDE)/2;
     if (shape === 'round') pushCylinder(F, q.x, H/2, q.y, hs, H, WOOD.post);
-    else pushBox(F, q.x, H/2, q.y, hs, H/2, hs, ang, WOOD.post);
+    else pushBox(F, q.x, H/2, q.y, ht, H/2, hs, ang, WOOD.post);
   }
   return F;
 }
@@ -3157,6 +3160,10 @@ function syncMatInputs(){
   if (document.activeElement !== $('iRailSide')) $('iRailSide').value = railSideOf(M);
   if (document.activeElement !== $('iFencePostShape'))
     $('iFencePostShape').value = postShapeOf(M);
+  const roundPost = postShapeOf(M) === 'round';
+  $('postSizePrefix').style.display = roundPost ? '' : 'none';
+  $('postTimes').style.display = roundPost ? 'none' : '';
+  $('iPostSizeD').style.display = roundPost ? 'none' : '';
   const ends = endsOf(M), oneEnd = oneEndOf(M, sc.pl);
   if (document.activeElement !== $('iEnds'))
     $('iEnds').value = oneEnd ? 'one' : String(ends);
@@ -3172,7 +3179,7 @@ function syncMatInputs(){
   if (selectedPoint && document.activeElement !== $('iPostShape'))
     $('iPostShape').value = ownPostShape(selectedPoint) || 'inherit';
   set('iPaling', small(M.paling));  set('iPalingT', small(palingTOf(M)));  set('iGap', small(M.gap));
-  set('iPostSize', small(postSizeOf(M)));
+  set('iPostSize', small(postSizeOf(M)));  set('iPostSizeD', small(postTOf(M)));
   set('iRailW', small(M.railW));    set('iRailT', small(railTOf(M)));  set('iRailGap', small(M.railGap));
   set('iBotOff', small(M.botOff));  set('iTopOff', small(M.topOff));
   const hr = hrOf(M);
@@ -3182,10 +3189,10 @@ function syncMatInputs(){
   $('uSpacing').textContent = $('uRailLength').textContent = $('uHeight').textContent =
     $('uHRLength').textContent = u;
   $('uPostDepth').textContent = u==='m' ? 'mm' : 'in';
-  $('uPaling').textContent = $('uPalingT').textContent = $('uGap').textContent =
+  $('uPaling').textContent = $('uGap').textContent =
     $('uPostSize').textContent =
-    $('uRailW').textContent = $('uRailT').textContent = $('uRailGap').textContent =
-    $('uHRW').textContent = $('uHRT').textContent =
+    $('uRailW').textContent = $('uRailGap').textContent =
+    $('uHRW').textContent =
     $('uBotOff').textContent = $('uTopOff').textContent = (u==='m'?'mm':'in');
   $('matSec').className = 'acc ' + (M.style === 'rail' ? 'rail' : 'paling') +
                           (hr.on ? '' : ' nohr') + ' editorOnly';
@@ -3731,7 +3738,7 @@ document.querySelectorAll('#unitTog button').forEach(b =>
     commitEdit(() => {
       state.unit = b.dataset.u;
       // untouched materials fields jump to the sensible default for the new unit (2.4 m ↔ 8 ft)
-      for (const f of ['spacing','railLength','paling','palingT','gap','postSize','height','postDepth','railW','railT','railGap','botOff','topOff','hrW','hrT','hrLength'])
+      for (const f of ['spacing','railLength','paling','palingT','gap','postSize','postT','height','postDepth','railW','railT','railGap','botOff','topOff','hrW','hrT','hrLength'])
         for (const M of [state.mat, ...state.polys.map(p => p.mat).filter(Boolean)])
           if (!(M.touched || {})[f]) M[f] = DEF[state.unit][f];
     });
@@ -3839,7 +3846,7 @@ $('iRails').addEventListener('change', e => {
   syncMatInputs(); updateAll();
 });
 for (const [id, f] of [['iPaling','paling'], ['iPalingT','palingT'], ['iGap','gap'], ['iPostDepth','postDepth'],
-                       ['iPostSize','postSize'], ['iRailW','railW'], ['iRailT','railT'],
+                       ['iPostSize','postSize'], ['iPostSizeD','postT'], ['iRailW','railW'], ['iRailT','railT'],
                        ['iRailGap','railGap'], ['iBotOff','botOff'], ['iTopOff','topOff'],
                        ['iHRW','hrW'], ['iHRT','hrT']])
   $(id).addEventListener('change', e => {
@@ -4002,16 +4009,16 @@ function copyBomRows(entries,u){
       byKey.set(id, row); rows.push(row);
     }
   };
-  const postSizeLabel = (shape, size) => shape === 'round'
+  const postSizeLabel = (shape, size, t) => shape === 'round'
     ? 'Ø' + fmtSmall(size,u)
-    : timberSize(size, size, u);
+    : timberSize(size, t, u);
   const order = {POSTS:0, RAILS:1, 'GATE RAILS':2, PALINGS:3, 'GATE PALINGS':4, HANDRAIL:5};
   const addPost = (qty, shape, M, source) => {
-    const postLength = postLengthOf(M), size = postSizeOf(M),
-          key = shape + '|' + size.toFixed(6) + '|' + postLength.toFixed(6);
+    const postLength = postLengthOf(M), size = postSizeOf(M), t = postTOf(M),
+          key = shape + '|' + size.toFixed(6) + '|' + t.toFixed(6) + '|' + postLength.toFixed(6);
     let row = postPurchases.get(key);
     if (!row){
-      row = {qty:0, unit:'count', item:'POSTS', shape, size, postLength,
+      row = {qty:0, unit:'count', item:'POSTS', shape, size, t, postLength,
              sources:[], depths:new Map()};
       postPurchases.set(key, row);
     }
@@ -4137,9 +4144,9 @@ function copyBomRows(entries,u){
       ? fmtBomLength(installRows[0].above,u) + ' above ground + ' + fmtSmall(installRows[0].depth,u) + ' in ground'
       : 'installations: ' + installRows.map(item => item.qty + ' × ' +
           fmtBomLength(item.above,u) + ' above ground + ' + fmtSmall(item.depth,u) + ' in ground').join('; ');
-    row.description = postSizeLabel(row.shape, row.size) + (row.shape === 'round' ? ' round' : ' square') +
+    row.description = postSizeLabel(row.shape, row.size, row.t) + (row.shape === 'round' ? ' round' : ' square') +
       ' fence posts; ' + fmtBomLength(row.postLength,u) + ' total length (' + installs + ')';
-    delete row.shape; delete row.size; delete row.postLength; delete row.depths;
+    delete row.shape; delete row.size; delete row.t; delete row.postLength; delete row.depths;
     rows.push(row);
   }
   for (const row of railPurchases.values()){
