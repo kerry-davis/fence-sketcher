@@ -51,6 +51,7 @@ test('copy summary renders a consolidated store-ready BOM', () => {
     RAIL_T: .045,
     fmtLen: (value, unit) => `${value} ${unit}`,
     fmtSmall: value => `${Math.round(value * 1000)} mm`,
+    fmtBomLength: value => `${Math.round(value * 1000)} mm`,
     fenceHeightOf: mat => Math.max(.2, (mat.height ?? 1.8) - (mat.postDepth ?? 0)),
     postDepthOf: mat => Math.max(0, mat.postDepth ?? 0),
     postLengthOf: mat => Math.max(.2, mat.height ?? 1.8),
@@ -126,7 +127,7 @@ test('copy summary renders a consolidated store-ready BOM', () => {
     {name:'Shortage', rails:1, railCuts:[{length:3, centres:3}],
      mat:{style:'rail', rails:1, railLength:2.4, railW:.1, height:1.8, postDepth:.6}},
   ], 'm');
-  assert.deepEqual(railStatusRows.map(row => [row.item, row.qty, row.description]), [
+  assert.deepEqual(JSON.parse(JSON.stringify(railStatusRows.map(row => [row.item, row.qty, row.description]))), [
     ['RAILS', 3, '100 mm face × 45 mm thick post-and-rail members; 2400 mm stock length'],
   ]);
   const statusPlan = context.copyBomCutPlan(railStatusRows, 'm').join('\n');
