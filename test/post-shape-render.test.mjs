@@ -20,6 +20,9 @@ test('round post settings render and split the materials count by shape', () => 
   const context = {
     Math, Map,
     POST_SIDE:.1, PALING_T:.02, RAIL_T:.045,
+    postSizeOf:mat => (mat && mat.postSize != null ? Number(mat.postSize) : .1),
+    palingTOf:mat => (mat && mat.palingT != null ? Number(mat.palingT) : .02),
+    railTOf:mat => (mat && mat.railT != null ? Number(mat.railT) : .045),
     GATE_GAP:.04, GATE_STILE:.09, GATE_BOTTOM:.08,
     fenceHeightOf:mat => Math.max(.2, mat.height - (mat.postDepth ?? 0)),
     WOOD:{post:[1], rail:[2], paling:[3]},

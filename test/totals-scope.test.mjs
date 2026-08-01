@@ -49,6 +49,10 @@ test('copy summary renders a consolidated store-ready BOM', () => {
     POST_SIDE: .1,
     PALING_T: .02,
     RAIL_T: .045,
+    postSizeOf: mat => (mat && mat.postSize != null ? Number(mat.postSize) : .1),
+    palingTOf: mat => (mat && mat.palingT != null ? Number(mat.palingT) : .02),
+    railTOf: mat => (mat && mat.railT != null ? Number(mat.railT) : .045),
+    timberSize: (w, t) => `${Math.round(w*1000)}mm x ${Math.round(t*1000)}mm`,
     fmtLen: (value, unit) => `${value} ${unit}`,
     fmtSmall: value => `${Math.round(value * 1000)} mm`,
     fmtBomLength: value => `${Math.round(value * 1000)} mm`,
@@ -88,12 +92,12 @@ test('copy summary renders a consolidated store-ready BOM', () => {
   assert.match(table, /^QTY\s+ITEM\s+FENCE\(S\)\s+DESCRIPTION\n/);
   assert.ok(table.indexOf('POSTS') < table.indexOf('RAILS'));
   assert.ok(table.indexOf('RAILS') < table.indexOf('PALINGS'));
-  assert.match(table, /6\s+POSTS\s+Fence 1, Gate 1\s+100 mm × 100 mm square fence posts/);
+  assert.match(table, /6\s+POSTS\s+Fence 1, Gate 1\s+100mm x 100mm square fence posts/);
   assert.match(table, /POSTS\s+Fence 1, Gate 1/);
   assert.match(table, /1800 mm total length \(1200 mm above ground \+ 600 mm in ground\)/);
   assert.match(table, /6\s+RAILS\s+Fence 1\s+45 mm thick backing rails; 2400 mm stock length/);
   assert.match(table, /2\s+GATE RAILS/);
-  assert.match(table, /1\s+HANDRAIL\s+Fence 1\s+100 mm wide × 45 mm thick top rail; 5000 mm stock length; 5000 mm total required cut length; post-bay cuts: 1 × 5000 mm \(fits post centre-to-centre\)/);
+  assert.match(table, /1\s+HANDRAIL\s+Fence 1\s+100mm x 45mm top rail; 5000 mm stock length; 5000 mm total required cut length; post-bay cuts: 1 × 5000 mm \(fits post centre-to-centre\)/);
   assert.equal(context.copyGateSizes([1.5,1.5], 'm'), '2 gate leaves (2 × 1500 mm)');
   const cutPlan = context.copyBomCutPlan(rows, 'm').join('\n');
   assert.match(cutPlan, /RAILS — Fence 1: 6 × 2000 mm post centre-to-centre \(400 mm overlap\)/);
@@ -113,7 +117,7 @@ test('copy summary renders a consolidated store-ready BOM', () => {
     mat:{style:'rail', rails:2, railW:.1000001, height:1.8, postDepth:.6},
   }], 'm');
   assert.deepEqual(JSON.parse(JSON.stringify(railRows.map(row => [row.item, row.qty, row.description]))), [
-    ['RAILS', 8, '100 mm face × 45 mm thick post-and-rail members; 2400 mm stock length'],
+    ['RAILS', 8, '100mm x 45mm post-and-rail members; 2400 mm stock length'],
   ]);
   const railCutPlan = context.copyBomCutPlan(railRows, 'm').join('\n');
   assert.match(railCutPlan, /4 × 2000 mm post centre-to-centre \+ 50 mm total end-post extension \(400 mm overlap\)/);
@@ -128,7 +132,7 @@ test('copy summary renders a consolidated store-ready BOM', () => {
      mat:{style:'rail', rails:1, railLength:2.4, railW:.1, height:1.8, postDepth:.6}},
   ], 'm');
   assert.deepEqual(JSON.parse(JSON.stringify(railStatusRows.map(row => [row.item, row.qty, row.description]))), [
-    ['RAILS', 3, '100 mm face × 45 mm thick post-and-rail members; 2400 mm stock length'],
+    ['RAILS', 3, '100mm x 45mm post-and-rail members; 2400 mm stock length'],
   ]);
   const statusPlan = context.copyBomCutPlan(railStatusRows, 'm').join('\n');
   assert.match(statusPlan, /1 × 3000 mm post centre-to-centre \(ISSUE: 600 mm too short\)/);
@@ -150,7 +154,7 @@ test('copy summary renders a consolidated store-ready BOM', () => {
     mat:{style:'paling', handrail:true, hrW:.2, hrT:.045, hrLength:2.4, height:1.8, postDepth:.6},
   }], 'm');
   assert.deepEqual(JSON.parse(JSON.stringify(handrailRows.map(row => [row.item, row.qty, row.description]))), [
-    ['HANDRAIL', 8, '200 mm wide × 45 mm thick top rail; 2400 mm stock length; 10860 mm total required cut length; post-bay cuts: 1 × 1550 mm (1500 mm fence segment + 50 mm total end-post extension; 900 mm overlap), 6 × 1500 mm (900 mm overlap), 1 × 310 mm (260 mm fence segment + 50 mm total end-post extension; 2140 mm overlap)'],
+    ['HANDRAIL', 8, '200mm x 45mm top rail; 2400 mm stock length; 10860 mm total required cut length; post-bay cuts: 1 × 1550 mm (1500 mm fence segment + 50 mm total end-post extension; 900 mm overlap), 6 × 1500 mm (900 mm overlap), 1 × 310 mm (260 mm fence segment + 50 mm total end-post extension; 2140 mm overlap)'],
   ]);
 
   const postRows = context.copyBomRows([
@@ -158,7 +162,7 @@ test('copy summary renders a consolidated store-ready BOM', () => {
     {squarePosts:9, mat:{style:'paling', height:1.8, postDepth:0}},
   ], 'm');
   assert.deepEqual(JSON.parse(JSON.stringify(postRows.map(row => [row.item, row.qty, row.description]))), [
-    ['POSTS', 19, '100 mm × 100 mm square fence posts; 1800 mm total length (installations: 10 × 1200 mm above ground + 600 mm in ground; 9 × 1800 mm above ground + 0 mm in ground)'],
+    ['POSTS', 19, '100mm x 100mm square fence posts; 1800 mm total length (installations: 10 × 1200 mm above ground + 600 mm in ground; 9 × 1800 mm above ground + 0 mm in ground)'],
   ]);
 
   context.state.mat.hrLength = 3.6;
