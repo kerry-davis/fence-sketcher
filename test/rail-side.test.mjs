@@ -10,7 +10,7 @@ test('rail side is explicit and reverses the 3D face offset', () => {
   assert.match(html, /railSide: 'left'/);
   assert.match(html, /M\.railSide = e\.target\.value === 'right' \? 'right' : 'left'/);
   assert.match(html, /const railSide = typeof railSideOf === 'function' \? railSideOf\(mat\) : 'left';/);
-  assert.match(html, /segmentSideMid\(rail\.a, rail\.b, POST_SIDE\/2 \+ RAIL_T\/2, railSide\)/);
+  assert.match(html, /segmentSideMid\(rail\.a, rail\.b, postTOf\(mat\)\/2 \+ railTOf\(mat\)\/2, railSide\)/);
 
   const start = html.indexOf('function segmentSideMid(');
   const end = html.indexOf('// Extend an outer rail bay', start);
