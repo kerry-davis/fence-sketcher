@@ -74,6 +74,7 @@ test('gate leaf rails and palings are counted and obey BOM exclusions', () => {
   const context = {
     Math, Map,
     POST_SIDE:0.1, GATE_GAP:0.04, GATE_STILE:0.09, GATE_BOTTOM:0.08,
+    fenceHeightOf: mat => Math.max(.2, (mat.height ?? 1.2) - (mat.postDepth ?? 0)),
     fenceName: (pl, i) => `Fence ${i+1}`,
     segLen: (a, b) => Math.hypot(b.x-a.x, b.y-a.y),
     segsOf: pl => {
