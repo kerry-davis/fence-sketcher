@@ -20,7 +20,7 @@ test('hidden fences stay identifiable in plan while being omitted from 3D', () =
 });
 
 test('share management exposes explicit link removal confirmation', () => {
-  assert.match(html, /id="shareStop"[^>]*>Remove public link<\/button>/);
+  assert.match(html, /id="shareStop"[^>]*>Remove link<\/button>/);
   assert.match(html, /id="shareStopPanel" hidden/);
   assert.match(html, /id="shareStopConfirm">Remove link<\/button>/);
   assert.doesNotMatch(html, /dataset\.armed|shareRevokeTimer/);
