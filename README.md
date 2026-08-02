@@ -161,10 +161,16 @@ dimensioned off what moved settles with it.
 **Contradictions are refused**, because two values for one measurement means
 the drawing lies about itself. You can't dimension a pair whose distance is
 already pinned — the two ends of one segment (its Length *is* that dimension),
-or a reference that closes a loop back on itself. Nor can an angle and a
-distance both drive the same post: an angle swings a stretch of the run while a
-distance pins a post in place. Each refusal says which way out it has; an angle
-is usually still available from the other fence, so the free side swings.
+or a reference that closes a loop back on itself.
+
+An angle and a distance can share a post, as long as the swing doesn't
+contradict the distance. Measured from the corner the angle turns about, or
+from another post the same swing carries round, the distance is unchanged by
+the rotation and the two live together happily. Measured from something the
+swing leaves behind — a building corner, a wall, a post outside the swept
+stretch — they would pull against each other, and that is refused. Each refusal
+says which way out it has; an angle is usually still available from the other
+fence, so the free side swings instead.
 
 Angles are refused on closed loops, where rotating part of the run would tear
 it open.

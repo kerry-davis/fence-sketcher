@@ -1644,11 +1644,21 @@ const angleSwingRange = (pl, k, fwd) => fwd ? [k+1, pl.pts.length-1] : [0, k-1];
 // A distance only fights the swing if it reaches something the swing leaves behind. Measured
 // from the corner post itself, or from another post carried round by the same swing, the
 // distance is unchanged by the rotation and the two can live together.
-function ridesTheSwing(pl, k, lo, hi, anchorIndex){
-  return anchorIndex === k || (anchorIndex >= lo && anchorIndex <= hi);
+function ridesTheSwing(pl, k, lo, hi, anchorIndex, anchorPos){
+  if (anchorIndex === k || (anchorIndex >= lo && anchorIndex <= hi)) return true;
+  // anything standing on the corner is the centre of the rotation, so the distance to it is
+  // unchanged whatever run that post belongs to — junction posts are shared here
+  const V = pl.pts[k];
+  return !!anchorPos && Math.hypot(anchorPos.x - V.x, anchorPos.y - V.y) < FENCE_JOIN_TOL;
 }
 const anchorIndexIn = (pl, dim) =>
   dim && dim.pid ? pl.pts.findIndex(q => q.pid === dim.pid) : -1;
+// Where a dimension's far end stands, or null when it has none that a rotation could preserve.
+function anchorPosOf(polys, dim){
+  if (!dim || dim.axis) return null;             // a wall is a line, never preserved by a turn
+  if (!dim.pid) return { x:dim.x, y:dim.y };
+  return findPoint(polys, dim.pid) || { x:dim.x, y:dim.y };
+}
 // -> the index of a post the angle would fight over, or -1
 function angleSwingConflict(polys, p, k, fwd){
   const pl = polys[p], [lo, hi] = angleSwingRange(pl, k, fwd);
@@ -1656,7 +1666,7 @@ function angleSwingConflict(polys, p, k, fwd){
     const dim = pl.pts[i].dim;
     if (!dim) continue;
     const j = anchorIndexIn(pl, dim);            // a wall, a building corner or another run: -1
-    if (!ridesTheSwing(pl, k, lo, hi, j)) return i;
+    if (!ridesTheSwing(pl, k, lo, hi, j, anchorPosOf(polys, dim))) return i;
   }
   return -1;
 }
@@ -1664,13 +1674,16 @@ function angleSwingConflict(polys, p, k, fwd){
 // what the new dimension would measure from, so a distance the swing preserves is allowed.
 function angleSweepingPost(polys, p, i, anchorRef){
   const pl = polys[p];
+  const refPos = !anchorRef || anchorRef.k === 'wall' ? null
+               : anchorRef.k === 'cnr' ? { x:anchorRef.x, y:anchorRef.y }
+               : (polys[anchorRef.p] || {pts:[]}).pts[anchorRef.i] || null;
   for (let k = 0; k < pl.pts.length; k++){
     const a = pl.pts[k].ang;
     if (!a) continue;
     const [lo, hi] = angleSwingRange(pl, k, a.fwd !== false);
     if (i < lo || i > hi) continue;
     const j = anchorRef && anchorRef.k === 'pt' && anchorRef.p === p ? anchorRef.i : -1;
-    if (!ridesTheSwing(pl, k, lo, hi, j)) return k;
+    if (!ridesTheSwing(pl, k, lo, hi, j, refPos)) return k;
   }
   return -1;
 }
@@ -2065,6 +2078,15 @@ function freezeTree(value){
   chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:0, i:2}) === -1, 'so is measuring from a swept post');
   chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:0, i:0}) === 1, 'but not from one left behind');
   chk(angleSweepingPost(ps, 0, 0, {k:'cnr'}) === -1, 'a post before the corner is not swung by it');
+  // a junction post of another run, standing on the corner, is the centre of the turn as well
+  ps.push({pts:[{x:5,y:0,pid:'pJ'},{x:11,y:-3}], closed:false});
+  chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:1, i:0}) === -1,
+      'measuring from a shared post on the corner is fine, whichever run owns it');
+  chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:1, i:1}) === 1, 'but not from one that stands apart');
+  ps[0].pts[3].dim = { pid:'pJ', x:5, y:0, len:9 };
+  chk(angleSwingConflict(ps, 0, 1, true) === -1, 'and the same holds for one already placed');
+  chk(angleSweepingPost(ps, 0, 3, {k:'cnr', x:5, y:0}) === -1,
+      'a building corner on the corner post is invariant too');
   // two fences make an angle only where they share a post of one open run
   const ap = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:9}], closed:false},
               {pts:[{x:0,y:9},{x:4,y:9}], closed:false}];
