@@ -2730,6 +2730,12 @@ function dimPlacement(A, B, sx, sy){
   const nx = -(B.y-A.y)/L, ny = (B.x-A.x)/L;
   return ((sx - (A.x+B.x)/2)*nx + (sy - (A.y+B.y)/2)*ny) / view.s;
 }
+// The two screen ends of an existing dimension, which is what its placement is measured from.
+function dimEndsFor(kind, p, i){
+  const pl = state.polys[p];
+  if (kind === 'seg') return { A: W2S(pl.pts[i]), B: W2S(pl.pts[(i+1) % pl.pts.length]) };
+  return dimEnds(pl.pts[i], state.polys);
+}
 // The two screen ends of whatever the tool is about to dimension.
 function dimPendingEnds(pend){
   if (pend.kind === 'seg'){
@@ -2740,6 +2746,15 @@ function dimPendingEnds(pend){
   const pt = state.polys[pend.p].pts[pend.i];
   const ends = dimEnds({ ...pt, dim: pend.anchor }, state.polys);
   return { ...ends, txt: fmtLen(dimDistance(pt, pend.anchor), state.unit) };
+}
+// Slide a placed dimension to a new offset — the CAD habit of nudging one clear of the drawing.
+function moveDimension(kind, p, i, sx, sy){
+  const pt = state.polys[p] && state.polys[p].pts[i];
+  if (!pt) return;
+  const { A, B } = dimEndsFor(kind, p, i);
+  const off = dimPlacement(A, B, sx, sy);
+  if (kind === 'seg') pt.lockOff = off;         // an inline label becomes a placed dimension
+  else if (pt.dim) pt.dim.off = off;
 }
 // One click of the dimension tool: pick a thing, close the pair, or drop the dimension in place.
 function dimToolClick(sx, sy){
@@ -4088,6 +4103,7 @@ cv.addEventListener('pointerdown', e => {
   if (e.button === 2){ drag = { t:'pan' }; return; }
   // while the tool is armed a press must not start a drag — every click is a pick
   pend = { hit: dimTool ? null : pick(e.offsetX, e.offsetY), x:e.offsetX, y:e.offsetY, moved:false,
+           dim: dimTool ? null : dimHitAt(e.offsetX, e.offsetY),
            multi: e.shiftKey || e.ctrlKey || e.metaKey };
   // touch has no shift key: holding a building toggles it in the selection
   clearTimeout(holdTimer);
@@ -4171,7 +4187,14 @@ cv.addEventListener('pointermove', e => {
     clearTimeout(holdTimer);                  // a drag is not a long press
     if (pend.done){ pend = null; return; }    // already selected under the finger
     const h = pend.hit;
-    if (h && h.t==='pt'){ pushUndo(); sel = h; drag = { t:'pt', p:h.p, i:h.i }; }
+    // a dimension under the press wins over the geometry behind it, same as a click does
+    if (pend.dim){
+      const d = pend.dim;
+      pushUndo();
+      sel = { t:'dim', kind:d.kind, p:d.p, i:d.i };
+      drag = { t:'dimoff', kind:d.kind, p:d.p, i:d.i };
+    }
+    else if (h && h.t==='pt'){ pushUndo(); sel = h; drag = { t:'pt', p:h.p, i:h.i }; }
     else if (h && h.t==='seg'){
       pushUndo(); sel = h;
       const pts = state.polys[h.p].pts.map(q => ({x:q.x,y:q.y}));
@@ -4199,6 +4222,9 @@ cv.addEventListener('pointermove', e => {
   }
   if (!drag) return;
   if (drag.t === 'pan'){ view.x -= dx/view.s; view.y -= dy/view.s; paint(); return; }
+  if (drag.t === 'dimoff'){
+    moveDimension(drag.kind, drag.p, drag.i, e.offsetX, e.offsetY); paint(); return;
+  }
   const w = S2W(e.offsetX, e.offsetY);
   if (drag.t === 'pt'){ movePoint(drag.p, drag.i, w); }
   if (drag.t === 'poly'){
