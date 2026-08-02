@@ -1570,6 +1570,19 @@ function reapplyDims(polys){
     q.x = pos.x; q.y = pos.y;
   }));
 }
+// A locked length has to be restored too, or the sweep measures a lock it never repairs and
+// reads a satisfiable drawing as contradictory. Alternating this with the distances is what
+// lets a locked segment and a distance meet where their circles cross.
+function reapplyLocks(polys){
+  polys.forEach(pl => pl.pts.forEach((a, i) => {
+    if (a.lockAfter == null) return;
+    if (!pl.closed && i >= pl.pts.length-1) return;
+    const b = pl.pts[(i+1) % pl.pts.length], d = segLen(a, b);
+    if (d < 1e-9) return;                        // no direction to restore it along
+    b.x = a.x + (b.x-a.x)/d*a.lockAfter;
+    b.y = a.y + (b.y-a.y)/d*a.lockAfter;
+  }));
+}
 // A dimensioned corner has to hold its angle when a post on either leg is moved, the same way
 // a locked length holds. Without this the geometry drifts away from the value that drove it.
 function reapplyAngles(polys){
@@ -1617,6 +1630,7 @@ function relaxConstraints(polys){
   let last = Infinity;
   for (let n = 0; n < RELAX_PASSES; n++){
     reapplyAngles(polys);
+    reapplyLocks(polys);
     reapplyDims(polys);
     const r = constraintResidual(polys);
     if (r < DIM_TOL) return r;                   // everything agrees
@@ -1669,6 +1683,17 @@ function setCornerAngle(polys, p, k, deg, fwd){
   // so the side can be swapped later by winding the whole run back through it.
   pl.pts[k].ang = { ...prev, deg: Math.abs(want) * 180/Math.PI, fwd, d: (prev.d || 0) + delta };
 }
+// Both swap buttons come through here, so neither can skip the check the other makes.
+function requestAngleSwap(){
+  if (!sel || sel.t !== 'dim' || sel.kind !== 'ang') return;
+  const pt = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+  if (!pt || !pt.ang) return;
+  if (!angleCanDrive(state.polys, sel.p, sel.i, pt.ang.fwd === false)){
+    alert('The other side is held by its own dimensions, so it cannot be the one to swing.');
+    return;
+  }
+  if (commitEdit(() => swapAngleSide(state.polys, sel.p, sel.i))) updateAll();
+}
 // Put the movement on the other leg. Undoing the swing on one side and applying it to the other
 // works out to one rotation of the whole run about the corner, so the angle itself never changes
 // — only which end of the fence ended up displaced.
@@ -1710,6 +1735,16 @@ function distanceCanDrive(polys, p, i, anchorRef){
   return dimensionIsSatisfiable(polys, c => {
     const a = dimAnchorRef(anchorRef, c);
     setPointDim(c, p, i, a, dimDistance(c[p].pts[i], a) + 0.37);
+  });
+}
+// Retyping a value asks for something specific, so the probe uses the value itself rather than
+// an arbitrary nudge: a figure the drawing cannot reach must not be written down as if it had.
+function typedValueFits(polys, kind, p, i, value){
+  return dimensionIsSatisfiable(polys, c => {
+    const q = c[p].pts[i];
+    if (kind === 'ang') setCornerAngle(c, p, i, value, (q.ang || {}).fwd !== false);
+    else if (kind === 'seg') setSegLen(c, p, i, value);
+    else if (q.dim) setPointDim(c, p, i, q.dim, value);
   });
 }
 /* A distance measured to a post standing on the corner is only safe because it stands there.
@@ -2132,6 +2167,15 @@ function freezeTree(value){
   chk(angleCanDrive(legPinned, 0, 1, true), 'an undimensioned leg can stretch to satisfy both');
   legPinned[0].pts[1].lockAfter = segLen(legPinned[0].pts[1], legPinned[0].pts[2]);
   chk(!angleCanDrive(legPinned, 0, 1, true), 'locking that leg leaves the two contradictory');
+  // a locked length is relaxed as well as measured, so it can meet a distance where they cross
+  const locked = [{pts:[{x:0,y:0,lockAfter:5},{x:3,y:4}], closed:false}];
+  chk(distanceCanDrive(locked, 0, 1, {k:'cnr', x:0, y:4}),
+      'a locked length and a distance meet where their circles cross');
+  setPointDim(locked, 0, 1, {x:0, y:4}, 3.37);
+  relaxConstraints(locked);
+  chk(constraintResidual(locked) < DIM_TOL, 'and settling satisfies both at once');
+  chk(!typedValueFits(locked, 'dim', 0, 1, 20), 'a value beyond reach is refused, not written down');
+  chk(typedValueFits(locked, 'dim', 0, 1, 2), 'one within reach is accepted');
   // a junction post of another run, standing on the corner, binds to the corner post
   ps.push({pts:[{x:5,y:0,pid:'pJ'},{x:11,y:-3}], closed:false});
   // that allowance is bound to the corner post, so separating the junction can't strand it
@@ -3050,9 +3094,13 @@ function commitDimEdit(){
   // whatever was just typed stays selected, so delete and swap are to hand straight away
   // instead of hiding behind leaving the tool and clicking the dimension again
   const keep = () => { sel = { t:'dim', kind:t.kind, p:t.p, i:t.i }; bsel.clear(); };
+  // a figure the rest of the drawing cannot accommodate is refused rather than written down
+  const refuse = () => { alert('The rest of the drawing cannot reach that value. Remove or ' +
+    'relax one of the dimensions holding it, then try again.'); keep(); updateAll(); };
   if (t.kind === 'ang'){                        // degrees, not a length
     const deg = parseFloat(String(typed).replace(/,/g,'.'));
     if (!isFinite(deg) || deg < 0.5 || deg > 179.5){ keep(); updateAll(); return; }
+    if (!typedValueFits(state.polys, 'ang', t.p, t.i, deg)) return refuse();
     commitEdit(() => setCornerAngle(state.polys, t.p, t.i, deg,
                                     (pl.pts[t.i].ang || {}).fwd !== false));
     keep(); updateAll();
@@ -3060,6 +3108,7 @@ function commitDimEdit(){
   }
   const v = parseLen(typed, state.unit);
   if (v == null || v <= 0.01){ keep(); updateAll(); return; }
+  if (!typedValueFits(state.polys, t.kind, t.p, t.i, v)) return refuse();
   commitEdit(() => {
     if (t.kind === 'seg') setSegLen(state.polys, t.p, t.i, v);
     else if (pl.pts[t.i].dim) setPointDim(state.polys, t.p, t.i, pl.pts[t.i].dim, v);
@@ -4430,10 +4479,7 @@ function updateSelbox(){
         '<p class="note" id="dimSelNote">Double-click it on the drawing to retype the value. ' +
         'Removing it leaves the geometry where it is.</p>';
       $('bDimDel').addEventListener('click', deleteSelected);
-      if ($('bAngSwap')) $('bAngSwap').addEventListener('click', () => {
-        if (sel && sel.t==='dim' && sel.kind==='ang' &&
-            commitEdit(() => swapAngleSide(state.polys, sel.p, sel.i))) updateAll();
-      });
+      if ($('bAngSwap')) $('bAngSwap').addEventListener('click', requestAngleSwap);
     }
     $('dimKind').textContent = kindWord;
     $('dimSelVal').textContent = value;
@@ -4952,13 +4998,7 @@ $('bRedo').addEventListener('click', redo);
 $('bDelSel').addEventListener('click', deleteSelected);
 fdel.addEventListener('click', deleteSelected);
 fswap.addEventListener('click', () => {
-  if (!sel || sel.t!=='dim' || sel.kind!=='ang') return;
-  const pt = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
-  if (pt && pt.ang && !angleCanDrive(state.polys, sel.p, sel.i, pt.ang.fwd === false)){
-    alert('The other side has a post held by its own dimension, so it cannot be the one to swing.');
-    return;
-  }
-  if (commitEdit(() => swapAngleSide(state.polys, sel.p, sel.i))) updateAll();
+  requestAngleSwap();
 });
 $('bDimTool').addEventListener('click', () => setDimTool(!dimTool));
 $('dimin').addEventListener('keydown', e => {
