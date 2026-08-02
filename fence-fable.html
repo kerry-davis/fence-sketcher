@@ -936,6 +936,7 @@ let postShapeScope = 'fence';                 // current Post shape dropdown sco
 let postShapePointKey = '';                   // selected point whose scope is being shown
 let bsel = new Set();                         // selected building members (whole groups expand here)
 let showAllTotals = false;
+let dimPick = false;                          // next canvas click picks a dimension's anchor corner
 let undoStack = [], redoStack = [];
 
 /* =====================================================================
@@ -1455,6 +1456,33 @@ function setSegLen(polys, p, i, len){
   b.x = a.x + ux*len; b.y = a.y + uy*len;
   a.lockAfter = len;
 }
+
+/* --- Point-to-corner dimensions (CAD style: the typed value drives the point) --- */
+const bldCorners = b =>                          // clockwise from the top-left
+  [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]].map(([x,y]) => ({x,y}));
+// Nearest building corner to a world point -> {x,y,d}, or null when there are no buildings.
+function nearestCorner(builds, w){
+  let best = null, bd = Infinity;
+  for (const b of builds) for (const c of bldCorners(b)){
+    const d = Math.hypot(w.x-c.x, w.y-c.y);
+    if (d < bd){ bd = d; best = { x:c.x, y:c.y, d }; }
+  }
+  return best;
+}
+// Hold a dimensioned point at its distance from the anchor, keeping the direction it's heading.
+function applyPointDim(pt, pos){
+  if (!pt.dim) return pos;
+  const dx = pos.x-pt.dim.x, dy = pos.y-pt.dim.y, d = Math.hypot(dx,dy);
+  // sitting exactly on the anchor: no direction to keep, so head east
+  const ux = d > 1e-9 ? dx/d : 1, uy = d > 1e-9 ? dy/d : 0;
+  return { x: pt.dim.x + ux*pt.dim.len, y: pt.dim.y + uy*pt.dim.len };
+}
+function setPointDim(polys, p, i, anchor, len){
+  const pt = polys[p].pts[i];
+  pt.dim = { x:anchor.x, y:anchor.y, len };
+  const pos = applyPointDim(pt, pt);
+  pt.x = pos.x; pt.y = pos.y;
+}
 // Reverse a polyline so drawing can continue from its old start. Gate/lock flags live on
 // each segment's START point, so they must shift to the segment's new start when reversed.
 function reversePoly(pl){
@@ -1686,6 +1714,12 @@ function freezeTree(value){
   // typed length moves far end
   ps = [{pts:[{x:0,y:0},{x:4,y:0}], closed:false}]; setSegLen(ps, 0, 0, 7.5);
   chk(near(ps[0].pts[1].x, 7.5) && near(ps[0].pts[0].lockAfter, 7.5), 'set length');
+  // typed dimension pulls the point along the line to its anchor corner
+  ps = [{pts:[{x:0,y:0},{x:4,y:0}], closed:false}]; setPointDim(ps, 0, 1, {x:10,y:0}, 1.5);
+  chk(near(ps[0].pts[1].x, 8.5) && near(ps[0].pts[1].y, 0), 'dimension drives the point');
+  chk(near(applyPointDim(ps[0].pts[1], {x:10,y:9}).y, 1.5), 'dragging keeps the dimension');
+  chk(near(nearestCorner([{x:2,y:2,w:3,h:3}], {x:5.4,y:5.4}).d, Math.hypot(.4,.4)), 'nearest corner');
+  chk(applyPointDim({x:1,y:1}, {x:9,y:9}).x === 9, 'no dimension leaves the point alone');
   // --- 3D geometry ---
   // posts follow the counting model: 10 m at 1.5 m = 7 panels = 8 posts, ends included
   let pa = postsAlong({x:0,y:0}, {x:10,y:0}, 1.5, false);
@@ -2276,7 +2310,8 @@ function clearAll(){
   state.polys = []; state.builds = []; sel = null; bsel.clear();
   updateAll();
 }
-// Move a dragged fence point: snap, then keep any locked neighbour segments at their length.
+// Move a dragged fence point: snap, then keep any locked neighbour segments at their length,
+// then honour a corner dimension (applied last, so it wins over a length lock).
 // ponytail: locks are enforced one neighbour at a time — with BOTH sides locked the first may
 // drift slightly; a real constraint solver is the upgrade if that ever matters.
 function movePoint(p, i, w){
@@ -2295,6 +2330,7 @@ function movePoint(p, i, w){
     const d = Math.hypot(pos.x-q.x, pos.y-q.y) || 1;
     pos = { x: q.x + (pos.x-q.x)/d*len, y: q.y + (pos.y-q.y)/d*len };
   }
+  pos = applyPointDim(pl.pts[i], pos);
   pl.pts[i].x = pos.x; pl.pts[i].y = pos.y;
 }
 
@@ -2447,6 +2483,25 @@ function doPaint(){
       ctx.fillStyle = isSel ? ACCENT : C.ptFill; ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = isSel ? ACCENT : C.fence; ctx.stroke();
       ctx.globalAlpha = 1;
+    });
+    // corner dimensions — dashed witness line back to the anchor, with the driving value
+    pl.pts.forEach(q => {
+      if (!q.dim) return;
+      const A = W2S({x:q.dim.x, y:q.dim.y}), B = W2S(q);
+      ctx.setLineDash([5,4]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = ACCENT; ctx.fillRect(A.x-3, A.y-3, 6, 6);
+      let dang = Math.atan2(B.y-A.y, B.x-A.x);
+      if (dang > Math.PI/2 || dang < -Math.PI/2) dang += Math.PI;
+      ctx.save();
+      ctx.translate((A.x+B.x)/2, (A.y+B.y)/2); ctx.rotate(dang);
+      ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+      ctx.lineWidth = 4; ctx.strokeStyle = C.halo;
+      ctx.strokeText(fmtLen(q.dim.len, state.unit), 0, -7);
+      ctx.fillStyle = ACCENT;
+      ctx.fillText(fmtLen(q.dim.len, state.unit), 0, -7);
+      ctx.restore();
     });
     // Match the per-fence materials list to the plan with a compact badge.
     const tag = showFenceLabels3 ? fenceLabelLayout(pl, p) : null;
@@ -3415,8 +3470,37 @@ function updateSelbox(){
       box.innerHTML = '<h2>Selected '+(isStart ? endLabels.start : isFinish ? endLabels.end : 'fence point')+'</h2>' +
         (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
         '<div class="row" id="cornerAngleRow" style="display:none"><span>Corner angle</span><b id="cornerAngle"></b></div>' +
-        '<p class="note">Drag to move. Deleting it joins the neighbouring segments. Select a fence to show its joined-post angles.</p>';
+        '<button id="bDim" style="width:100%">📐 Dimension to a building corner</button>' +
+        '<div class="row" id="dimRow" style="display:none"><span>To corner</span>' +
+          '<span><input id="iDim" inputmode="text"> <span class="unit">'+(u==='m'?'m':'')+'</span></span></div>' +
+        '<button id="bDimClear" style="width:100%;display:none">Remove dimension</button>' +
+        '<p class="note" id="dimNote">Drag to move. Deleting it joins the neighbouring segments. Select a fence to show its joined-post angles.</p>';
       if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
+      $('bDim').addEventListener('click', () => {
+        if (!state.builds.length){ alert('Draw a building first — dimensions anchor to its corners.'); return; }
+        dimPick = true; cv.style.cursor = 'crosshair';
+        $('dimNote').textContent = 'Click the building corner to measure from.';
+      });
+      $('iDim').addEventListener('change', e => {
+        const v = parseLen(e.target.value, state.unit);
+        const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+        if (v != null && v > 0 && pt && pt.dim)
+          commitEdit(() => setPointDim(state.polys, sel.p, sel.i, pt.dim, v)) && updateAll();
+        else updateSelbox();
+      });
+      $('bDimClear').addEventListener('click', () => {
+        const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+        if (pt && commitEdit(() => { delete pt.dim; })) updateAll();
+      });
+    }
+    const selPt = pl && pl.pts[sel.i];
+    if ($('dimRow')){
+      const has = !!(selPt && selPt.dim);
+      $('dimRow').style.display = has ? '' : 'none';
+      $('bDimClear').style.display = has ? '' : 'none';
+      $('bDim').textContent = has ? '📐 Re-anchor to another corner' : '📐 Dimension to a building corner';
+      if (has && document.activeElement !== $('iDim'))
+        $('iDim').value = u==='m' ? +selPt.dim.len.toFixed(3) : ftStr(selPt.dim.len);
     }
     const cornerAngleRow = $('cornerAngleRow');
     if (cornerAngleRow){
@@ -3714,6 +3798,14 @@ function resumeLine(p, i){
 //   idle + empty    -> clear the selection, or start a new fence if nothing was selected
 function handleClick(hit, sx, sy, multi){
   if (readOnly) return;
+  if (dimPick){                                 // picking the corner a dimension measures from
+    dimPick = false; cv.style.cursor = '';
+    const c = nearestCorner(state.builds, S2W(sx, sy));
+    const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+    if (c && pt) commitEdit(() => setPointDim(state.polys, sel.p, sel.i, c,
+                                              Math.hypot(pt.x-c.x, pt.y-c.y)));
+    lastSelKey = ''; updateAll(); return;        // force the panel to rebuild with the input
+  }
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
   if (hit && hit.label){
     if (drawTarget()) endLine();
