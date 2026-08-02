@@ -2569,80 +2569,100 @@ function dimArrow(x, y, ux, uy){                 // filled triangle, tip at (x,y
   ctx.lineTo(x - ux*DIM.arrow + uy*DIM.half, y - uy*DIM.arrow - ux*DIM.half);
   ctx.closePath(); ctx.fill();
 }
-function drawDimension(q, p, i){
-  const foot = dimAnchor(q, q.dim, state.polys);
-  const A = W2S(foot), B = W2S(q);
+/* Draw one dimension between two screen points, offset by `offPx` to the side the user placed
+   it. Returns the label's centre so it can be registered for picking or used to site the input.
+   opts: { picked, extendTo (screen pt for a wall's dotted run-past), ghost } */
+function renderDimension(A, B, txt, offPx, opts = {}){
   const len = Math.hypot(B.x-A.x, B.y-A.y);
-  if (len < 1) return;                           // on top of the anchor: nothing to draw
+  if (len < 1) return null;                      // the two ends coincide: nothing to draw
   const ux = (B.x-A.x)/len, uy = (B.y-A.y)/len;  // along the measurement
-  const nx = -uy, ny = ux;                       // sideways, where the dimension line sits
-  const picked = sel && sel.t==='dim' && sel.kind==='dim' && sel.p===p && sel.i===i;
+  const nx = -uy, ny = ux;                       // sideways, towards the placement
+  const off = offPx, side = off < 0 ? -1 : 1, gap = DIM.gap*side, tail = off + DIM.tail*side;
+  ctx.save();
   ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.setLineDash([]);
-  ctx.lineWidth = picked ? 2 : 1;
-  if (picked){                                   // selection halo, so it reads as picked
+  if (opts.ghost) ctx.globalAlpha = .65;
+  ctx.lineWidth = opts.picked ? 2 : 1;
+  const a = { x: A.x + nx*off, y: A.y + ny*off }, b = { x: B.x + nx*off, y: B.y + ny*off };
+  if (opts.picked){                              // selection halo, so it reads as picked
     ctx.save();
     ctx.globalAlpha = .18; ctx.lineWidth = 10; ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(A.x + nx*DIM.off, A.y + ny*DIM.off);
-    ctx.lineTo(B.x + nx*DIM.off, B.y + ny*DIM.off);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     ctx.restore();
   }
   for (const P of [A, B]){                       // witness lines, clear of the geometry
     ctx.beginPath();
-    ctx.moveTo(P.x + nx*DIM.gap, P.y + ny*DIM.gap);
-    ctx.lineTo(P.x + nx*(DIM.off+DIM.tail), P.y + ny*(DIM.off+DIM.tail));
+    ctx.moveTo(P.x + nx*gap, P.y + ny*gap);
+    ctx.lineTo(P.x + nx*tail, P.y + ny*tail);
     ctx.stroke();
   }
-  // an edge dimension measures to the infinite wall line — show where it runs past the wall
-  if (q.dim.axis){
-    const along = q.dim.axis === 'x' ? foot.y : foot.x, [lo,hi] = q.dim.span;
-    if (along < lo || along > hi){
-      const end = along < lo ? lo : hi;
-      const E = W2S(q.dim.axis === 'x' ? {x:q.dim.v, y:end} : {x:end, y:q.dim.v});
-      ctx.setLineDash([2,4]);
-      ctx.beginPath(); ctx.moveTo(E.x, E.y); ctx.lineTo(A.x, A.y); ctx.stroke();
-      ctx.setLineDash([]);
-    }
+  if (opts.extendTo){                            // a wall measured past its own end
+    ctx.setLineDash([2,4]);
+    ctx.beginPath(); ctx.moveTo(opts.extendTo.x, opts.extendTo.y); ctx.lineTo(A.x, A.y); ctx.stroke();
+    ctx.setLineDash([]);
   }
-  const a = { x: A.x + nx*DIM.off, y: A.y + ny*DIM.off };
-  const b = { x: B.x + nx*DIM.off, y: B.y + ny*DIM.off };
   // too short for arrowheads to fit between the witness lines: put them outside, pointing in
   const inward = len > DIM.arrow*2.6 ? 1 : -1;
   const ext = inward < 0 ? DIM.arrow*1.4 : 0;
-  ctx.lineWidth = picked ? 2.25 : 1.25;
+  ctx.lineWidth = opts.picked ? 2.25 : 1.25;
   ctx.beginPath();
   ctx.moveTo(a.x - ux*ext, a.y - uy*ext); ctx.lineTo(b.x + ux*ext, b.y + uy*ext);
   ctx.stroke();
   dimArrow(a.x, a.y, -ux*inward, -uy*inward);
   dimArrow(b.x, b.y,  ux*inward,  uy*inward);
-  const txt = fmtLen(q.dim.len, state.unit);
-  const mid = { x:(a.x+b.x)/2, y:(a.y+b.y)/2 };
-  ctx.font = '12px system-ui';
-  dimHits.push({ kind:'dim', p, i, x:mid.x, y:mid.y,
-                 r: Math.max(24, ctx.measureText(txt).width/2 + 9) });
   let ang = Math.atan2(uy, ux);
   if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI;
-  ctx.save();
-  ctx.translate((a.x+b.x)/2, (a.y+b.y)/2); ctx.rotate(ang);
+  const mid = { x:(a.x+b.x)/2, y:(a.y+b.y)/2 }, lift = inward < 0 ? -11 : 0;
+  ctx.translate(mid.x, mid.y); ctx.rotate(ang);
   ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.lineWidth = 5; ctx.strokeStyle = C.halo;   // the halo IS the break in the dimension line
-  ctx.strokeText(txt, 0, inward < 0 ? -11 : 0);
-  ctx.fillStyle = ACCENT; ctx.fillText(txt, 0, inward < 0 ? -11 : 0);
+  ctx.strokeText(txt, 0, lift);
+  ctx.fillStyle = ACCENT; ctx.fillText(txt, 0, lift);
+  const half = Math.max(24, ctx.measureText(txt).width/2 + 9);
   ctx.restore();
+  return { x: mid.x - Math.sin(ang)*lift, y: mid.y + Math.cos(ang)*lift, r: half };
+}
+// Where the anchor and the measured point sit on screen, plus the wall run-past if there is one.
+function dimEnds(q, polys){
+  const foot = dimAnchor(q, q.dim, polys);
+  const out = { A: W2S(foot), B: W2S(q) };
+  if (q.dim.axis){
+    const along = q.dim.axis === 'x' ? foot.y : foot.x, [lo,hi] = q.dim.span;
+    if (along < lo || along > hi){
+      const end = along < lo ? lo : hi;
+      out.extendTo = W2S(q.dim.axis === 'x' ? {x:q.dim.v, y:end} : {x:end, y:q.dim.v});
+    }
+  }
+  return out;
+}
+// Placement is stored in metres so it holds its distance from the drawing as you zoom.
+const dimOffPx = d => (d.off == null ? DIM.off : d.off * view.s);
+function drawDimension(q, p, i){
+  const { A, B, extendTo } = dimEnds(q, state.polys);
+  const box = renderDimension(A, B, fmtLen(q.dim.len, state.unit), dimOffPx(q.dim), {
+    picked: sel && sel.t==='dim' && sel.kind==='dim' && sel.p===p && sel.i===i, extendTo });
+  if (box) dimHits.push({ kind:'dim', p, i, ...box });
+}
+// A locked segment length placed by the tool is drawn as a dimension in its own right.
+function drawSegDimension(pl, p, i){
+  const a = pl.pts[i], b = pl.pts[(i+1) % pl.pts.length];
+  const box = renderDimension(W2S(a), W2S(b), fmtLen(segLen(a,b), state.unit), a.lockOff * view.s,
+    { picked: sel && sel.t==='dim' && sel.kind==='seg' && sel.p===p && sel.i===i });
+  if (box) dimHits.push({ kind:'seg', p, i, ...box });
 }
 
 // Where a value sits on the drawing, so the inline input can open exactly on top of it.
 function dimLabelPos(kind, p, i){
   const pl = state.polys[p];
+  const hit = dimHits.find(h => h.kind === kind && h.p === p && h.i === i);
+  if (hit) return hit;
   if (kind === 'seg'){
     const A = W2S(pl.pts[i]), B = W2S(pl.pts[(i+1) % pl.pts.length]);
     return { x:(A.x+B.x)/2, y:(A.y+B.y)/2 };
   }
   const q = pl.pts[i];
   const A = W2S(dimAnchor(q, q.dim, state.polys)), B = W2S(q);
-  const L = Math.hypot(B.x-A.x, B.y-A.y) || 1;
-  return { x:(A.x+B.x)/2 - (B.y-A.y)/L*DIM.off, y:(A.y+B.y)/2 + (B.x-A.x)/L*DIM.off };
+  const L = Math.hypot(B.x-A.x, B.y-A.y) || 1, off = dimOffPx(q.dim);
+  return { x:(A.x+B.x)/2 - (B.y-A.y)/L*off, y:(A.y+B.y)/2 + (B.x-A.x)/L*off };
 }
 const dimHitAt = (sx, sy) =>
   dimHits.find(h => Math.abs(sx-h.x) <= h.r && Math.abs(sy-h.y) <= 13);
@@ -2685,13 +2705,52 @@ function commitDimEdit(){
   });
   updateAll();
 }
-// One click of the dimension tool: pick a thing, or close the pair and ask for the value.
+// Signed sideways distance, in metres, from the measured line to where the cursor is — this is
+// what the placement click stores, so the dimension keeps its position relative to the drawing.
+function dimPlacement(A, B, sx, sy){
+  const L = Math.hypot(B.x-A.x, B.y-A.y) || 1;
+  const nx = -(B.y-A.y)/L, ny = (B.x-A.x)/L;
+  return ((sx - (A.x+B.x)/2)*nx + (sy - (A.y+B.y)/2)*ny) / view.s;
+}
+// The two screen ends of whatever the tool is about to dimension.
+function dimPendingEnds(pend){
+  if (pend.kind === 'seg'){
+    const pl = state.polys[pend.p];
+    return { A: W2S(pl.pts[pend.i]), B: W2S(pl.pts[(pend.i+1) % pl.pts.length]),
+             txt: fmtLen(segLen(pl.pts[pend.i], pl.pts[(pend.i+1) % pl.pts.length]), state.unit) };
+  }
+  const pt = state.polys[pend.p].pts[pend.i];
+  const ends = dimEnds({ ...pt, dim: pend.anchor }, state.polys);
+  return { ...ends, txt: fmtLen(dimDistance(pt, pend.anchor), state.unit) };
+}
+// One click of the dimension tool: pick a thing, close the pair, or drop the dimension in place.
 function dimToolClick(sx, sy){
+  if (dimTool.pend){                            // second stage: this click places it
+    const pend = dimTool.pend, ends = dimPendingEnds(pend);
+    const off = dimPlacement(ends.A, ends.B, sx, sy);
+    dimTool.pend = null;
+    commitEdit(() => {
+      if (pend.kind === 'seg'){
+        const pl = state.polys[pend.p];
+        setSegLen(state.polys, pend.p, pend.i,
+                  segLen(pl.pts[pend.i], pl.pts[(pend.i+1) % pl.pts.length]));
+        pl.pts[pend.i].lockOff = off;
+      } else {
+        const pt = state.polys[pend.p].pts[pend.i];
+        setPointDim(state.polys, pend.p, pend.i, pend.anchor, dimDistance(pt, pend.anchor));
+        pt.dim.off = off;
+      }
+    });
+    updateAll();
+    openDimEdit({ kind:pend.kind, p:pend.p, i:pend.i });
+    return;
+  }
   const ref = dimRefAt(sx, sy);
   const first = dimTool.a;
   if (!ref){ dimTool.a = null; updateAll(); return; }   // clicking off cancels the pending pick
   if (!first && ref.k === 'seg'){                       // a fence on its own means its own length
-    updateAll(); openDimEdit({ kind:'seg', p:ref.p, i:ref.i }); return;
+    dimTool.a = null; dimTool.pend = { kind:'seg', p:ref.p, i:ref.i };
+    updateAll(); return;
   }
   if (!first || sameDimRef(first, ref)){
     dimTool.a = sameDimRef(first, ref) ? null : ref;    // clicking it again deselects it
@@ -2708,17 +2767,14 @@ function dimToolClick(sx, sy){
     const why = dimRefusal(state.polys, driven.p, driven.i, anchor.p, anchor.i);
     if (why){ alert(why); updateAll(); return; }
   }
-  const pt = state.polys[driven.p].pts[driven.i];
-  commitEdit(() => {
-    const a = dimAnchorRef(anchor, state.polys);
-    setPointDim(state.polys, driven.p, driven.i, a, dimDistance(pt, a));
-  });
+  // hold the anchor as a plain value; the placement click is what actually commits it
+  dimTool.pend = { kind:'dim', p:driven.p, i:driven.i,
+                   anchor: dimAnchorRef(anchor, state.polys) };
   updateAll();
-  openDimEdit({ kind:'dim', p:driven.p, i:driven.i });
 }
 function setDimTool(on){
   closeDimEdit();
-  dimTool = on ? { a:null } : null;
+  dimTool = on ? { a:null, pend:null, at:null } : null;
   dimHover = null;
   if (on){ endLine(); sel = null; }             // the tool owns the canvas while it is armed
   $('bDimTool').classList.toggle('on', !!dimTool);
@@ -2847,7 +2903,8 @@ function doPaint(){
       ctx.setLineDash([]);
       // label — fixed screen size so it stays readable at any zoom
       const px = Math.hypot(B.x-A.x, B.y-A.y);
-      if (px > 44){
+      if (a.lockOff != null) drawSegDimension(pl, p, i);   // placed by the tool: a real dimension
+      else if (px > 44){
         let ang = Math.atan2(B.y-A.y, B.x-A.x);
         if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI;
         const label = (a.lockAfter != null ? '🔒 ' : '') + (a.gateAfter ? 'Gate ' : '') +
@@ -2856,9 +2913,11 @@ function doPaint(){
         ctx.save();
         ctx.translate((A.x+B.x)/2, (A.y+B.y)/2); ctx.rotate(ang);
         ctx.font = '12px system-ui'; ctx.textAlign = 'center';
-        // a locked length is a dimension: selectable and deletable like the rest
-        if (a.lockAfter != null)
-          dimHits.push({ kind:'seg', p, i, x:(A.x+B.x)/2, y:(A.y+B.y)/2 - 7*Math.cos(ang),
+        // a length locked from the panel has no placement, so it stays an inline label —
+        // but it is still a dimension: selectable and deletable like the rest
+        if (a.lockAfter != null && a.lockOff == null)
+          dimHits.push({ kind:'seg', p, i, x:(A.x+B.x)/2 + 7*Math.sin(ang),
+                         y:(A.y+B.y)/2 - 7*Math.cos(ang),
                          r: Math.max(24, ctx.measureText(label).width/2 + 9) });
         ctx.lineWidth = 4; ctx.strokeStyle = C.halo;
         ctx.strokeText(label, 0, -7);
@@ -2956,8 +3015,13 @@ function doPaint(){
     ctx.setLineDash([]);
   }
 
-  // dimension tool: what is held, and what the cursor would grab next
+  // dimension tool: what is held, what the cursor would grab, and where it would land
   if (dimTool){
+    if (dimTool.pend && dimTool.at){            // drag to position, exactly as CAD does it
+      const e = dimPendingEnds(dimTool.pend);
+      renderDimension(e.A, e.B, e.txt, dimPlacement(e.A, e.B, dimTool.at.x, dimTool.at.y)*view.s,
+                      { extendTo: e.extendTo, ghost: true });
+    }
     if (dimTool.a) highlightRef(dimTool.a, true);
     if (dimHover && !sameDimRef(dimHover, dimTool.a)) highlightRef(dimHover, false);
   }
@@ -4043,8 +4107,9 @@ cv.addEventListener('pointermove', e => {
     else orbit(dx, dy);
     paint(); return;
   }
-  // dimension tool: preview what a click would grab, instead of the drawing rubber band
+  // dimension tool: preview where it would land, or what a click would grab
   if (dimTool && !pointers.size && e.pointerType !== 'touch'){
+    if (dimTool.pend){ dimTool.at = { x:e.offsetX, y:e.offsetY }; paint(); return; }
     const nh = dimRefAt(e.offsetX, e.offsetY);
     if ((!nh !== !dimHover) || (nh && !sameDimRef(nh, dimHover))){ dimHover = nh; paint(); }
     return;
@@ -4271,8 +4336,10 @@ window.addEventListener('keydown', e => {
     if (e.key === 'Escape'){ sel = null; updateAll(); }
     return;
   }
-  if (e.key === 'Escape' && dimTool){           // back out one pick at a time, then the tool
-    if (dimTool.a){ dimTool.a = null; updateAll(); } else setDimTool(false);
+  if (e.key === 'Escape' && dimTool){           // back out one stage at a time, then the tool
+    if (dimTool.pend){ dimTool.pend = null; dimTool.at = null; updateAll(); }
+    else if (dimTool.a){ dimTool.a = null; updateAll(); }
+    else setDimTool(false);
     return;
   }
   if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'd'){
@@ -4309,10 +4376,12 @@ function updateHint(){
     return;
   }
   if (dimTool){
-    $('hint').textContent = dimTool.a
-      ? 'Now click the post, building corner or wall to measure from · Esc to undo that pick.'
-      : 'Click a fence to set its length, or a post then a corner, wall or another post · ' +
-        'type the value where it lands · Esc or D to finish.';
+    $('hint').textContent = dimTool.pend
+      ? 'Move to position the dimension, then click to place it · Esc to back out.'
+      : dimTool.a
+      ? 'Now click the post, building corner or wall to measure from · Esc to back out.'
+      : 'Click a fence for its length, or a post then a corner, wall or another post · ' +
+        'Esc or D to leave the tool, then click a dimension to select or delete it.';
     return;
   }
   $('hint').textContent = drawing
