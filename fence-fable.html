@@ -1540,6 +1540,33 @@ function reapplyDims(polys){
     q.x = pos.x; q.y = pos.y;
   }));
 }
+const sharesSegment = (pl, i, j) => {
+  const n = pl.pts.length, d = Math.abs(i - j);
+  return d === 1 || (pl.closed && d === n-1);
+};
+// Following the anchor chain from `other` back to `pt` means the new reference closes a loop:
+// the two ends would each be driving the other. Catches the plain A->B, B->A case as well.
+function dimCycles(polys, pt, other){
+  const seen = new Set();
+  let cur = other;
+  while (cur && cur.dim && cur.dim.pid && !seen.has(cur.dim.pid)){
+    if (cur.dim.pid === pt.pid) return true;
+    seen.add(cur.dim.pid);
+    cur = findPoint(polys, cur.dim.pid);
+  }
+  return false;
+}
+// Why dimensioning point (p,i) off point (hp,hi) would be redundant — the distance between
+// them is already pinned, so a second dimension could only ever contradict the first.
+function dimRefusal(polys, p, i, hp, hi){
+  const pt = polys[p].pts[i], other = polys[hp].pts[hi];
+  if (pt === other) return 'Pick a different point — a point cannot be dimensioned to itself.';
+  if (p === hp && sharesSegment(polys[p], i, hi))
+    return 'Those two points are the ends of one segment. Set its Length on the segment instead.';
+  if (dimCycles(polys, pt, other))
+    return 'Those two points are already dimensioned. Remove that dimension first.';
+  return null;
+}
 function setPointDim(polys, p, i, ref, len){
   const pt = polys[p].pts[i];
   pt.dim = ref.axis ? { axis:ref.axis, v:ref.v, span:ref.span, len }
@@ -1811,6 +1838,20 @@ function freezeTree(value){
   chk(near(ps[0].pts[1].x, 1), 'id survives a renumbering delete');
   ps[0].pts.splice(0, 1); reapplyDims(ps);       // anchor deleted: falls back to its last position
   chk(near(ps[0].pts[0].x, 1), 'deleted anchor falls back to its last position');
+  // a pair whose distance is already pinned must refuse a second, contradictable dimension
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:9,y:0}], closed:false}];
+  chk(dimRefusal(ps, 0, 0, 0, 0), 'refuses dimensioning a point to itself');
+  chk(dimRefusal(ps, 0, 0, 0, 1), 'refuses the two ends of one segment');
+  chk(!dimRefusal(ps, 0, 0, 0, 2), 'allows a non-adjacent pair');
+  chk(dimRefusal([{pts:[{x:0,y:0},{x:5,y:0},{x:9,y:0}], closed:true}], 0, 0, 0, 2),
+      'closed run: first and last share a segment too');
+  ps.push({pts:[{x:0,y:9},{x:5,y:9}], closed:false});
+  chk(!dimRefusal(ps, 0, 0, 1, 0), 'allows a pair on two different runs');
+  setPointDim(ps, 0, 0, { pid: pointId(ps[0].pts[2], ps), x:9, y:0 }, 4);
+  chk(dimRefusal(ps, 0, 2, 0, 0), 'refuses the mirror image of an existing dimension');
+  // A -> B -> C, so C -> A would close the loop
+  setPointDim(ps, 1, 0, { pid: pointId(ps[0].pts[0], ps), x:0, y:0 }, 3);
+  chk(dimRefusal(ps, 0, 2, 1, 0), 'refuses a longer reference cycle');
   // --- 3D geometry ---
   // posts follow the counting model: 10 m at 1.5 m = 7 panels = 8 posts, ends included
   let pa = postsAlong({x:0,y:0}, {x:10,y:0}, 1.5, false);
@@ -3945,18 +3986,22 @@ function handleClick(hit, sx, sy, multi){
   if (dimPick){                                 // picking what a dimension measures from
     const kind = dimPick;
     dimPick = false; cv.style.cursor = '';
-    const w = S2W(sx, sy);
     const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
-    if (pt) commitEdit(() => {
-      let ref;
-      if (kind === 'point'){
-        // must be a different fence point — measuring to itself means nothing
-        if (!hit || hit.t !== 'pt' || (hit.p === sel.p && hit.i === sel.i)) return;
-        const other = state.polys[hit.p].pts[hit.i];
-        ref = { pid: pointId(other, state.polys), x: other.x, y: other.y };
-      } else ref = kind === 'edge' ? nearestEdge(state.builds, w) : nearestCorner(state.builds, w);
-      if (ref) setPointDim(state.polys, sel.p, sel.i, ref, dimDistance(pt, ref));
-    });
+    if (pt && kind === 'point'){
+      if (hit && hit.t === 'pt'){
+        const why = dimRefusal(state.polys, sel.p, sel.i, hit.p, hit.i);
+        if (why) alert(why);                     // already pinned: a second one could only disagree
+        else commitEdit(() => {
+          const other = state.polys[hit.p].pts[hit.i];
+          const ref = { pid: pointId(other, state.polys), x: other.x, y: other.y };
+          setPointDim(state.polys, sel.p, sel.i, ref, dimDistance(pt, ref));
+        });
+      }
+    } else if (pt){
+      const w = S2W(sx, sy);
+      const ref = kind === 'edge' ? nearestEdge(state.builds, w) : nearestCorner(state.builds, w);
+      if (ref) commitEdit(() => setPointDim(state.polys, sel.p, sel.i, ref, dimDistance(pt, ref)));
+    }
     lastSelKey = ''; updateAll(); return;        // force the panel to rebuild with the input
   }
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
