@@ -2494,6 +2494,10 @@ function deleteSelected(){
   if (sel.t==='pt')  deletePoint(state.polys, sel.p, sel.i);
   if (sel.t==='seg') deleteSegment(state.polys, sel.p, sel.i);
   if (sel.t==='bld') deleteBuildings(state.builds, bsel);
+  if (sel.t==='dim'){                           // the dimension goes, the geometry stays put
+    const pt = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+    if (pt){ if (sel.kind === 'seg') pt.lockAfter = null; else delete pt.dim; }
+  }
   sel = null; bsel.clear(); updateAll();
 }
 function clearAll(){
@@ -2572,7 +2576,18 @@ function drawDimension(q, p, i){
   if (len < 1) return;                           // on top of the anchor: nothing to draw
   const ux = (B.x-A.x)/len, uy = (B.y-A.y)/len;  // along the measurement
   const nx = -uy, ny = ux;                       // sideways, where the dimension line sits
-  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.lineWidth = 1; ctx.setLineDash([]);
+  const picked = sel && sel.t==='dim' && sel.kind==='dim' && sel.p===p && sel.i===i;
+  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.setLineDash([]);
+  ctx.lineWidth = picked ? 2 : 1;
+  if (picked){                                   // selection halo, so it reads as picked
+    ctx.save();
+    ctx.globalAlpha = .18; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(A.x + nx*DIM.off, A.y + ny*DIM.off);
+    ctx.lineTo(B.x + nx*DIM.off, B.y + ny*DIM.off);
+    ctx.stroke();
+    ctx.restore();
+  }
   for (const P of [A, B]){                       // witness lines, clear of the geometry
     ctx.beginPath();
     ctx.moveTo(P.x + nx*DIM.gap, P.y + ny*DIM.gap);
@@ -2595,7 +2610,7 @@ function drawDimension(q, p, i){
   // too short for arrowheads to fit between the witness lines: put them outside, pointing in
   const inward = len > DIM.arrow*2.6 ? 1 : -1;
   const ext = inward < 0 ? DIM.arrow*1.4 : 0;
-  ctx.lineWidth = 1.25;
+  ctx.lineWidth = picked ? 2.25 : 1.25;
   ctx.beginPath();
   ctx.moveTo(a.x - ux*ext, a.y - uy*ext); ctx.lineTo(b.x + ux*ext, b.y + uy*ext);
   ctx.stroke();
@@ -2837,12 +2852,17 @@ function doPaint(){
         if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI;
         const label = (a.lockAfter != null ? '🔒 ' : '') + (a.gateAfter ? 'Gate ' : '') +
                       fmtLen(segLen(a,b), state.unit);
+        const dimSel = sel && sel.t==='dim' && sel.kind==='seg' && sel.p===p && sel.i===i;
         ctx.save();
         ctx.translate((A.x+B.x)/2, (A.y+B.y)/2); ctx.rotate(ang);
         ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+        // a locked length is a dimension: selectable and deletable like the rest
+        if (a.lockAfter != null)
+          dimHits.push({ kind:'seg', p, i, x:(A.x+B.x)/2, y:(A.y+B.y)/2 - 7*Math.cos(ang),
+                         r: Math.max(24, ctx.measureText(label).width/2 + 9) });
         ctx.lineWidth = 4; ctx.strokeStyle = C.halo;
         ctx.strokeText(label, 0, -7);
-        ctx.fillStyle = a.gateAfter ? C.gate : C.label;
+        ctx.fillStyle = dimSel ? ACCENT : a.gateAfter ? C.gate : C.label;
         ctx.fillText(label, 0, -7);
         ctx.restore();
       }
@@ -2952,6 +2972,8 @@ function doPaint(){
     if (sel.t==='bld' && state.builds[sel.i]){
       const b = houseBox(state.builds, [...bsel]); a = W2S({ x:b.x+b.w, y:b.y });
     }
+    if (sel.t==='dim' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i])
+      a = dimLabelPos(sel.kind, sel.p, sel.i);
     if (a){
       fdel.style.display = 'block';
       fdel.style.left = Math.max(4, Math.min(cw-48, a.x+16)) + 'px';
@@ -3695,7 +3717,7 @@ let lastSelKey = '';
 function updateSelbox(){
   const box = $('selbox');
   if (readOnly){ box.style.display='none'; return; }
-  const key = sel ? sel.t + '/' + (sel.p ?? '') + '/' + (sel.i ?? '') +
+  const key = sel ? sel.t + '/' + (sel.kind ?? '') + '/' + (sel.p ?? '') + '/' + (sel.i ?? '') +
                     (sel.t==='bld' ? '/' + [...bsel].sort((a,b)=>a-b).join(',') : '') : '';
   if (!sel){ box.style.display='none'; lastSelKey=''; return; }
   box.style.display = 'block';
@@ -3824,6 +3846,26 @@ function updateSelbox(){
     if (document.activeElement !== $('iBW')) $('iBW').value = u==='m' ? +hb.w.toFixed(2) : ftStr(hb.w);
     if (document.activeElement !== $('iBH')) $('iBH').value = u==='m' ? +hb.h.toFixed(2) : ftStr(hb.h);
 
+  } else if (sel.t === 'dim'){
+    const pl = state.polys[sel.p], pt = pl && pl.pts[sel.i];
+    const dim = pt && pt.dim;
+    const kindWord = sel.kind === 'seg' ? 'segment length'
+                   : !dim ? '' : dim.axis ? 'distance to a wall'
+                   : dim.pid ? 'distance to another post' : 'distance to a corner';
+    const value = !pt ? '' : sel.kind === 'seg'
+      ? fmtLen(segLen(pt, pl.pts[(sel.i+1)%pl.pts.length]), u)
+      : dim ? fmtLen(dim.len, u) : '';
+    if (key !== lastSelKey){
+      box.innerHTML = '<h2>Selected dimension</h2>' +
+        '<div class="row"><span id="dimKind"></span><b id="dimSelVal"></b></div>' +
+        '<button id="bDimDel" class="danger" style="width:100%">Remove dimension</button>' +
+        '<p class="note">Double-click it on the drawing to retype the value. ' +
+        'Removing it leaves the geometry where it is.</p>';
+      $('bDimDel').addEventListener('click', deleteSelected);
+    }
+    $('dimKind').textContent = kindWord;
+    $('dimSelVal').textContent = value;
+
   } else {
     const pl = state.polys[sel.p];
     // an end of an open run can be picked back up and drawn from
@@ -3871,6 +3913,10 @@ function updateAll(){
   // drop any selection that no longer points at a live object
   if (sel){
     if (sel.t==='bld' && !state.builds[sel.i]) sel = null;
+    else if (sel.t==='dim'){                    // gone once its point, dim or lock goes
+      const pt = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+      if (!pt || (sel.kind === 'seg' ? pt.lockAfter == null : !pt.dim)) sel = null;
+    }
     else if ((sel.t==='pt' || sel.t==='seg') &&
              (!state.polys[sel.p] || sel.i >= (sel.t==='pt' ? state.polys[sel.p].pts.length
                                                             : segsOf(state.polys[sel.p]).length))) sel = null;
@@ -4131,6 +4177,12 @@ function pointerEnd(e){
     pend = null; drag = null;
   }
 }
+// double-click a dimension to retype its value, the way a CAD sketch does
+cv.addEventListener('dblclick', e => {
+  if (readOnly || mode3d || dimTool) return;
+  const lab = dimHitAt(e.offsetX, e.offsetY);
+  if (lab){ e.preventDefault(); openDimEdit(lab); }
+});
 cv.addEventListener('pointerup', pointerEnd);
 cv.addEventListener('pointercancel', pointerEnd);
 cv.addEventListener('pointerleave', () => {
@@ -4160,8 +4212,11 @@ function resumeLine(p, i){
 function handleClick(hit, sx, sy, multi){
   if (readOnly) return;
   if (dimTool){ dimToolClick(sx, sy); return; }
-  const lab = dimHitAt(sx, sy);                 // click a value to retype it, where it sits
-  if (lab){ openDimEdit(lab); return; }
+  const lab = dimHitAt(sx, sy);                 // a dimension selects like any other entity
+  if (lab && !drawTarget()){
+    sel = { t:'dim', kind:lab.kind, p:lab.p, i:lab.i };
+    bsel.clear(); updateAll(); return;
+  }
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
   if (hit && hit.label){
     if (drawTarget()) endLine();
