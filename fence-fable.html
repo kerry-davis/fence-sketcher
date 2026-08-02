@@ -1589,7 +1589,20 @@ function setCornerAngle(polys, p, k, deg, fwd){
   const delta = want - m.signed;
   if (fwd) rotatePts(pl.pts, k+1, pl.pts.length-1, V.x, V.y, delta);
   else     rotatePts(pl.pts, 0, k-1, V.x, V.y, -delta);
-  pl.pts[k].ang = { ...(pl.pts[k].ang || {}), deg: Math.abs(want) * 180/Math.PI, fwd };
+  const prev = pl.pts[k].ang || {};
+  // `d` tracks everything this dimension has swung, always in the "after the corner" sense,
+  // so the side can be swapped later by winding the whole run back through it.
+  pl.pts[k].ang = { ...prev, deg: Math.abs(want) * 180/Math.PI, fwd, d: (prev.d || 0) + delta };
+}
+// Put the movement on the other leg. Undoing the swing on one side and applying it to the other
+// works out to one rotation of the whole run about the corner, so the angle itself never changes
+// — only which end of the fence ended up displaced.
+function swapAngleSide(polys, p, k){
+  const pl = polys[p], pt = pl.pts[k];
+  if (!pt || !pt.ang) return;
+  const V = { x: pt.x, y: pt.y }, d = pt.ang.d || 0;
+  if (d) rotatePts(pl.pts, 0, pl.pts.length-1, V.x, V.y, pt.ang.fwd ? -d : d);
+  pt.ang.fwd = !pt.ang.fwd;
 }
 // Two picked fences make an angle only where they meet at a shared post of one open run.
 // The second one clicked is the leg that swings, matching how the second entity gives way.
@@ -1907,6 +1920,23 @@ function freezeTree(value){
   chk(near(ps[0].pts[2].x, heldEnd.x) && near(ps[0].pts[2].y, heldEnd.y),
       'the leg after the corner is the one left alone this time');
   chk(Math.abs(ps[0].pts[0].x - movedEnd) > 1, 'the leg before the corner is what swung');
+  // swapping the moving side keeps the angle and hands the displacement to the other end
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  const home = ps[0].pts.map(q => ({x:q.x, y:q.y}));
+  setCornerAngle(ps, 0, 1, 45, true);            // the far end swings, the near end holds
+  chk(near(ps[0].pts[0].x, home[0].x) && near(ps[0].pts[0].y, home[0].y), 'near end held');
+  const swung = ps[0].pts.map(q => ({x:q.x, y:q.y}));
+  swapAngleSide(ps, 0, 1);
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 45), 'swapping does not disturb the angle');
+  chk(near(ps[0].pts[2].x, home[2].x) && near(ps[0].pts[2].y, home[2].y),
+      'after the swap the far end is back where it started');
+  chk(Math.hypot(ps[0].pts[0].x-home[0].x, ps[0].pts[0].y-home[0].y) > 1,
+      'and the near end is the one that moved instead');
+  chk(ps[0].pts[1].ang.fwd === false, 'the swap is recorded');
+  swapAngleSide(ps, 0, 1);                       // and back again
+  chk(ps[0].pts.every((q, j) => near(q.x, swung[j].x) && near(q.y, swung[j].y)),
+      'swapping back restores the first arrangement exactly');
+  chk(ps[0].pts[1].ang.fwd === true, 'and the recorded side goes back too');
   // two fences make an angle only where they share a post of one open run
   const ap = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:9}], closed:false},
               {pts:[{x:0,y:9},{x:4,y:9}], closed:false}];
@@ -4156,13 +4186,27 @@ function updateSelbox(){
     if (key !== lastSelKey){
       box.innerHTML = '<h2>Selected dimension</h2>' +
         '<div class="row"><span id="dimKind"></span><b id="dimSelVal"></b></div>' +
+        (sel.kind === 'ang'
+          ? '<div class="row"><span>Moves</span><b id="angSide"></b></div>' +
+            '<button id="bAngSwap" style="width:100%">⇄ Swap the side that moves</button>'
+          : '') +
         '<button id="bDimDel" class="danger" style="width:100%">Remove dimension</button>' +
-        '<p class="note">Double-click it on the drawing to retype the value. ' +
+        '<p class="note" id="dimSelNote">Double-click it on the drawing to retype the value. ' +
         'Removing it leaves the geometry where it is.</p>';
       $('bDimDel').addEventListener('click', deleteSelected);
+      if ($('bAngSwap')) $('bAngSwap').addEventListener('click', () => {
+        if (sel && sel.t==='dim' && sel.kind==='ang' &&
+            commitEdit(() => swapAngleSide(state.polys, sel.p, sel.i))) updateAll();
+      });
     }
     $('dimKind').textContent = kindWord;
     $('dimSelVal').textContent = value;
+    if ($('angSide') && pt && pt.ang){
+      const ends = physicalEndLabels(pl);
+      $('angSide').textContent = pt.ang.fwd ? ends.end + ' side' : ends.start + ' side';
+      $('dimSelNote').textContent = 'Double-click it on the drawing to retype the angle. ' +
+        'Swapping winds the run round the corner so the other end is the one that moved.';
+    }
 
   } else {
     const pl = state.polys[sel.p];
