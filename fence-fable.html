@@ -950,6 +950,24 @@ function segsOf(pl){                          // -> [[i, a, b], ...] for each se
   return out;
 }
 const segLen = (a,b) => Math.hypot(b.x-a.x, b.y-a.y);
+const FENCE_JOIN_TOL = 1e-4;
+function joinedFenceAngle(polys, p, i){
+  const point = polys[p] && polys[p].pts[i];
+  if (!point) return null;
+  const rays = [], samePoint = q => Math.hypot(q.x-point.x, q.y-point.y) < FENCE_JOIN_TOL;
+  polys.forEach(pl => {
+    for (const [,a,b] of segsOf(pl)){
+      if (segLen(a,b) < 1e-9) continue;
+      if (samePoint(a)) rays.push({x:b.x-point.x, y:b.y-point.y});
+      if (samePoint(b)) rays.push({x:a.x-point.x, y:a.y-point.y});
+    }
+  });
+  if (rays.length !== 2) return null;
+  const lengths = rays.map(ray => Math.hypot(ray.x,ray.y));
+  const dot = (rays[0].x*rays[1].x + rays[0].y*rays[1].y) / (lengths[0]*lengths[1]);
+  return { rays, degrees:Math.acos(Math.max(-1,Math.min(1,dot))) * 180/Math.PI };
+}
+const formatFenceAngle = degrees => (Math.round(degrees*10)/10).toFixed(1) + '°';
 const gateOnly = pl => segsOf(pl).length > 0 && segsOf(pl).every(([,a]) => a.gateAfter);
 const defaultFenceName = (pl, i) => (gateOnly(pl) ? 'Gate ' : 'Fence ') + (i+1);
 const fenceName = (pl, i) => String(pl.name || '').trim() || defaultFenceName(pl, i);
@@ -1556,6 +1574,12 @@ function freezeTree(value){
   m = calcMaterials([{pts:[{x:0,y:0},{x:10,y:0}], closed:false},
                      {pts:[{x:10,y:0},{x:10,y:10}], closed:false}], mat15);
   chk(m.shared===1 && m.posts===15, 'shared junction post');
+  const cornerTurn = 131.2 * Math.PI/180;
+  const joinedAngle = joinedFenceAngle([
+    {pts:[{x:1,y:0},{x:0,y:0}],closed:false},
+    {pts:[{x:0,y:0},{x:Math.cos(cornerTurn),y:Math.sin(cornerTurn)}],closed:false},
+  ], 0, 1);
+  chk(joinedAngle && near(joinedAngle.degrees,131.2), 'joined fence angle');
   m = calcMaterials([{pts:[{x:0,y:0},{x:10,y:0}], closed:false, excludeMaterials:true},
                      {pts:[{x:10,y:0},{x:20,y:0}], closed:false}], mat15);
   chk(m.shared===0 && m.posts===8, 'excluded run does not suppress an included end post');
@@ -1859,6 +1883,45 @@ function fenceLabelLayout(pl, p){
   x = Math.max(w/2+4, Math.min(cw-w/2-4, x));
   y = Math.max(h/2+4, Math.min(ch-h/2-4, y));
   return { p, i, text, x, y, w, h, mx, my };
+}
+function drawCornerAngle(p, i, measure){
+  const point = state.polys[p] && state.polys[p].pts[i];
+  if (!measure || !point) return;
+  const P = W2S(point), rays = measure.rays.map(ray => {
+    const end = W2S({x:point.x+ray.x, y:point.y+ray.y});
+    return {angle:Math.atan2(end.y-P.y,end.x-P.x), length:Math.hypot(end.x-P.x,end.y-P.y)};
+  });
+  const start = rays[0].angle;
+  const delta = Math.atan2(Math.sin(rays[1].angle-start), Math.cos(rays[1].angle-start));
+  const mid = start + delta/2, radius = Math.max(22, Math.min(38, Math.min(...rays.map(ray => ray.length))*.38));
+  const label = formatFenceAngle(measure.degrees), textRadius = radius + 16;
+  const selectedPoint = sel && sel.t === 'pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+  const selected = selectedPoint && Math.hypot(selectedPoint.x-point.x, selectedPoint.y-point.y) < FENCE_JOIN_TOL;
+  let x = P.x + Math.cos(mid)*textRadius, y = P.y + Math.sin(mid)*textRadius;
+  ctx.save();
+  ctx.font = '700 12px system-ui';
+  const w = ctx.measureText(label).width + 10;
+  x = Math.max(w/2+4, Math.min(cw-w/2-4, x));
+  y = Math.max(12, Math.min(ch-12, y));
+  ctx.beginPath();
+  ctx.arc(P.x, P.y, radius, start, start+delta, delta < 0);
+  ctx.lineWidth = 5; ctx.strokeStyle = C.halo; ctx.stroke();
+  ctx.lineWidth = 2; ctx.strokeStyle = selected ? ACCENT : C.label; ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 4; ctx.strokeStyle = C.halo; ctx.strokeText(label, x, y);
+  ctx.fillStyle = selected ? ACCENT : C.label; ctx.fillText(label, x, y);
+  ctx.restore();
+}
+function drawCornerAngles(){
+  if (!sel || (sel.t !== 'seg' && sel.t !== 'pt') || !state.polys[sel.p]) return;
+  const seen = [];
+  const pl = state.polys[sel.p], p = sel.p;
+  pl.pts.forEach((point, i) => {
+    const measure = joinedFenceAngle(state.polys, p, i);
+    if (!measure || (measure.degrees > 179.9 && !(sel && sel.t === 'pt' && sel.p === p && sel.i === i)) ||
+        seen.some(q => Math.hypot(q.x-point.x, q.y-point.y) < FENCE_JOIN_TOL)) return;
+    seen.push(point); drawCornerAngle(p, i, measure);
+  });
 }
 function zoomAt(sx, sy, factor){
   const w = S2W(sx, sy);
@@ -2404,6 +2467,8 @@ function doPaint(){
       ctx.globalAlpha = 1;
     }
   });
+
+  drawCornerAngles();
 
   // dashed guides back to whatever post/corner the point lined up with
   const gd = (hover && hover.guides) || ((drag && drag.t === 'pt') ? guides : null);
@@ -3341,11 +3406,18 @@ function updateSelbox(){
     const isFinish = pl && !pl.closed && sel.i === pl.pts.length-1;
     const isEnd = isStart || isFinish;
     const endLabels = physicalEndLabels(pl);
+    const cornerAngle = joinedFenceAngle(state.polys, sel.p, sel.i);
     if (key !== lastSelKey){
       box.innerHTML = '<h2>Selected '+(isStart ? endLabels.start : isFinish ? endLabels.end : 'fence point')+'</h2>' +
         (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
-        '<p class="note">Drag to move. Deleting it joins the neighbouring segments.</p>';
+        '<div class="row" id="cornerAngleRow" style="display:none"><span>Corner angle</span><b id="cornerAngle"></b></div>' +
+        '<p class="note">Drag to move. Deleting it joins the neighbouring segments. Select a fence to show its joined-post angles.</p>';
       if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
+    }
+    const cornerAngleRow = $('cornerAngleRow');
+    if (cornerAngleRow){
+      cornerAngleRow.style.display = cornerAngle ? '' : 'none';
+      $('cornerAngle').textContent = cornerAngle ? formatFenceAngle(cornerAngle.degrees) : '';
     }
   }
   // bring the panel into view when the selection changes (it lives at the top of the sidebar)
