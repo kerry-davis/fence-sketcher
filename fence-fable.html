@@ -5829,7 +5829,7 @@ async function refreshSharedDrawings(){
   } catch(error) {
     sharedItems = [];
     renderSharedDrawings();
-    setPickMessage(error.message);
+    setPickMessage(error.message, 'shares');
     setBkStatus(error.message, 'error');
   }
 }
@@ -5846,7 +5846,10 @@ const ICON_FOLDER =
 const ICON_SHARE =
   `<svg viewBox="0 0 24 24" fill="none"><circle cx="18" cy="5" r="3" stroke-width="1.8"/><circle cx="6" cy="12" r="3" stroke-width="1.8"/><circle cx="18" cy="19" r="3" stroke-width="1.8"/><path d="m8.7 13.5 6.6 3.9M15.3 6.6 8.7 10.5" stroke-width="1.8" stroke-linecap="round"/></svg>`;
 const savedWhen = mtime => mtime ? 'Saved ' + new Date(mtime).toLocaleString() : 'Saved drawing';
-const setPickMessage = text => { $('pickEmpty').textContent = text; };
+// one dialog serves both modes, so a message only lands if its own list is showing
+const setPickMessage = (text, mode='') => {
+  if (!mode || mode === pickMode) $('pickEmpty').textContent = text;
+};
 function pickAll(){ return pickMode === 'shares' ? sharedItems : bkItems; }
 function pickMatches(items, query){
   const needle = query.trim().toLowerCase();
@@ -6042,7 +6045,7 @@ async function refreshBackups(){
     $('bkSec').style.display = '';
     syncBkActions();
     renderPicker();
-    setPickMessage(e.message);
+    setPickMessage(e.message, 'drawings');
     setBkStatus(e.message + ' Full external backup requires the file server.', 'error');
   }
 }

@@ -30,6 +30,12 @@ test('the menu holds no unbounded list — drawings and shares live in the picke
   assert.match(html, /\.pickList\{[^}]*max-height:min\(52vh,340px\);overflow-y:auto/);
 });
 
+test('a failed refresh only speaks to the list that is showing', () => {
+  assert.match(html, /const setPickMessage = \(text, mode=''\) => \{\s*\n\s*if \(!mode \|\| mode === pickMode\)/);
+  assert.match(html, /setPickMessage\(error\.message, 'shares'\)/);
+  assert.match(html, /setPickMessage\(e\.message, 'drawings'\)/);
+});
+
 test('the picker acts on names, so filtering cannot mis-target a row', () => {
   assert.doesNotMatch(html, /data-share-index|dataset\.shareIndex/);
   assert.match(html, /sharedItems\.find\(share => share\.name === name\)/);
