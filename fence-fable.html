@@ -139,6 +139,13 @@
   #gridcap{position:absolute;left:12px;bottom:10px;font-size:12px;color:var(--muted);
            background:var(--chip);padding:3px 9px;border-radius:7px;pointer-events:none}
   /* floating delete button next to the selected object (works with touch) */
+  #bDimTool.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  #bDimTool.on svg{stroke:#fff}
+  /* the dimension value, edited where it sits on the drawing instead of in the side panel */
+  #dimin{position:absolute;display:none;width:104px;padding:5px 8px;text-align:center;
+         font:700 13px var(--font);color:var(--ink);background:var(--card);
+         border:2px solid var(--accent);border-radius:9px;box-shadow:var(--shadow-2);z-index:6}
+  #dimin:focus{outline:none;box-shadow:0 0 0 4px var(--accent-soft),var(--shadow-2)}
   #fdel{position:absolute;display:none;width:44px;height:44px;border-radius:50%;padding:0;
         background:var(--danger);color:#fff;border:0;font-size:18px;line-height:44px;
         box-shadow:0 4px 12px rgb(225 29 72/.4)}
@@ -410,6 +417,11 @@
               stroke-linecap="round" stroke-linejoin="round"/>
       </svg>Building</button>
     <button id="bClose">Close loop</button>
+    <button id="bDimTool" title="Dimension (D) — click two things on the drawing">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M3 12h18M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3M6 5v14M18 5v14"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>Dimension</button>
   </div>
   <div class="grp sec editorOnly">
     <button id="bClear" class="danger">Clear all</button>
@@ -553,6 +565,8 @@
               aria-label="Orbit speed: 15 degrees per second">15°</button>
     </div>
     <button id="fdel" class="editorOnly" title="Delete">✕</button>
+    <input id="dimin" class="editorOnly" inputmode="text" autocomplete="off"
+           aria-label="Dimension value">
     <div id="gridcap" title="Grid spacing adapts automatically as you zoom"></div>
     <div id="shareState" role="status" aria-live="polite">
       <div class="shareStateCard">
@@ -936,7 +950,12 @@ let postShapeScope = 'fence';                 // current Post shape dropdown sco
 let postShapePointKey = '';                   // selected point whose scope is being shown
 let bsel = new Set();                         // selected building members (whole groups expand here)
 let showAllTotals = false;
-let dimPick = false;                          // next canvas click picks a dimension's anchor corner
+/* Dimensioning happens on the drawing, not in the panel: arm the tool, click the two things
+   being measured, then type the value where it lands. `a` holds the first pick. */
+let dimTool = null;                           // null | { a: ref | null }
+let dimHover = null;                          // reference under the cursor, highlighted while armed
+let dimHits = [];                             // value label boxes, captured at paint time
+let dimEdit = null;                           // { kind:'dim'|'seg', p, i } while the input is open
 let undoStack = [], redoStack = [];
 
 /* =====================================================================
@@ -2342,6 +2361,48 @@ function pick(sx, sy){
   return null;
 }
 
+/* What sits under the cursor that a dimension could measure, in the order a click should
+   prefer them: a post beats the corner behind it, a fence beats the wall behind it. */
+function dimRefAt(sx, sy){
+  for (let p = state.polys.length-1; p >= 0; p--)
+    for (let i = state.polys[p].pts.length-1; i >= 0; i--){
+      const s = W2S(state.polys[p].pts[i]);
+      if (Math.hypot(sx-s.x, sy-s.y) < HIT.pt) return { k:'pt', p, i };
+    }
+  const w = S2W(sx, sy);
+  const c = nearestCorner(state.builds, w);
+  if (c && c.d * view.s < HIT.corner) return { k:'cnr', x:c.x, y:c.y };
+  for (let p = state.polys.length-1; p >= 0; p--)
+    for (const [i,a,b] of segsOf(state.polys[p])){
+      const A = W2S(a), B = W2S(b);
+      if (dist2seg(sx,sy, A.x,A.y, B.x,B.y).d < HIT.seg) return { k:'seg', p, i };
+    }
+  const e = nearestEdge(state.builds, w);
+  if (e && e.d * view.s < HIT.edge) return { k:'wall', axis:e.axis, v:e.v, span:e.span };
+  return null;
+}
+const sameDimRef = (a, b) => !!a && !!b && a.k === b.k &&
+  (a.k === 'pt' || a.k === 'seg' ? a.p === b.p && a.i === b.i
+   : a.k === 'cnr' ? a.x === b.x && a.y === b.y
+   : a.axis === b.axis && a.v === b.v);
+// Only a fence point can be moved to satisfy a dimension, so one end of the pair must be one.
+// With two, the second click is the one that gives way — the same order Onshape drives in.
+// A fence segment is only ever measured on its own (its length), never used as an anchor.
+function dimPairing(first, second){
+  const anchorable = r => r.k === 'pt' || r.k === 'cnr' || r.k === 'wall';
+  if (second.k === 'pt' && anchorable(first)) return { driven: second, ref: first };
+  if (first.k === 'pt' && anchorable(second)) return { driven: first,  ref: second };
+  return null;
+}
+// A picked reference in the shape setPointDim stores. Mutates on 'pt' (assigns the anchor its
+// stable id), so it belongs inside the commitEdit that follows.
+function dimAnchorRef(ref, polys){
+  if (ref.k === 'cnr')  return { x:ref.x, y:ref.y };
+  if (ref.k === 'wall') return { axis:ref.axis, v:ref.v, span:ref.span };
+  const q = polys[ref.p].pts[ref.i];
+  return { pid: pointId(q, polys), x:q.x, y:q.y };
+}
+
 /* =====================================================================
    Mutations — every one snapshots first so Undo reverses it
    ===================================================================== */
@@ -2504,7 +2565,7 @@ function dimArrow(x, y, ux, uy){                 // filled triangle, tip at (x,y
   ctx.lineTo(x - ux*DIM.arrow + uy*DIM.half, y - uy*DIM.arrow - ux*DIM.half);
   ctx.closePath(); ctx.fill();
 }
-function drawDimension(q){
+function drawDimension(q, p, i){
   const foot = dimAnchor(q, q.dim, state.polys);
   const A = W2S(foot), B = W2S(q);
   const len = Math.hypot(B.x-A.x, B.y-A.y);
@@ -2541,6 +2602,10 @@ function drawDimension(q){
   dimArrow(a.x, a.y, -ux*inward, -uy*inward);
   dimArrow(b.x, b.y,  ux*inward,  uy*inward);
   const txt = fmtLen(q.dim.len, state.unit);
+  const mid = { x:(a.x+b.x)/2, y:(a.y+b.y)/2 };
+  ctx.font = '12px system-ui';
+  dimHits.push({ kind:'dim', p, i, x:mid.x, y:mid.y,
+                 r: Math.max(24, ctx.measureText(txt).width/2 + 9) });
   let ang = Math.atan2(uy, ux);
   if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI;
   ctx.save();
@@ -2552,11 +2617,132 @@ function drawDimension(q){
   ctx.restore();
 }
 
+// Where a value sits on the drawing, so the inline input can open exactly on top of it.
+function dimLabelPos(kind, p, i){
+  const pl = state.polys[p];
+  if (kind === 'seg'){
+    const A = W2S(pl.pts[i]), B = W2S(pl.pts[(i+1) % pl.pts.length]);
+    return { x:(A.x+B.x)/2, y:(A.y+B.y)/2 };
+  }
+  const q = pl.pts[i];
+  const A = W2S(dimAnchor(q, q.dim, state.polys)), B = W2S(q);
+  const L = Math.hypot(B.x-A.x, B.y-A.y) || 1;
+  return { x:(A.x+B.x)/2 - (B.y-A.y)/L*DIM.off, y:(A.y+B.y)/2 + (B.x-A.x)/L*DIM.off };
+}
+const dimHitAt = (sx, sy) =>
+  dimHits.find(h => Math.abs(sx-h.x) <= h.r && Math.abs(sy-h.y) <= 13);
+
+function openDimEdit(target){
+  const pl = state.polys[target.p];
+  if (readOnly || !pl || !pl.pts[target.i]) return;
+  const pt = pl.pts[target.i];
+  const cur = target.kind === 'seg' ? segLen(pt, pl.pts[(target.i+1) % pl.pts.length])
+                                    : pt.dim && pt.dim.len;
+  if (cur == null) return;
+  dimEdit = target;
+  const pos = dimLabelPos(target.kind, target.p, target.i);
+  const el = $('dimin');
+  el.style.display = 'block';
+  el.style.left = Math.max(4, Math.min(cw-112, pos.x-54)) + 'px';
+  el.style.top  = Math.max(4, Math.min(ch-38,  pos.y-15)) + 'px';
+  el.value = state.unit === 'm' ? +cur.toFixed(3) : ftStr(cur);
+  el.focus(); el.select();
+  paint();
+}
+function closeDimEdit(){
+  if (!dimEdit) return;
+  dimEdit = null;
+  const el = $('dimin');
+  el.style.display = 'none';
+  if (document.activeElement === el) el.blur();  // else the hidden input keeps eating shortcuts
+  paint();
+}
+function commitDimEdit(){
+  const t = dimEdit;
+  if (!t) return;
+  const typed = $('dimin').value;
+  closeDimEdit();                                // before the work, so the blur can't re-enter
+  const v = parseLen(typed, state.unit), pl = state.polys[t.p];
+  if (v == null || v <= 0.01 || !pl || !pl.pts[t.i]) return;
+  commitEdit(() => {
+    if (t.kind === 'seg') setSegLen(state.polys, t.p, t.i, v);
+    else if (pl.pts[t.i].dim) setPointDim(state.polys, t.p, t.i, pl.pts[t.i].dim, v);
+  });
+  updateAll();
+}
+// One click of the dimension tool: pick a thing, or close the pair and ask for the value.
+function dimToolClick(sx, sy){
+  const ref = dimRefAt(sx, sy);
+  const first = dimTool.a;
+  if (!ref){ dimTool.a = null; updateAll(); return; }   // clicking off cancels the pending pick
+  if (!first && ref.k === 'seg'){                       // a fence on its own means its own length
+    updateAll(); openDimEdit({ kind:'seg', p:ref.p, i:ref.i }); return;
+  }
+  if (!first || sameDimRef(first, ref)){
+    dimTool.a = sameDimRef(first, ref) ? null : ref;    // clicking it again deselects it
+    updateAll(); return;
+  }
+  dimTool.a = null;
+  const pair = dimPairing(first, ref);
+  if (!pair){
+    alert('One end has to be a fence post — a building never moves to satisfy a dimension.');
+    updateAll(); return;
+  }
+  const { driven, ref: anchor } = pair;
+  if (anchor.k === 'pt'){
+    const why = dimRefusal(state.polys, driven.p, driven.i, anchor.p, anchor.i);
+    if (why){ alert(why); updateAll(); return; }
+  }
+  const pt = state.polys[driven.p].pts[driven.i];
+  commitEdit(() => {
+    const a = dimAnchorRef(anchor, state.polys);
+    setPointDim(state.polys, driven.p, driven.i, a, dimDistance(pt, a));
+  });
+  updateAll();
+  openDimEdit({ kind:'dim', p:driven.p, i:driven.i });
+}
+function setDimTool(on){
+  closeDimEdit();
+  dimTool = on ? { a:null } : null;
+  dimHover = null;
+  if (on){ endLine(); sel = null; }             // the tool owns the canvas while it is armed
+  $('bDimTool').classList.toggle('on', !!dimTool);
+  $('bDimTool').setAttribute('aria-pressed', String(!!dimTool));
+  cv.style.cursor = dimTool ? 'crosshair' : '';
+  updateAll();
+}
+// Show what a click would grab, and what is already held.
+function highlightRef(ref, held){
+  ctx.save();
+  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT;
+  ctx.lineWidth = held ? 3 : 2; ctx.setLineDash([]);
+  if (ref.k === 'pt' || ref.k === 'cnr'){
+    const S = W2S(ref.k === 'pt' ? state.polys[ref.p].pts[ref.i] : ref);
+    ctx.globalAlpha = held ? .22 : .14;
+    ctx.beginPath(); ctx.arc(S.x, S.y, 11, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(S.x, S.y, 11, 0, 7); ctx.stroke();
+  } else {
+    let A, B;
+    if (ref.k === 'seg'){
+      const pl = state.polys[ref.p];
+      A = W2S(pl.pts[ref.i]); B = W2S(pl.pts[(ref.i+1) % pl.pts.length]);
+    } else {
+      A = W2S(ref.axis === 'x' ? {x:ref.v, y:ref.span[0]} : {x:ref.span[0], y:ref.v});
+      B = W2S(ref.axis === 'x' ? {x:ref.v, y:ref.span[1]} : {x:ref.span[1], y:ref.v});
+    }
+    ctx.globalAlpha = held ? .6 : .4; ctx.lineWidth = held ? 7 : 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 let raf = 0;
 function paint(){ if (!raf) raf = requestAnimationFrame(doPaint); }
 function doPaint(){
   raf = 0;
   ctx.clearRect(0,0,cw,ch);
+  dimHits = [];                                 // rebuilt as the dimensions draw
   if (mode3d){ fdel.style.display = 'none'; paint3d(); return; }
 
   // --- grid: spacing follows zoom, keeping squares readable without manual controls ---
@@ -2676,7 +2862,7 @@ function doPaint(){
       ctx.lineWidth = 2; ctx.strokeStyle = isSel ? ACCENT : C.fence; ctx.stroke();
       ctx.globalAlpha = 1;
     });
-    pl.pts.forEach(q => { if (q.dim) drawDimension(q); });
+    pl.pts.forEach((q, i) => { if (q.dim) drawDimension(q, p, i); });
 
     // Match the per-fence materials list to the plan with a compact badge.
     const tag = showFenceLabels3 ? fenceLabelLayout(pl, p) : null;
@@ -2750,8 +2936,13 @@ function doPaint(){
     ctx.setLineDash([]);
   }
 
+  // dimension tool: what is held, and what the cursor would grab next
+  if (dimTool){
+    if (dimTool.a) highlightRef(dimTool.a, true);
+    if (dimHover && !sameDimRef(dimHover, dimTool.a)) highlightRef(dimHover, false);
+  }
   // floating delete button beside the selection (the touch-friendly delete)
-  if (sel){
+  if (sel && !dimTool){
     let a = null;
     if (sel.t==='pt'  && state.polys[sel.p]) a = W2S(state.polys[sel.p].pts[sel.i]);
     if (sel.t==='seg' && state.polys[sel.p]){
@@ -3645,33 +3836,12 @@ function updateSelbox(){
       box.innerHTML = '<h2>Selected '+(isStart ? endLabels.start : isFinish ? endLabels.end : 'fence point')+'</h2>' +
         (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
         '<div class="row" id="cornerAngleRow" style="display:none"><span>Corner angle</span><b id="cornerAngle"></b></div>' +
-        '<div class="grp"><button id="bDim" style="flex:1">📐 Corner</button>' +
-          '<button id="bDimEdge" style="flex:1">📐 Wall</button>' +
-          '<button id="bDimPt" style="flex:1">📐 Point</button></div>' +
         '<div class="row" id="dimRow" style="display:none"><span id="dimLabel">To corner</span>' +
-          '<span><input id="iDim" inputmode="text"> <span class="unit">'+(u==='m'?'m':'')+'</span></span></div>' +
+          '<b id="dimVal"></b></div>' +
         '<button id="bDimClear" style="width:100%;display:none">Remove dimension</button>' +
-        '<p class="note" id="dimNote">Drag to move. Deleting it joins the neighbouring segments. Select a fence to show its joined-post angles.</p>';
+        '<p class="note" id="dimNote">Drag to move. Deleting it joins the neighbouring segments. ' +
+        'Press D for the dimension tool, or click any value on the drawing to retype it.</p>';
       if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
-      const armDim = kind => {
-        if (kind !== 'point' && !state.builds.length){
-          alert('Draw a building first — corner and wall dimensions anchor to it.'); return;
-        }
-        dimPick = kind; cv.style.cursor = 'crosshair';
-        $('dimNote').textContent = kind === 'edge' ? 'Click the building wall to measure from.'
-                                 : kind === 'point' ? 'Click the other fence point to measure from.'
-                                 : 'Click the building corner to measure from.';
-      };
-      $('bDim').addEventListener('click', () => armDim('corner'));
-      $('bDimEdge').addEventListener('click', () => armDim('edge'));
-      $('bDimPt').addEventListener('click', () => armDim('point'));
-      $('iDim').addEventListener('change', e => {
-        const v = parseLen(e.target.value, state.unit);
-        const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
-        if (v != null && v > 0 && pt && pt.dim)
-          commitEdit(() => setPointDim(state.polys, sel.p, sel.i, pt.dim, v)) && updateAll();
-        else updateSelbox();
-      });
       $('bDimClear').addEventListener('click', () => {
         const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
         if (pt && commitEdit(() => { delete pt.dim; })) updateAll();
@@ -3684,8 +3854,7 @@ function updateSelbox(){
       $('bDimClear').style.display = has ? '' : 'none';
       $('dimLabel').textContent = !has ? '' : selPt.dim.axis ? 'To wall'
                                             : selPt.dim.pid ? 'To point' : 'To corner';
-      if (has && document.activeElement !== $('iDim'))
-        $('iDim').value = u==='m' ? +selPt.dim.len.toFixed(3) : ftStr(selPt.dim.len);
+      if (has) $('dimVal').textContent = fmtLen(selPt.dim.len, u);
     }
     const cornerAngleRow = $('cornerAngleRow');
     if (cornerAngleRow){
@@ -3789,7 +3958,8 @@ cv.addEventListener('pointerdown', e => {
     return;
   }
   if (e.button === 2){ drag = { t:'pan' }; return; }
-  pend = { hit: pick(e.offsetX, e.offsetY), x:e.offsetX, y:e.offsetY, moved:false,
+  // while the tool is armed a press must not start a drag — every click is a pick
+  pend = { hit: dimTool ? null : pick(e.offsetX, e.offsetY), x:e.offsetX, y:e.offsetY, moved:false,
            multi: e.shiftKey || e.ctrlKey || e.metaKey };
   // touch has no shift key: holding a building toggles it in the selection
   clearTimeout(holdTimer);
@@ -3827,10 +3997,16 @@ cv.addEventListener('pointermove', e => {
     else orbit(dx, dy);
     paint(); return;
   }
+  // dimension tool: preview what a click would grab, instead of the drawing rubber band
+  if (dimTool && !pointers.size && e.pointerType !== 'touch'){
+    const nh = dimRefAt(e.offsetX, e.offsetY);
+    if ((!nh !== !dimHover) || (nh && !sameDimRef(nh, dimHover))){ dimHover = nh; paint(); }
+    return;
+  }
   // live rubber-band preview of the next segment (mouse only; touch has no hover)
   if (!pointers.size && e.pointerType !== 'touch'){
     const hit = pick(e.offsetX, e.offsetY);
-    cv.classList.toggle('labelhit', !!(hit && hit.label));
+    cv.classList.toggle('labelhit', !!dimHitAt(e.offsetX, e.offsetY) || !!(hit && hit.label));
     if (readOnly) return;
     if (hit && hit.label){
       if (hover){ hover = null; paint(); }
@@ -3983,27 +4159,9 @@ function resumeLine(p, i){
 //   idle + empty    -> clear the selection, or start a new fence if nothing was selected
 function handleClick(hit, sx, sy, multi){
   if (readOnly) return;
-  if (dimPick){                                 // picking what a dimension measures from
-    const kind = dimPick;
-    dimPick = false; cv.style.cursor = '';
-    const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
-    if (pt && kind === 'point'){
-      if (hit && hit.t === 'pt'){
-        const why = dimRefusal(state.polys, sel.p, sel.i, hit.p, hit.i);
-        if (why) alert(why);                     // already pinned: a second one could only disagree
-        else commitEdit(() => {
-          const other = state.polys[hit.p].pts[hit.i];
-          const ref = { pid: pointId(other, state.polys), x: other.x, y: other.y };
-          setPointDim(state.polys, sel.p, sel.i, ref, dimDistance(pt, ref));
-        });
-      }
-    } else if (pt){
-      const w = S2W(sx, sy);
-      const ref = kind === 'edge' ? nearestEdge(state.builds, w) : nearestCorner(state.builds, w);
-      if (ref) commitEdit(() => setPointDim(state.polys, sel.p, sel.i, ref, dimDistance(pt, ref)));
-    }
-    lastSelKey = ''; updateAll(); return;        // force the panel to rebuild with the input
-  }
+  if (dimTool){ dimToolClick(sx, sy); return; }
+  const lab = dimHitAt(sx, sy);                 // click a value to retype it, where it sits
+  if (lab){ openDimEdit(lab); return; }
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
   if (hit && hit.label){
     if (drawTarget()) endLine();
@@ -4058,6 +4216,13 @@ window.addEventListener('keydown', e => {
     if (e.key === 'Escape'){ sel = null; updateAll(); }
     return;
   }
+  if (e.key === 'Escape' && dimTool){           // back out one pick at a time, then the tool
+    if (dimTool.a){ dimTool.a = null; updateAll(); } else setDimTool(false);
+    return;
+  }
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'd'){
+    e.preventDefault(); setDimTool(!dimTool); return;
+  }
   if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSelected(); }
   else if (e.key === 'Escape'){
     if ($('bkSec').open && !$('bkDialog').open){ $('bkSec').open = false; return; }
@@ -4086,6 +4251,13 @@ function updateHint(){
   }
   if (readOnly){
     $('hint').textContent = 'Tap a fence label to inspect it · drag to pan · scroll or pinch to zoom.';
+    return;
+  }
+  if (dimTool){
+    $('hint').textContent = dimTool.a
+      ? 'Now click the post, building corner or wall to measure from · Esc to undo that pick.'
+      : 'Click a fence to set its length, or a post then a corner, wall or another post · ' +
+        'type the value where it lands · Esc or D to finish.';
     return;
   }
   $('hint').textContent = drawing
@@ -4125,6 +4297,13 @@ $('bUndo').addEventListener('click', undo);
 $('bRedo').addEventListener('click', redo);
 $('bDelSel').addEventListener('click', deleteSelected);
 fdel.addEventListener('click', deleteSelected);
+$('bDimTool').addEventListener('click', () => setDimTool(!dimTool));
+$('dimin').addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Enter'){ e.preventDefault(); commitDimEdit(); }
+  else if (e.key === 'Escape'){ e.preventDefault(); closeDimEdit(); }
+});
+$('dimin').addEventListener('blur', commitDimEdit);
 $('bClear').addEventListener('click', clearAll);
 $('cSnapGrid').addEventListener('change', e => { state.snapGrid = e.target.checked; saveSoon(); });
 $('cSnapBld').addEventListener('change', e => { state.snapBld = e.target.checked; saveSoon(); });
