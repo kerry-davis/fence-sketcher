@@ -1641,21 +1641,36 @@ function angleTarget(polys, first, second){
    post where it is. Both driving the same post means they pull against each other on every
    settle, so whichever is asked for second is refused. */
 const angleSwingRange = (pl, k, fwd) => fwd ? [k+1, pl.pts.length-1] : [0, k-1];
+// A distance only fights the swing if it reaches something the swing leaves behind. Measured
+// from the corner post itself, or from another post carried round by the same swing, the
+// distance is unchanged by the rotation and the two can live together.
+function ridesTheSwing(pl, k, lo, hi, anchorIndex){
+  return anchorIndex === k || (anchorIndex >= lo && anchorIndex <= hi);
+}
+const anchorIndexIn = (pl, dim) =>
+  dim && dim.pid ? pl.pts.findIndex(q => q.pid === dim.pid) : -1;
 // -> the index of a post the angle would fight over, or -1
 function angleSwingConflict(polys, p, k, fwd){
   const pl = polys[p], [lo, hi] = angleSwingRange(pl, k, fwd);
-  for (let i = Math.max(0, lo); i <= Math.min(hi, pl.pts.length-1); i++)
-    if (pl.pts[i].dim) return i;
+  for (let i = Math.max(0, lo); i <= Math.min(hi, pl.pts.length-1); i++){
+    const dim = pl.pts[i].dim;
+    if (!dim) continue;
+    const j = anchorIndexIn(pl, dim);            // a wall, a building corner or another run: -1
+    if (!ridesTheSwing(pl, k, lo, hi, j)) return i;
+  }
   return -1;
 }
-// -> the corner whose angle already swings this post, or -1
-function pointSwungByAngle(polys, p, i){
+// -> the corner whose angle would fight a new dimension on this post, or -1. `anchorRef` is
+// what the new dimension would measure from, so a distance the swing preserves is allowed.
+function angleSweepingPost(polys, p, i, anchorRef){
   const pl = polys[p];
   for (let k = 0; k < pl.pts.length; k++){
     const a = pl.pts[k].ang;
     if (!a) continue;
     const [lo, hi] = angleSwingRange(pl, k, a.fwd !== false);
-    if (i >= lo && i <= hi) return k;
+    if (i < lo || i > hi) continue;
+    const j = anchorRef && anchorRef.k === 'pt' && anchorRef.p === p ? anchorRef.i : -1;
+    if (!ridesTheSwing(pl, k, lo, hi, j)) return k;
   }
   return -1;
 }
@@ -2030,13 +2045,26 @@ function freezeTree(value){
   // an angle and a distance must not both drive the same post
   ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:5}], closed:false}];
   chk(angleSwingConflict(ps, 0, 1, true) === -1, 'a clear run has nothing to fight over');
-  ps[0].pts[3].dim = { x:20, y:5, len:4 };       // the last post is pinned by a distance
+  ps[0].pts[3].dim = { x:20, y:5, len:4 };       // pinned to a building corner: rotation breaks it
   chk(angleSwingConflict(ps, 0, 1, true) === 3, 'the swinging side reports the pinned post');
   chk(angleSwingConflict(ps, 0, 1, false) === -1, 'the other side of the corner is still free');
-  chk(pointSwungByAngle(ps, 0, 3) === -1, 'no angle yet, so nothing swings that post');
+  // but a distance the swing carries round with it is no conflict at all
+  ps[0].pts[1].pid = 'pA'; ps[0].pts[2].pid = 'pB';
+  ps[0].pts[3].dim = { pid:'pA', x:5, y:0, len:9 };   // measured from the corner post itself
+  chk(angleSwingConflict(ps, 0, 1, true) === -1, 'a distance to the corner post rides the swing');
+  ps[0].pts[3].dim = { pid:'pB', x:5, y:5, len:4 };   // measured from another swept post
+  chk(angleSwingConflict(ps, 0, 1, true) === -1, 'a distance between two swept posts rides too');
+  ps[0].pts[3].dim = { axis:'x', v:20, span:[0,9], len:15 };
+  chk(angleSwingConflict(ps, 0, 1, true) === 3, 'a distance to a wall does not ride the swing');
+  // and the same test the other way round, for a dimension about to be created
+  delete ps[0].pts[3].dim;
+  chk(angleSweepingPost(ps, 0, 3, {k:'cnr'}) === -1, 'no angle yet, so nothing swings that post');
   ps[0].pts[1].ang = { deg:90, fwd:true };
-  chk(pointSwungByAngle(ps, 0, 3) === 1, 'once the angle exists the post is swung by it');
-  chk(pointSwungByAngle(ps, 0, 0) === -1, 'a post before the corner is not swung by it');
+  chk(angleSweepingPost(ps, 0, 3, {k:'cnr'}) === 1, 'pinning it to a building is refused');
+  chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:0, i:1}) === -1, 'measuring from the corner is fine');
+  chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:0, i:2}) === -1, 'so is measuring from a swept post');
+  chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:0, i:0}) === 1, 'but not from one left behind');
+  chk(angleSweepingPost(ps, 0, 0, {k:'cnr'}) === -1, 'a post before the corner is not swung by it');
   // two fences make an angle only where they share a post of one open run
   const ap = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:9}], closed:false},
               {pts:[{x:0,y:9},{x:4,y:9}], closed:false}];
@@ -3134,9 +3162,9 @@ function dimToolClick(sx, sy){
     const why = dimRefusal(state.polys, driven.p, driven.i, anchor.p, anchor.i);
     if (why){ alert(why); updateAll(); return; }
   }
-  if (pointSwungByAngle(state.polys, driven.p, driven.i) >= 0){
-    alert('That post is already swung by a corner angle on this run. Remove the angle first, ' +
-          'or dimension a post on the other side of it.');
+  if (angleSweepingPost(state.polys, driven.p, driven.i, anchor) >= 0){
+    alert('That post is swung by a corner angle on this run, and this dimension would hold it ' +
+          'still. Remove the angle first, or measure from a post that swings with it.');
     updateAll(); return;
   }
   // hold the anchor as a plain value; the placement click is what actually commits it
