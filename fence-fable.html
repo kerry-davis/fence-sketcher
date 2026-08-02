@@ -196,8 +196,6 @@
   #selbox:not(.skillroof) .skillOnly{display:none}
   #selbox label{display:flex;align-items:center;gap:8px;padding:6px 0}
   #selbox input[type=checkbox]{width:19px;height:19px;accent-color:var(--accent)}
-  #postShapeWrap{border-color:var(--accent-soft);background:var(--accent-faint);align-items:center}
-  #postShapeWrap .row{flex:1;padding:0}
   #copyBtn{width:100%}
   #totalsHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
   #totalsHead h2{margin-bottom:0}
@@ -567,15 +565,6 @@
   <aside>
     <section id="selbox" class="editorOnly" style="display:none"></section>
 
-    <section id="postShapeWrap" class="editorOnly" style="display:none">
-      <div class="row">
-        <span>Selected post shape</span>
-        <span><select id="iPostShape">
-          <option value="inherit">Use fence setting</option>
-          <option value="square">Square</option><option value="round">Round</option>
-        </select></span></div>
-    </section>
-
     <section>
       <div id="totalsHead">
         <h2>Totals</h2>
@@ -653,8 +642,14 @@
         <h3 class="subhead">Posts</h3>
         <div class="row"><span>Post spacing</span><span><input id="iSpacing" inputmode="decimal"> <span class="unit" id="uSpacing">m</span></span></div>
         <div class="row"><span>Post shape</span>
-          <span><select id="iFencePostShape">
-            <option value="square">Square</option><option value="round">Round</option>
+          <span><select id="iPostShape">
+            <optgroup label="Fence setting">
+              <option value="fence:square">Square</option><option value="fence:round">Round</option>
+            </optgroup>
+            <optgroup id="selectedPostShapeGroup" label="Selected post" hidden disabled>
+              <option value="post:inherit">Use fence setting</option>
+              <option value="post:square">Square</option><option value="post:round">Round</option>
+            </optgroup>
           </select></span></div>
         <div class="row sizePair" title="Square post width × depth, or round post diameter. A 100x100 post is width 100, depth 100."><span>Post</span><span><span class="times" id="postSizePrefix" style="display:none">Ø</span><input id="iPostSize" inputmode="decimal" title="Post width"> <b class="times" id="postTimes">×</b> <input id="iPostSizeD" inputmode="decimal" title="Post depth"> <span class="unit" id="uPostSize">mm</span></span></div>
         <div class="row" title="Posts at the ends of a run. Auto skips an end already posted by another fence. One end lets you choose the physical end.">
@@ -937,6 +932,8 @@ let state = {
 };
 let view = { x: 0, y: 0, s: 24 };             // world origin offset (m) + scale (px per m)
 let sel  = null;                              // {t:'pt'|'seg'|'bld', p?, i?}
+let postShapeScope = 'fence';                 // current Post shape dropdown scope
+let postShapePointKey = '';                   // selected point whose scope is being shown
 let bsel = new Set();                         // selected building members (whole groups expand here)
 let showAllTotals = false;
 let undoStack = [], redoStack = [];
@@ -3225,8 +3222,6 @@ function syncMatInputs(){
   $('iAboveGroundHeight').textContent = fmtLen(fenceHeightOf(M),u);
   set('iRails', M.rails);
   if (document.activeElement !== $('iRailSide')) $('iRailSide').value = railSideOf(M);
-  if (document.activeElement !== $('iFencePostShape'))
-    $('iFencePostShape').value = postShapeOf(M);
   const roundPost = postShapeOf(M) === 'round';
   $('postSizePrefix').style.display = roundPost ? '' : 'none';
   $('postTimes').style.display = roundPost ? 'none' : '';
@@ -3242,9 +3237,18 @@ function syncMatInputs(){
     $('iOneEnd').value = oneEnd || 'end';
   const selectedPoint = sel && sel.t === 'pt' && state.polys[sel.p] &&
                         state.polys[sel.p].pts[sel.i];
-  $('postShapeWrap').style.display = selectedPoint ? 'flex' : 'none';
-  if (selectedPoint && document.activeElement !== $('iPostShape'))
-    $('iPostShape').value = ownPostShape(selectedPoint) || 'inherit';
+  const postShapeInput = $('iPostShape');
+  const selectedPostGroup = $('selectedPostShapeGroup');
+  const selectedPostKey = selectedPoint ? sel.p + '/' + sel.i : '';
+  if (selectedPostKey !== postShapePointKey){
+    postShapePointKey = selectedPostKey;
+    postShapeScope = selectedPoint ? 'post' : 'fence';
+  }
+  selectedPostGroup.hidden = !selectedPoint;
+  selectedPostGroup.disabled = !selectedPoint;
+  postShapeInput.value = selectedPoint && postShapeScope === 'post'
+    ? 'post:' + (ownPostShape(selectedPoint) || 'inherit')
+    : 'fence:' + postShapeOf(M);
   set('iPaling', small(M.paling));  set('iPalingT', small(palingTOf(M)));  set('iGap', small(M.gap));
   set('iPostSize', small(postSizeOf(M)));  set('iPostSizeD', small(postTOf(M)));
   set('iRailW', small(M.railW));    set('iRailT', small(railTOf(M)));  set('iRailGap', small(M.railGap));
@@ -3980,25 +3984,27 @@ $('iOneEnd').addEventListener('change', e => {
   });
   updateAll();
 });
-$('iFencePostShape').addEventListener('change', e => {
-  const M = curMat();
-  commitEdit(() => M.postShape = e.target.value === 'round' ? 'round' : 'square');
-  updateAll();
-});
 $('iRailSide').addEventListener('change', e => {
   const M = curMat();
   commitEdit(() => M.railSide = e.target.value === 'right' ? 'right' : 'left');
   updateAll();
 });
 $('iPostShape').addEventListener('change', e => {
-  if (!sel || sel.t !== 'pt') return;
-  const point = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
-  if (!point) return;
-  commitEdit(() => {
-    if (e.target.value === 'round' || e.target.value === 'square')
-      point.postShape = e.target.value;
-    else delete point.postShape;
-  });
+  const [scope, shape] = e.target.value.split(':');
+  if (scope === 'post'){
+    const point = sel && sel.t === 'pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+    if (!point) return;
+    postShapeScope = 'post';
+    commitEdit(() => {
+      if (shape === 'round' || shape === 'square')
+        point.postShape = shape;
+      else delete point.postShape;
+    });
+  } else if (scope === 'fence') {
+    const M = curMat();
+    postShapeScope = 'fence';
+    commitEdit(() => M.postShape = shape === 'round' ? 'round' : 'square');
+  }
   updateAll();
 });
 $('matInclude').addEventListener('change', e => {
