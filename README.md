@@ -97,9 +97,9 @@ screens.
 - **Per-fence 3D visibility.** Hide a fence from the 3D scene while retaining a
   muted dotted, labelled reference in plan and keeping its materials counted.
 - **Metric or imperial.** Everything is stored in metres; units only affect
-  display and parsing. `12'6"`, `12 ft 6 in`, `6"` and bare numbers all parse.
-  Fields you haven't touched jump to the sensible default for the new unit
-  (2.4 m ↔ 8 ft); fields you have typed into stay put.
+  display and parsing. `12'6"`, `12 ft 6 in`, `6"`, `70mm`, `7cm` and bare
+  numbers all parse. Fields you haven't touched jump to the sensible default for
+  the new unit (2.4 m ↔ 8 ft); fields you have typed into stay put.
 - **Live materials controls.** Exclude an individual fence, or just its rails or
   palings, from the bill of materials without hiding it from the plan, and copy a
   detailed plain-text takeoff with the current names, lengths, post shapes and
@@ -173,6 +173,15 @@ usually still available from the other fence, so the free side swings instead.
 
 Angles are refused on closed loops, where rotating part of the run would tear
 it open.
+
+**Millimetres below a metre.** A 70 mm gap is not 0.07 m to anyone holding a
+tape, and typing it that way invites a misplaced decimal. Under a metre a
+dimension shows millimetres and its field takes them, so a bare `70` means
+70 mm — the same threshold the grid caption uses. Over a metre nothing changes.
+A unit typed out always wins, so `1.5 m` in a millimetre field is still a metre
+and a half, and `70mm` or `7cm` are understood in any length field.
+
+Building sizes stay in metres, since that is how their own fields are edited.
 
 **Stored** on the post the dimension belongs to. Other posts are referenced by a
 stable id rather than a position in the run, so a dimension survives points

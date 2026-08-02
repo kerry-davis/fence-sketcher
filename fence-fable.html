@@ -3517,7 +3517,7 @@ function doPaint(){
         let ang = Math.atan2(B.y-A.y, B.x-A.x);
         if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI;
         const label = (a.lockAfter != null ? '🔒 ' : '') + (a.gateAfter ? 'Gate ' : '') +
-                      fmtLen(segLen(a,b), state.unit);
+                      fmtDim(segLen(a,b), state.unit);
         const dimSel = sel && sel.t==='dim' && sel.kind==='seg' && sel.p===p && sel.i===i;
         ctx.save();
         ctx.translate((A.x+B.x)/2, (A.y+B.y)/2); ctx.rotate(ang);
@@ -3610,7 +3610,7 @@ function doPaint(){
     ctx.setLineDash([]);
     ctx.beginPath(); ctx.arc(B.x, B.y, 4, 0, 7);
     ctx.fillStyle = hover.angled ? ACCENT : C.gate; ctx.fill();
-    const label = fmtLen(Math.hypot(hover.x-hover.a.x, hover.y-hover.a.y), state.unit);
+    const label = fmtDim(Math.hypot(hover.x-hover.a.x, hover.y-hover.a.y), state.unit);
     ctx.font = '12px system-ui'; ctx.textAlign = 'left';
     ctx.lineWidth = 4; ctx.strokeStyle = C.halo; ctx.strokeText(label, B.x+10, B.y-10);
     ctx.fillStyle = hover.angled ? ACCENT : C.label; ctx.fillText(label, B.x+10, B.y-10);
@@ -4548,7 +4548,7 @@ function updateSelbox(){
                    : !dim ? '' : dim.axis ? 'distance to a wall'
                    : dim.pid ? 'distance to another post' : 'distance to a corner';
     const value = !pt ? '' : sel.kind === 'seg'
-      ? fmtLen(segLen(pt, pl.pts[(sel.i+1)%pl.pts.length]), u)
+      ? fmtDim(segLen(pt, pl.pts[(sel.i+1)%pl.pts.length]), u)
       : sel.kind === 'ang'
       ? formatFenceAngle((cornerAngleAt(pl, sel.i) || {degrees:0}).degrees)
       : dim ? fmtDim(dim.len, u) : '';
