@@ -1637,6 +1637,28 @@ function angleTarget(polys, first, second){
   if (!cornerAngleAt(pl, k)) return null;
   return { p: first.p, k, fwd: second.i === k };
 }
+/* An angle swings a whole stretch of the run about its corner; a distance dimension pins one
+   post where it is. Both driving the same post means they pull against each other on every
+   settle, so whichever is asked for second is refused. */
+const angleSwingRange = (pl, k, fwd) => fwd ? [k+1, pl.pts.length-1] : [0, k-1];
+// -> the index of a post the angle would fight over, or -1
+function angleSwingConflict(polys, p, k, fwd){
+  const pl = polys[p], [lo, hi] = angleSwingRange(pl, k, fwd);
+  for (let i = Math.max(0, lo); i <= Math.min(hi, pl.pts.length-1); i++)
+    if (pl.pts[i].dim) return i;
+  return -1;
+}
+// -> the corner whose angle already swings this post, or -1
+function pointSwungByAngle(polys, p, i){
+  const pl = polys[p];
+  for (let k = 0; k < pl.pts.length; k++){
+    const a = pl.pts[k].ang;
+    if (!a) continue;
+    const [lo, hi] = angleSwingRange(pl, k, a.fwd !== false);
+    if (i >= lo && i <= hi) return k;
+  }
+  return -1;
+}
 const sharesSegment = (pl, i, j) => {
   const n = pl.pts.length, d = Math.abs(i - j);
   return d === 1 || (pl.closed && d === n-1);
@@ -2005,6 +2027,16 @@ function freezeTree(value){
   swapAngleSide(ps, 0, 1);
   chk(near(ps[0].pts[2].x, 5) && near(ps[0].pts[2].y, 5),
       'swap still lands the swung post home after the corner was settled');
+  // an angle and a distance must not both drive the same post
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:5}], closed:false}];
+  chk(angleSwingConflict(ps, 0, 1, true) === -1, 'a clear run has nothing to fight over');
+  ps[0].pts[3].dim = { x:20, y:5, len:4 };       // the last post is pinned by a distance
+  chk(angleSwingConflict(ps, 0, 1, true) === 3, 'the swinging side reports the pinned post');
+  chk(angleSwingConflict(ps, 0, 1, false) === -1, 'the other side of the corner is still free');
+  chk(pointSwungByAngle(ps, 0, 3) === -1, 'no angle yet, so nothing swings that post');
+  ps[0].pts[1].ang = { deg:90, fwd:true };
+  chk(pointSwungByAngle(ps, 0, 3) === 1, 'once the angle exists the post is swung by it');
+  chk(pointSwungByAngle(ps, 0, 0) === -1, 'a post before the corner is not swung by it');
   // two fences make an angle only where they share a post of one open run
   const ap = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:9}], closed:false},
               {pts:[{x:0,y:9},{x:4,y:9}], closed:false}];
@@ -3035,8 +3067,13 @@ function dimToolClick(sx, sy){
       const second = dimRefAt(sx, sy);
       if (second && second.k === 'seg' && !sameDimRef(second, dimTool.a)){
         const t = angleTarget(state.polys, dimTool.a, second);
+        const clash = t && angleSwingConflict(state.polys, t.p, t.k, t.fwd) >= 0;
+        dimTool.pend = null; dimTool.a = null;  // refused or not, this pair is done with
         if (!t) alert('Angles are measured where two fences meet at a shared post of one run.');
-        else { dimTool.pend = { kind:'ang', p:t.p, i:t.k, fwd:t.fwd }; dimTool.a = null; }
+        else if (clash)
+          alert('That side of the corner has a post held by its own dimension. Remove that one, ' +
+                'or dimension the angle from the other fence so the other side swings.');
+        else dimTool.pend = { kind:'ang', p:t.p, i:t.k, fwd:t.fwd };
         updateAll(); return;
       }
     }
@@ -3096,6 +3133,11 @@ function dimToolClick(sx, sy){
   if (anchor.k === 'pt'){
     const why = dimRefusal(state.polys, driven.p, driven.i, anchor.p, anchor.i);
     if (why){ alert(why); updateAll(); return; }
+  }
+  if (pointSwungByAngle(state.polys, driven.p, driven.i) >= 0){
+    alert('That post is already swung by a corner angle on this run. Remove the angle first, ' +
+          'or dimension a post on the other side of it.');
+    updateAll(); return;
   }
   // hold the anchor as a plain value; the placement click is what actually commits it
   dimTool.pend = { kind:'dim', p:driven.p, i:driven.i,
@@ -4803,8 +4845,13 @@ $('bRedo').addEventListener('click', redo);
 $('bDelSel').addEventListener('click', deleteSelected);
 fdel.addEventListener('click', deleteSelected);
 fswap.addEventListener('click', () => {
-  if (sel && sel.t==='dim' && sel.kind==='ang' &&
-      commitEdit(() => swapAngleSide(state.polys, sel.p, sel.i))) updateAll();
+  if (!sel || sel.t!=='dim' || sel.kind!=='ang') return;
+  const pt = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+  if (pt && pt.ang && angleSwingConflict(state.polys, sel.p, sel.i, pt.ang.fwd === false) >= 0){
+    alert('The other side has a post held by its own dimension, so it cannot be the one to swing.');
+    return;
+  }
+  if (commitEdit(() => swapAngleSide(state.polys, sel.p, sel.i))) updateAll();
 });
 $('bDimTool').addEventListener('click', () => setDimTool(!dimTool));
 $('dimin').addEventListener('keydown', e => {
