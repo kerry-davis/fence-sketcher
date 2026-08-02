@@ -1591,6 +1591,8 @@ function setPointDim(polys, p, i, ref, len){
   pt.dim = ref.axis ? { axis:ref.axis, v:ref.v, span:ref.span, len }
          : ref.pid  ? { pid:ref.pid, x:ref.x, y:ref.y, len }
                     : { x:ref.x, y:ref.y, len };
+  // retyping the value rebuilds the dim from the old one — keep where the user put it
+  if (ref.off != null) pt.dim.off = ref.off;
   const pos = applyPointDim(pt, pt, polys);
   pt.x = pos.x; pt.y = pos.y;
 }
@@ -1843,6 +1845,11 @@ function freezeTree(value){
   chk(near(applyPointDim(ps[0].pts[1], {x:3,y:9}).x, 8.5), 'edge dimension holds through a drag');
   chk(near(applyPointDim({dim:{axis:'x',v:10,len:1.5}}, {x:20,y:0}).x, 11.5), 'edge keeps its side');
   chk(near(dimAnchor({x:4,y:5}, {axis:'x',v:10,len:1}).y, 5), 'edge anchor is the foot on the line');
+  // retyping a value must not throw away where the dimension was placed
+  ps = [{pts:[{x:0,y:0},{x:4,y:0}], closed:false}];
+  setPointDim(ps, 0, 1, {x:10,y:0}, 6); ps[0].pts[1].dim.off = 2.75;
+  setPointDim(ps, 0, 1, ps[0].pts[1].dim, 3);
+  chk(near(ps[0].pts[1].dim.off, 2.75) && near(ps[0].pts[1].dim.len, 3), 'placement survives a retype');
   // point-to-point: referenced by stable id, so it survives the anchor's index moving
   ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:9,y:0}], closed:false}];
   let anchorId = pointId(ps[0].pts[0], ps);
