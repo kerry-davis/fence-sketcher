@@ -1751,12 +1751,25 @@ function distanceCanDrive(polys, p, i, anchorRef){
 // Retyping a value asks for something specific, so the probe uses the value itself rather than
 // an arbitrary nudge: a figure the drawing cannot reach must not be written down as if it had.
 function typedValueFits(polys, kind, p, i, value){
-  return dimensionIsSatisfiable(polys, c => {
-    const q = c[p].pts[i];
-    if (kind === 'ang') setCornerAngle(c, p, i, value, (q.ang || {}).fwd !== false);
-    else if (kind === 'seg') setSegLen(c, p, i, value);
-    else if (q.dim) setPointDim(c, p, i, q.dim, value);
-  });
+  return dimensionIsSatisfiable(polys, c => writeTypedValue(c, kind, p, i, value));
+}
+function writeTypedValue(polys, kind, p, i, value){
+  const q = polys[p].pts[i];
+  if (kind === 'ang') setCornerAngle(polys, p, i, value, (q.ang || {}).fwd !== false);
+  else if (kind === 'seg') setSegLen(polys, p, i, value);
+  else if (q.dim) setPointDim(polys, p, i, q.dim, value);
+}
+/* The one way a typed value reaches the drawing, so no entry point can be added that forgets
+   to ask whether the value is reachable. Returns false when it was refused. */
+function applyTypedValue(kind, p, i, value){
+  if (!state.polys[p] || !state.polys[p].pts[i]) return false;
+  if (!typedValueFits(state.polys, kind, p, i, value)){
+    alert('The rest of the drawing cannot reach that value. Remove or relax one of the ' +
+          'dimensions holding it, then try again.');
+    return false;
+  }
+  commitEdit(() => writeTypedValue(state.polys, kind, p, i, value));
+  return true;
 }
 /* A distance measured to a post standing on the corner is only safe because it stands there.
    Two runs meeting keep their own copy of a junction post, so dragging one apart would strand
@@ -3105,25 +3118,14 @@ function commitDimEdit(){
   // whatever was just typed stays selected, so delete and swap are to hand straight away
   // instead of hiding behind leaving the tool and clicking the dimension again
   const keep = () => { sel = { t:'dim', kind:t.kind, p:t.p, i:t.i }; bsel.clear(); };
-  // a figure the rest of the drawing cannot accommodate is refused rather than written down
-  const refuse = () => { alert('The rest of the drawing cannot reach that value. Remove or ' +
-    'relax one of the dimensions holding it, then try again.'); keep(); updateAll(); };
   if (t.kind === 'ang'){                        // degrees, not a length
     const deg = parseFloat(String(typed).replace(/,/g,'.'));
-    if (!isFinite(deg) || deg < 0.5 || deg > 179.5){ keep(); updateAll(); return; }
-    if (!typedValueFits(state.polys, 'ang', t.p, t.i, deg)) return refuse();
-    commitEdit(() => setCornerAngle(state.polys, t.p, t.i, deg,
-                                    (pl.pts[t.i].ang || {}).fwd !== false));
+    if (isFinite(deg) && deg >= 0.5 && deg <= 179.5) applyTypedValue('ang', t.p, t.i, deg);
     keep(); updateAll();
     return;
   }
   const v = parseLen(typed, state.unit);
-  if (v == null || v <= 0.01){ keep(); updateAll(); return; }
-  if (!typedValueFits(state.polys, t.kind, t.p, t.i, v)) return refuse();
-  commitEdit(() => {
-    if (t.kind === 'seg') setSegLen(state.polys, t.p, t.i, v);
-    else if (pl.pts[t.i].dim) setPointDim(state.polys, t.p, t.i, pl.pts[t.i].dim, v);
-  });
+  if (v != null && v > 0.01) applyTypedValue(t.kind, t.p, t.i, v);
   keep(); updateAll();
 }
 // Signed sideways distance, in metres, from the measured line to where the cursor is — this is
@@ -4353,9 +4355,9 @@ function updateSelbox(){
         '<p class="note">Drag this segment to move the whole fence. Locked lengths stay unchanged.</p>';
       $('iSegLen').addEventListener('change', e => {
         const v = parseLen(e.target.value, state.unit);
+        // the same gate the canvas uses, so a length typed here is checked and settled alike
         if (v != null && v > 0.01 && sel && sel.t==='seg'){
-          // through commitEdit, so whatever is dimensioned off this run settles with it
-          commitEdit(() => setSegLen(state.polys, sel.p, sel.i, v));
+          applyTypedValue('seg', sel.p, sel.i, v);
           updateAll();
         } else updateSelbox();
       });
