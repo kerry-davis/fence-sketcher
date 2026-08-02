@@ -1670,6 +1670,27 @@ function angleSwingConflict(polys, p, k, fwd){
   }
   return -1;
 }
+/* A distance measured to a post standing on the corner is only safe because it stands there.
+   Two runs meeting keep their own copy of a junction post, so dragging one apart would strand
+   the allowance. Bind it to the corner post itself instead — the same place, but the actual
+   centre of the rotation, so no later drag can invalidate it. */
+function retargetToCorner(polys, p, i, anchorRef){
+  if (!anchorRef || anchorRef.k === 'wall') return anchorRef;
+  const pl = polys[p];
+  const pos = anchorRef.k === 'cnr' ? anchorRef
+            : (polys[anchorRef.p] || {pts:[]}).pts[anchorRef.i];
+  if (!pos) return anchorRef;
+  for (let k = 0; k < pl.pts.length; k++){
+    const a = pl.pts[k].ang;
+    if (!a) continue;
+    const [lo, hi] = angleSwingRange(pl, k, a.fwd !== false);
+    if (i < lo || i > hi) continue;
+    if (anchorRef.k === 'pt' && anchorRef.p === p && anchorRef.i === k) return anchorRef;
+    const V = pl.pts[k];
+    if (Math.hypot(pos.x - V.x, pos.y - V.y) < FENCE_JOIN_TOL) return { k:'pt', p, i:k };
+  }
+  return anchorRef;
+}
 // -> the corner whose angle would fight a new dimension on this post, or -1. `anchorRef` is
 // what the new dimension would measure from, so a distance the swing preserves is allowed.
 function angleSweepingPost(polys, p, i, anchorRef){
@@ -2087,6 +2108,14 @@ function freezeTree(value){
   chk(angleSwingConflict(ps, 0, 1, true) === -1, 'and the same holds for one already placed');
   chk(angleSweepingPost(ps, 0, 3, {k:'cnr', x:5, y:0}) === -1,
       'a building corner on the corner post is invariant too');
+  // that allowance is bound to the corner post, so separating the junction can't strand it
+  const bound = retargetToCorner(ps, 0, 3, {k:'pt', p:1, i:0});
+  chk(bound.k === 'pt' && bound.p === 0 && bound.i === 1, 'a post on the corner binds to the corner');
+  chk(retargetToCorner(ps, 0, 3, {k:'cnr', x:5, y:0}).i === 1, 'so does a building corner on it');
+  chk(retargetToCorner(ps, 0, 3, {k:'pt', p:1, i:1}).p === 1, 'one standing apart is left alone');
+  chk(retargetToCorner(ps, 0, 3, {k:'wall', axis:'x', v:9}).k === 'wall', 'a wall is left alone');
+  chk(retargetToCorner(ps, 0, 0, {k:'pt', p:1, i:0}).p === 1,
+      'and a post outside the swing is left alone, there being nothing to strand');
   // two fences make an angle only where they share a post of one open run
   const ap = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:9}], closed:false},
               {pts:[{x:0,y:9},{x:4,y:9}], closed:false}];
@@ -3179,7 +3208,9 @@ function dimToolClick(sx, sy){
     alert('One end has to be a fence post — a building never moves to satisfy a dimension.');
     updateAll(); return;
   }
-  const { driven, ref: anchor } = pair;
+  const { driven } = pair;
+  // a post standing on a dimensioned corner means the corner: bind it there while they coincide
+  const anchor = retargetToCorner(state.polys, driven.p, driven.i, pair.ref);
   if (anchor.k === 'pt'){
     const why = dimRefusal(state.polys, driven.p, driven.i, anchor.p, anchor.i);
     if (why){ alert(why); updateAll(); return; }
