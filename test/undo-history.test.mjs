@@ -28,6 +28,7 @@ test('undo and redo restore materials and units as well as geometry', () => {
     updateAll() {},
     // commitEdit settles the drawing's constraints; this slice only exercises history
     reapplyConstraints() {},
+    junctionGroups: () => [],
   };
   vm.createContext(context);
   vm.runInContext(html.slice(start, end), context);

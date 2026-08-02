@@ -919,9 +919,30 @@ function parseLen(s, unit){
   if (m) return (+m[1])*FT + (+(m[2]||0))*IN;
   m = s.match(/^(\d+(?:\.\d+)?)\s*(?:"|in|inch|inches)$/);
   if (m) return (+m[1])*IN;
+  m = s.match(/^(\d+(?:\.\d+)?)\s*(?:mm|millimet(?:er|re)s?)$/);
+  if (m) return (+m[1])/1000;
+  m = s.match(/^(\d+(?:\.\d+)?)\s*(?:cm|centimet(?:er|re)s?)$/);
+  if (m) return (+m[1])/100;
   m = s.match(/^(\d+(?:\.\d+)?)\s*(?:m|meters?|metres?)?$/);
   if (m) return (+m[1]) * (unit==='m' ? 1 : FT);
   return null;
+}
+/* Under a metre, metres are the wrong unit to think in: 0.07 m is 70 mm, and typing four
+   decimal places to place a post is nobody's idea of a good time. Dimensions show and take
+   millimetres below a metre — the same threshold the grid caption already uses — and a bare
+   number in such a field means millimetres. Any value can still be typed with its own unit. */
+const dimShowsSmall = (m, unit) => unit === 'm' && Math.abs(m) < 1;
+const fmtDim = (m, unit) => dimShowsSmall(m, unit) ? fmtSmall(m, unit) : fmtLen(m, unit);
+// what the editable field starts with, bare (no unit suffix)
+function dimFieldValue(m, unit){
+  if (dimShowsSmall(m, unit)) return String(Math.round(m*1000));
+  return unit === 'm' ? String(+m.toFixed(3)) : ftStr(m);
+}
+// a bare number is millimetres when the field was showing millimetres, metres otherwise
+function parseDimField(text, unit, showing){
+  const bare = String(text).trim().replace(/,/g,'.');
+  if (dimShowsSmall(showing, unit) && /^\d+(?:\.\d+)?$/.test(bare)) return (+bare)/1000;
+  return parseLen(text, unit);
 }
 // Parse the small-unit inputs (mm in metric, inches in imperial) -> metres, or null
 function parseSmall(s, unit){
@@ -2121,6 +2142,14 @@ function freezeTree(value){
   chk(near(applyPointDim(ps[0].pts[1], {x:3,y:9}).x, 8.5), 'edge dimension holds through a drag');
   chk(near(applyPointDim({dim:{axis:'x',v:10,len:1.5}}, {x:20,y:0}).x, 11.5), 'edge keeps its side');
   chk(near(dimAnchor({x:4,y:5}, {axis:'x',v:10,len:1}).y, 5), 'edge anchor is the foot on the line');
+  // under a metre, dimensions read and take millimetres — 0.07 m is 70 mm to anyone measuring
+  chk(near(parseLen('70mm','m'), 0.07) && near(parseLen('7cm','m'), 0.07), 'mm and cm parse');
+  chk(fmtDim(0.07,'m') === '70 mm' && fmtDim(1.5,'m') === '1.5 m', 'sub-metre shows mm');
+  chk(dimFieldValue(0.07,'m') === '70' && dimFieldValue(10.5,'m') === '10.5', 'the field matches');
+  chk(near(parseDimField('70','m',0.07), 0.07), 'a bare number in a mm field is mm');
+  chk(near(parseDimField('12','m',10.5), 12), 'and metres in a metre field');
+  chk(near(parseDimField('1.5 m','m',0.07), 1.5) && near(parseDimField('70mm','m',10.5), 0.07),
+      'a unit typed out always wins');
   // retyping a value must not throw away where the dimension was placed
   ps = [{pts:[{x:0,y:0},{x:4,y:0}], closed:false}];
   setPointDim(ps, 0, 1, {x:10,y:0}, 6); ps[0].pts[1].dim.off = 2.75;
@@ -3063,14 +3092,14 @@ function dimEnds(q, polys){
 const dimOffPx = d => (d.off == null ? DIM.off : d.off * view.s);
 function drawDimension(q, p, i){
   const { A, B, extendTo } = dimEnds(q, state.polys);
-  const box = renderDimension(A, B, fmtLen(q.dim.len, state.unit), dimOffPx(q.dim), {
+  const box = renderDimension(A, B, fmtDim(q.dim.len, state.unit), dimOffPx(q.dim), {
     picked: sel && sel.t==='dim' && sel.kind==='dim' && sel.p===p && sel.i===i, extendTo });
   if (box) dimHits.push({ kind:'dim', p, i, ...box });
 }
 // A locked segment length placed by the tool is drawn as a dimension in its own right.
 function drawSegDimension(pl, p, i){
   const a = pl.pts[i], b = pl.pts[(i+1) % pl.pts.length];
-  const box = renderDimension(W2S(a), W2S(b), fmtLen(segLen(a,b), state.unit), a.lockOff * view.s,
+  const box = renderDimension(W2S(a), W2S(b), fmtDim(segLen(a,b), state.unit), a.lockOff * view.s,
     { picked: sel && sel.t==='dim' && sel.kind==='seg' && sel.p===p && sel.i===i });
   if (box) dimHits.push({ kind:'seg', p, i, ...box });
 }
@@ -3133,8 +3162,9 @@ function openDimEdit(target){
   el.style.display = 'block';
   el.style.left = Math.max(4, Math.min(cw-112, pos.x-54)) + 'px';
   el.style.top  = Math.max(4, Math.min(ch-38,  pos.y-15)) + 'px';
-  el.value = target.kind === 'ang' ? +cur.toFixed(1)
-           : state.unit === 'm' ? +cur.toFixed(3) : ftStr(cur);
+  el.value = target.kind === 'ang' ? String(+cur.toFixed(1))
+                                   : dimFieldValue(cur, state.unit);
+  el.dataset.showing = target.kind === 'ang' ? '' : String(cur);
   el.focus(); el.select();
   paint();
 }
@@ -3162,8 +3192,8 @@ function commitDimEdit(){
     keep(); updateAll();
     return;
   }
-  const v = parseLen(typed, state.unit);
-  if (v != null && v > 0.01) applyTypedValue(t.kind, t.p, t.i, v);
+  const v = parseDimField(typed, state.unit, +($('dimin').dataset.showing || 0));
+  if (v != null && v > 0.001) applyTypedValue(t.kind, t.p, t.i, v);
   keep(); updateAll();
 }
 // Signed sideways distance, in metres, from the measured line to where the cursor is — this is
@@ -3242,11 +3272,11 @@ function dimPendingEnds(pend){
   if (pend.kind === 'seg'){
     const pl = state.polys[pend.p];
     return { A: W2S(pl.pts[pend.i]), B: W2S(pl.pts[(pend.i+1) % pl.pts.length]),
-             txt: fmtLen(segLen(pl.pts[pend.i], pl.pts[(pend.i+1) % pl.pts.length]), state.unit) };
+             txt: fmtDim(segLen(pl.pts[pend.i], pl.pts[(pend.i+1) % pl.pts.length]), state.unit) };
   }
   const pt = state.polys[pend.p].pts[pend.i];
   const ends = dimEnds({ ...pt, dim: pend.anchor }, state.polys);
-  return { ...ends, txt: fmtLen(dimDistance(pt, pend.anchor), state.unit) };
+  return { ...ends, txt: fmtDim(dimDistance(pt, pend.anchor), state.unit) };
 }
 // Slide a placed dimension to a new offset — the CAD habit of nudging one clear of the drawing.
 function moveDimension(kind, p, i, sx, sy){
@@ -4387,14 +4417,16 @@ function updateSelbox(){
     const len = segLen(a, pl.pts[(sel.i+1)%pl.pts.length]);
     if (key !== lastSelKey){
       box.innerHTML = '<h2>Selected segment</h2>' +
-        '<div class="row"><span>Length</span><span><input id="iSegLen" inputmode="text"> <span class="unit">'+(u==='m'?'m':'')+'</span></span></div>' +
+        '<div class="row"><span>Length</span><span><input id="iSegLen" inputmode="text"> <span class="unit" id="uSegLen"></span></span></div>' +
         '<label><input type="checkbox" id="iGate"> This is a gate</label>' +
         '<label><input type="checkbox" id="iLock"> Length locked</label>' +
         '<p class="note">Drag this segment to move the whole fence. Locked lengths stay unchanged.</p>';
       $('iSegLen').addEventListener('change', e => {
-        const v = parseLen(e.target.value, state.unit);
+        const pl0 = state.polys[sel && sel.p], cur = pl0 && sel && sel.t==='seg'
+          ? segLen(pl0.pts[sel.i], pl0.pts[(sel.i+1) % pl0.pts.length]) : 1;
+        const v = parseDimField(e.target.value, state.unit, cur);
         // the same gate the canvas uses, so a length typed here is checked and settled alike
-        if (v != null && v > 0.01 && sel && sel.t==='seg'){
+        if (v != null && v > 0.001 && sel && sel.t==='seg'){
           applyTypedValue('seg', sel.p, sel.i, v);
           updateAll();
         } else updateSelbox();
@@ -4413,7 +4445,8 @@ function updateSelbox(){
       });
     }
     if (document.activeElement !== $('iSegLen'))
-      $('iSegLen').value = u==='m' ? +len.toFixed(2) : ftStr(len);
+      $('iSegLen').value = dimFieldValue(len, u);
+    $('uSegLen').textContent = dimShowsSmall(len, u) ? 'mm' : (u==='m' ? 'm' : '');
     $('iGate').checked = !!a.gateAfter;
     $('iLock').checked = a.lockAfter != null;
 
@@ -4518,7 +4551,7 @@ function updateSelbox(){
       ? fmtLen(segLen(pt, pl.pts[(sel.i+1)%pl.pts.length]), u)
       : sel.kind === 'ang'
       ? formatFenceAngle((cornerAngleAt(pl, sel.i) || {degrees:0}).degrees)
-      : dim ? fmtLen(dim.len, u) : '';
+      : dim ? fmtDim(dim.len, u) : '';
     if (key !== lastSelKey){
       box.innerHTML = '<h2>Selected dimension</h2>' +
         '<div class="row"><span id="dimKind"></span><b id="dimSelVal"></b></div>' +
@@ -4571,7 +4604,7 @@ function updateSelbox(){
       $('bDimClear').style.display = has ? '' : 'none';
       $('dimLabel').textContent = !has ? '' : selPt.dim.axis ? 'To wall'
                                             : selPt.dim.pid ? 'To point' : 'To corner';
-      if (has) $('dimVal').textContent = fmtLen(selPt.dim.len, u);
+      if (has) $('dimVal').textContent = fmtDim(selPt.dim.len, u);
     }
     const cornerAngleRow = $('cornerAngleRow');
     if (cornerAngleRow){
