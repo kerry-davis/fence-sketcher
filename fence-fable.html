@@ -139,6 +139,18 @@
   #gridcap{position:absolute;left:12px;bottom:10px;font-size:12px;color:var(--muted);
            background:var(--chip);padding:3px 9px;border-radius:7px;pointer-events:none}
   /* floating delete button next to the selected object (works with touch) */
+  #bDimTool.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  #bDimTool.on svg{stroke:#fff}
+  /* the dimension value, edited where it sits on the drawing instead of in the side panel */
+  #dimin{position:absolute;display:none;width:104px;padding:5px 8px;text-align:center;
+         font:700 13px var(--font);color:var(--ink);background:var(--card);
+         border:2px solid var(--accent);border-radius:9px;box-shadow:var(--shadow-2);z-index:6}
+  #dimin:focus{outline:none;box-shadow:0 0 0 4px var(--accent-soft),var(--shadow-2)}
+  /* sits beside the delete button, only while an angle is selected — the one moment it means
+     anything, so it never has to live in a menu */
+  #fswap{position:absolute;display:none;width:44px;height:44px;border-radius:50%;padding:0;
+         background:var(--accent);color:#fff;border:0;font-size:19px;line-height:44px;
+         box-shadow:0 4px 12px rgb(5 150 105/.4)}
   #fdel{position:absolute;display:none;width:44px;height:44px;border-radius:50%;padding:0;
         background:var(--danger);color:#fff;border:0;font-size:18px;line-height:44px;
         box-shadow:0 4px 12px rgb(225 29 72/.4)}
@@ -196,8 +208,6 @@
   #selbox:not(.skillroof) .skillOnly{display:none}
   #selbox label{display:flex;align-items:center;gap:8px;padding:6px 0}
   #selbox input[type=checkbox]{width:19px;height:19px;accent-color:var(--accent)}
-  #postShapeWrap{border-color:var(--accent-soft);background:var(--accent-faint);align-items:center}
-  #postShapeWrap .row{flex:1;padding:0}
   #copyBtn{width:100%}
   #totalsHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
   #totalsHead h2{margin-bottom:0}
@@ -343,7 +353,7 @@
   .dialogActions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 
   /* 3D view: the plan-only overlays have nothing to say */
-  body.d3 #snapover, body.d3 #fdel, body.d3 #gridcap{display:none}
+  body.d3 #snapover, body.d3 #fdel, body.d3 #fswap, body.d3 #gridcap{display:none}
   #bMore{display:none}         /* only shown on small screens */
   @media (max-width: 860px){
     main{flex-direction:column}
@@ -412,6 +422,11 @@
               stroke-linecap="round" stroke-linejoin="round"/>
       </svg>Building</button>
     <button id="bClose">Close loop</button>
+    <button id="bDimTool" title="Dimension (D) — click two things on the drawing">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M3 12h18M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3M6 5v14M18 5v14"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>Dimension</button>
   </div>
   <div class="grp sec editorOnly">
     <button id="bClear" class="danger">Clear all</button>
@@ -554,7 +569,11 @@
       <button id="bOrbitSpeed" title="Orbit speed: 15 degrees per second"
               aria-label="Orbit speed: 15 degrees per second">15°</button>
     </div>
+    <button id="fswap" class="editorOnly"
+            title="Swap which side of the corner moves">⇄</button>
     <button id="fdel" class="editorOnly" title="Delete">✕</button>
+    <input id="dimin" class="editorOnly" inputmode="text" autocomplete="off"
+           aria-label="Dimension value">
     <div id="gridcap" title="Grid spacing adapts automatically as you zoom"></div>
     <div id="shareState" role="status" aria-live="polite">
       <div class="shareStateCard">
@@ -566,15 +585,6 @@
 
   <aside>
     <section id="selbox" class="editorOnly" style="display:none"></section>
-
-    <section id="postShapeWrap" class="editorOnly" style="display:none">
-      <div class="row">
-        <span>Selected post shape</span>
-        <span><select id="iPostShape">
-          <option value="inherit">Use fence setting</option>
-          <option value="square">Square</option><option value="round">Round</option>
-        </select></span></div>
-    </section>
 
     <section>
       <div id="totalsHead">
@@ -653,8 +663,14 @@
         <h3 class="subhead">Posts</h3>
         <div class="row"><span>Post spacing</span><span><input id="iSpacing" inputmode="decimal"> <span class="unit" id="uSpacing">m</span></span></div>
         <div class="row"><span>Post shape</span>
-          <span><select id="iFencePostShape">
-            <option value="square">Square</option><option value="round">Round</option>
+          <span><select id="iPostShape">
+            <optgroup label="Fence setting">
+              <option value="fence:square">Square</option><option value="fence:round">Round</option>
+            </optgroup>
+            <optgroup id="selectedPostShapeGroup" label="Selected post" hidden disabled>
+              <option value="post:inherit">Use fence setting</option>
+              <option value="post:square">Square</option><option value="post:round">Round</option>
+            </optgroup>
           </select></span></div>
         <div class="row sizePair" title="Square post width × depth, or round post diameter. A 100x100 post is width 100, depth 100."><span>Post</span><span><span class="times" id="postSizePrefix" style="display:none">Ø</span><input id="iPostSize" inputmode="decimal" title="Post width"> <b class="times" id="postTimes">×</b> <input id="iPostSizeD" inputmode="decimal" title="Post depth"> <span class="unit" id="uPostSize">mm</span></span></div>
         <div class="row" title="Posts at the ends of a run. Auto skips an end already posted by another fence. One end lets you choose the physical end.">
@@ -937,8 +953,16 @@ let state = {
 };
 let view = { x: 0, y: 0, s: 24 };             // world origin offset (m) + scale (px per m)
 let sel  = null;                              // {t:'pt'|'seg'|'bld', p?, i?}
+let postShapeScope = 'fence';                 // current Post shape dropdown scope
+let postShapePointKey = '';                   // selected point whose scope is being shown
 let bsel = new Set();                         // selected building members (whole groups expand here)
 let showAllTotals = false;
+/* Dimensioning happens on the drawing, not in the panel: arm the tool, click the two things
+   being measured, then type the value where it lands. `a` holds the first pick. */
+let dimTool = null;                           // null | { a: ref | null }
+let dimHover = null;                          // reference under the cursor, highlighted while armed
+let dimHits = [];                             // value label boxes, captured at paint time
+let dimEdit = null;                           // { kind:'dim'|'seg', p, i } while the input is open
 let undoStack = [], redoStack = [];
 
 /* =====================================================================
@@ -950,6 +974,24 @@ function segsOf(pl){                          // -> [[i, a, b], ...] for each se
   return out;
 }
 const segLen = (a,b) => Math.hypot(b.x-a.x, b.y-a.y);
+const FENCE_JOIN_TOL = 1e-4;
+function joinedFenceAngle(polys, p, i){
+  const point = polys[p] && polys[p].pts[i];
+  if (!point) return null;
+  const rays = [], samePoint = q => Math.hypot(q.x-point.x, q.y-point.y) < FENCE_JOIN_TOL;
+  polys.forEach(pl => {
+    for (const [,a,b] of segsOf(pl)){
+      if (segLen(a,b) < 1e-9) continue;
+      if (samePoint(a)) rays.push({x:b.x-point.x, y:b.y-point.y});
+      if (samePoint(b)) rays.push({x:a.x-point.x, y:a.y-point.y});
+    }
+  });
+  if (rays.length !== 2) return null;
+  const lengths = rays.map(ray => Math.hypot(ray.x,ray.y));
+  const dot = (rays[0].x*rays[1].x + rays[0].y*rays[1].y) / (lengths[0]*lengths[1]);
+  return { rays, degrees:Math.acos(Math.max(-1,Math.min(1,dot))) * 180/Math.PI };
+}
+const formatFenceAngle = degrees => (Math.round(degrees*10)/10).toFixed(1) + '°';
 const gateOnly = pl => segsOf(pl).length > 0 && segsOf(pl).every(([,a]) => a.gateAfter);
 const defaultFenceName = (pl, i) => (gateOnly(pl) ? 'Gate ' : 'Fence ') + (i+1);
 const fenceName = (pl, i) => String(pl.name || '').trim() || defaultFenceName(pl, i);
@@ -1440,15 +1482,368 @@ function setSegLen(polys, p, i, len){
   b.x = a.x + ux*len; b.y = a.y + uy*len;
   a.lockAfter = len;
 }
+
+/* --- Dimensions to a building (CAD style: the typed value drives the point) ---
+   A point's `dim` references either a corner ({x,y,len}, straight-line distance) or an
+   edge ({axis,v,span,len}, perpendicular distance to that axis-aligned line). Buildings
+   are axis-aligned, so an edge is just "x = v" or "y = v" and the distance is along axis. */
+const bldCorners = b =>                          // clockwise from the top-left
+  [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]].map(([x,y]) => ({x,y}));
+const bldEdges = b => [                          // axis = the direction the distance is measured
+  { axis:'y', v:b.y,     span:[b.x, b.x+b.w] },  // top
+  { axis:'y', v:b.y+b.h, span:[b.x, b.x+b.w] },  // bottom
+  { axis:'x', v:b.x,     span:[b.y, b.y+b.h] },  // left
+  { axis:'x', v:b.x+b.w, span:[b.y, b.y+b.h] },  // right
+];
+// Nearest building corner to a world point -> {x,y,d}, or null when there are no buildings.
+function nearestCorner(builds, w){
+  let best = null, bd = Infinity;
+  for (const b of builds) for (const c of bldCorners(b)){
+    const d = Math.hypot(w.x-c.x, w.y-c.y);
+    if (d < bd){ bd = d; best = { x:c.x, y:c.y, d }; }
+  }
+  return best;
+}
+// Nearest building edge -> {axis,v,span,d}. Distance is to the drawn edge (span-clamped) so
+// clicking picks the side you meant; the dimension itself measures to the infinite line.
+function nearestEdge(builds, w){
+  let best = null, bd = Infinity;
+  for (const b of builds) for (const e of bldEdges(b)){
+    const along = e.axis === 'x' ? w.y : w.x;
+    const t = Math.min(Math.max(along, e.span[0]), e.span[1]);
+    const d = Math.hypot(w.x - (e.axis === 'x' ? e.v : t), w.y - (e.axis === 'x' ? t : e.v));
+    if (d < bd){ bd = d; best = { ...e, d }; }
+  }
+  return best;
+}
+// Referencing another fence point by index would rot the moment a point is deleted or a run
+// splits, so anchors get a stable id instead. Seeded from what's already in the drawing, which
+// keeps it correct across save/load and undo without a global counter.
+function pointId(pt, polys){
+  if (pt.pid) return pt.pid;
+  let max = 0;
+  for (const pl of polys) for (const q of pl.pts)
+    if (q.pid) max = Math.max(max, parseInt(q.pid.slice(1), 10) || 0);
+  return (pt.pid = 'p' + (max + 1));
+}
+const findPoint = (polys, pid) => {
+  for (const pl of polys) for (const q of pl.pts) if (q.pid === pid) return q;
+  return null;
+};
+// The world point a dimension measures from: another fence point, a corner, or the foot on
+// the edge line. A referenced point that has been deleted falls back to its last position.
+function dimAnchor(pt, dim, polys){
+  if (dim.pid) return findPoint(polys || [], dim.pid) || { x:dim.x, y:dim.y };
+  if (dim.axis) return dim.axis === 'x' ? { x:dim.v, y:pt.y } : { x:pt.x, y:dim.v };
+  return { x:dim.x, y:dim.y };
+}
+const dimDistance = (pt, ref) => ref.axis ? Math.abs(pt[ref.axis] - ref.v)
+                                          : Math.hypot(pt.x-ref.x, pt.y-ref.y);
+// Hold a dimensioned point at its distance from the anchor, keeping the direction it's heading.
+function applyPointDim(pt, pos, polys){
+  const dim = pt.dim;
+  if (!dim) return pos;
+  if (dim.axis){                                 // perpendicular to an edge, staying on its side
+    const side = pos[dim.axis] >= dim.v ? 1 : -1; // exactly on the line: push to the positive side
+    return dim.axis === 'x' ? { x: dim.v + side*dim.len, y: pos.y }
+                            : { x: pos.x, y: dim.v + side*dim.len };
+  }
+  const A = dimAnchor(pt, dim, polys);
+  const dx = pos.x-A.x, dy = pos.y-A.y, d = Math.hypot(dx,dy);
+  // sitting exactly on the anchor: no direction to keep, so head east
+  const ux = d > 1e-9 ? dx/d : 1, uy = d > 1e-9 ? dy/d : 0;
+  return { x: A.x + ux*dim.len, y: A.y + uy*dim.len };
+}
+// A point dimensioned off another point has to follow when that anchor moves.
+// ponytail: one pass, so a chain of them settles over successive edits rather than at once —
+// and a cycle just wobbles instead of hanging. Solve properly only if chains turn up in real use.
+function reapplyDims(polys){
+  polys.forEach(pl => pl.pts.forEach(q => {
+    if (!q.dim) return;
+    if (q.dim.pid){
+      const A = findPoint(polys, q.dim.pid);
+      if (A){ q.dim.x = A.x; q.dim.y = A.y; }    // keep the fallback fresh while it still exists
+    }
+    // a building corner or wall stays put, but the post can still be moved by something else,
+    // so its distance to them needs restoring the same as any other
+    const pos = applyPointDim(q, q, polys);
+    q.x = pos.x; q.y = pos.y;
+  }));
+}
+// A locked length has to be restored too, or the sweep measures a lock it never repairs and
+// reads a satisfiable drawing as contradictory. Alternating this with the distances is what
+// lets a locked segment and a distance meet where their circles cross.
+function reapplyLocks(polys){
+  polys.forEach(pl => pl.pts.forEach((a, i) => {
+    if (a.lockAfter == null) return;
+    if (!pl.closed && i >= pl.pts.length-1) return;
+    const b = pl.pts[(i+1) % pl.pts.length], d = segLen(a, b);
+    if (d < 1e-9) return;                        // no direction to restore it along
+    b.x = a.x + (b.x-a.x)/d*a.lockAfter;
+    b.y = a.y + (b.y-a.y)/d*a.lockAfter;
+  }));
+}
+// A dimensioned corner has to hold its angle when a post on either leg is moved, the same way
+// a locked length holds. Without this the geometry drifts away from the value that drove it.
+function reapplyAngles(polys){
+  polys.forEach((pl, p) => pl.pts.forEach((q, k) => {
+    if (!q.ang || q.ang.deg == null) return;
+    if (Math.abs((cornerAngleAt(pl, k) || {degrees:q.ang.deg}).degrees - q.ang.deg) < 1e-9) return;
+    setCornerAngle(polys, p, k, q.ang.deg, q.ang.fwd !== false);
+  }));
+}
+/* How far each dimension is from being satisfied, in metres (an angle counts a degree as a
+   centimetre so one tolerance covers both). Zero everywhere means the drawing agrees with
+   every value written on it. */
+const DIM_TOL = 5e-5;                            // a twentieth of a millimetre
+function constraintResidual(polys){
+  let worst = 0;
+  polys.forEach((pl, p) => pl.pts.forEach((q, k) => {
+    if (q.dim){
+      const A = dimAnchor(q, q.dim, polys);
+      const at = q.dim.axis ? Math.abs(q[q.dim.axis] - q.dim.v)
+                            : Math.hypot(q.x-A.x, q.y-A.y);
+      worst = Math.max(worst, Math.abs(at - q.dim.len));
+    }
+    if (q.ang && q.ang.deg != null){
+      const m = cornerAngleAt(pl, k);
+      if (m) worst = Math.max(worst, Math.abs(m.degrees - q.ang.deg) / 100);
+    }
+    if (q.lockAfter != null){
+      const b = pl.pts[(k+1) % pl.pts.length];
+      if (b && (pl.closed || k < pl.pts.length-1))
+        worst = Math.max(worst, Math.abs(segLen(q, b) - q.lockAfter));
+    }
+  }));
+  return worst;
+}
+/* Settle the drawing by applying each dimension in turn and repeating until nothing moves.
+   Sweeping one constraint at a time is a relaxation: each pass satisfies each dimension exactly
+   and disturbs its neighbours less than the last, so a chain of them converges instead of
+   settling one link per edit. Dimensions that genuinely contradict each other have no
+   arrangement to reach, so the residual stalls above tolerance — which is what makes them
+   detectable rather than something to reason about rule by rule.
+   ponytail: relaxation, not a Newton solve. It converges on the shapes a fence drawing makes,
+   but every projection moves along the line it measures, so a configuration where those lines
+   coincide — anchor, post and corner exactly collinear — is a saddle it cannot leave even when
+   a solution exists just off the axis. Swap in a least-squares solve if that ever shows up. */
+const RELAX_PASSES = 24;
+function relaxConstraints(polys){
+  let last = Infinity;
+  for (let n = 0; n < RELAX_PASSES; n++){
+    reapplyAngles(polys);
+    reapplyLocks(polys);
+    reapplyDims(polys);
+    const r = constraintResidual(polys);
+    if (r < DIM_TOL) return r;                   // everything agrees
+    if (r > last - 1e-9) return r;               // no longer improving: as close as it gets
+    last = r;
+  }
+  return constraintResidual(polys);
+}
+function reapplyConstraints(polys){ relaxConstraints(polys); }
+// Would the drawing still be satisfiable with this dimension added? Rather than reason about
+// which dimensions can coexist, try it on a copy and see whether everything can be satisfied
+// at once. `add` receives the copy and puts the proposed dimension on it.
+function dimensionIsSatisfiable(polys, add){
+  const copy = JSON.parse(JSON.stringify(polys));
+  try { add(copy); } catch { return false; }
+  return relaxConstraints(copy) < DIM_TOL;
+}
+/* --- Corner angle dimensions: the value drives the corner, swinging one leg round --- */
+// The corner at vertex k, as the two ray bearings and the signed turn between them.
+function cornerAngleAt(pl, k){
+  const V = pl.pts[k], A = pl.pts[k-1], B = pl.pts[k+1];
+  if (!V || !A || !B) return null;
+  const a1 = Math.atan2(A.y-V.y, A.x-V.x), a2 = Math.atan2(B.y-V.y, B.x-V.x);
+  let d = a2 - a1;                               // signed, so the corner keeps its handedness
+  while (d <= -Math.PI) d += 2*Math.PI;
+  while (d > Math.PI) d -= 2*Math.PI;
+  return { a1, a2, signed: d, degrees: Math.abs(d) * 180/Math.PI };
+}
+function rotatePts(pts, from, to, cx, cy, rad){
+  const c = Math.cos(rad), s = Math.sin(rad);
+  for (let i = from; i <= to; i++){
+    const dx = pts[i].x-cx, dy = pts[i].y-cy;
+    pts[i].x = cx + dx*c - dy*s;
+    pts[i].y = cy + dx*s + dy*c;
+  }
+}
+// Swing one leg of the corner until it reads `deg`. `fwd` picks which leg gives way: the run
+// after the corner, or the run before it. Everything downstream comes along, so the rest of
+// the fence keeps its shape and only this corner changes.
+function setCornerAngle(polys, p, k, deg, fwd){
+  const pl = polys[p], m = cornerAngleAt(pl, k);
+  if (!m) return;
+  const V = { x: pl.pts[k].x, y: pl.pts[k].y };
+  const want = Math.max(0.5, Math.min(179.5, deg)) * Math.PI/180 * (m.signed < 0 ? -1 : 1);
+  const delta = want - m.signed;
+  if (fwd) rotatePts(pl.pts, k+1, pl.pts.length-1, V.x, V.y, delta);
+  else     rotatePts(pl.pts, 0, k-1, V.x, V.y, -delta);
+  const prev = pl.pts[k].ang || {};
+  // `d` tracks everything this dimension has swung, always in the "after the corner" sense,
+  // so the side can be swapped later by winding the whole run back through it.
+  pl.pts[k].ang = { ...prev, deg: Math.abs(want) * 180/Math.PI, fwd, d: (prev.d || 0) + delta };
+}
+// Both swap buttons come through here, so neither can skip the check the other makes.
+function requestAngleSwap(){
+  if (!sel || sel.t !== 'dim' || sel.kind !== 'ang') return;
+  const pt = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+  if (!pt || !pt.ang) return;
+  if (!angleCanDrive(state.polys, sel.p, sel.i, pt.ang.fwd === false)){
+    alert('The other side is held by its own dimensions, so it cannot be the one to swing.');
+    return;
+  }
+  if (commitEdit(() => swapAngleSide(state.polys, sel.p, sel.i))) updateAll();
+}
+// Put the movement on the other leg. Undoing the swing on one side and applying it to the other
+// works out to one rotation of the whole run about the corner, so the angle itself never changes
+// — only which end of the fence ended up displaced.
+function swapAngleSide(polys, p, k){
+  const pl = polys[p], pt = pl.pts[k];
+  if (!pt || !pt.ang) return;
+  const V = { x: pt.x, y: pt.y }, d = pt.ang.d || 0;
+  if (d) rotatePts(pl.pts, 0, pl.pts.length-1, V.x, V.y, pt.ang.fwd ? -d : d);
+  pt.ang.fwd = !pt.ang.fwd;
+}
+// Two picked fences make an angle only where they meet at a shared post of one open run.
+// The second one clicked is the leg that swings, matching how the second entity gives way.
+function angleTarget(polys, first, second){
+  if (first.k !== 'seg' || second.k !== 'seg' || first.p !== second.p) return null;
+  const pl = polys[first.p];
+  if (pl.closed) return null;                    // rotating part of a loop would tear it open
+  if (Math.abs(first.i - second.i) !== 1) return null;
+  const k = Math.max(first.i, second.i);         // the post they share
+  if (!cornerAngleAt(pl, k)) return null;
+  return { p: first.p, k, fwd: second.i === k };
+}
+/* An angle swings a whole stretch of the run about its corner; a distance dimension pins one
+   post where it is. Both driving the same post means they pull against each other on every
+   settle, so whichever is asked for second is refused. */
+const angleSwingRange = (pl, k, fwd) => fwd ? [k+1, pl.pts.length-1] : [0, k-1];
+/* Can this dimension actually drive, or is the drawing already pinned against it? Asking for a
+   value different from the one it has and seeing whether everything can still be satisfied
+   answers that for any combination, without a rule per pairing. */
+/* The question is whether the value is free to move at all, so the nudge is small and tried
+   both ways. Asking for a large excursion would refuse a dimension that is perfectly drivable
+   but only within a short range — free is free, however little room there is. */
+const NUDGE = 0.02, NUDGE_DEG = 1.5;
+function angleCanDrive(polys, p, k, fwd){
+  const m = cornerAngleAt(polys[p], k);
+  if (!m) return false;
+  return [NUDGE_DEG, -NUDGE_DEG].some(step => {
+    const probe = Math.max(0.5, Math.min(179.5, m.degrees + step));
+    if (Math.abs(probe - m.degrees) < 1e-9) return false;
+    return dimensionIsSatisfiable(polys, c => {
+      c[p].pts[k].ang = { ...(c[p].pts[k].ang || {}), deg: probe, fwd };
+      setCornerAngle(c, p, k, probe, fwd);
+    });
+  });
+}
+function distanceCanDrive(polys, p, i, anchorRef){
+  return [NUDGE, -NUDGE].some(step => dimensionIsSatisfiable(polys, c => {
+    const a = dimAnchorRef(anchorRef, c);
+    const want = dimDistance(c[p].pts[i], a) + step;
+    if (want <= 0.01) throw new Error('too short to test the other way');
+    setPointDim(c, p, i, a, want);
+  }));
+}
+// Retyping a value asks for something specific, so the probe uses the value itself rather than
+// an arbitrary nudge: a figure the drawing cannot reach must not be written down as if it had.
+function typedValueFits(polys, kind, p, i, value){
+  return dimensionIsSatisfiable(polys, c => writeTypedValue(c, kind, p, i, value));
+}
+function writeTypedValue(polys, kind, p, i, value){
+  const q = polys[p].pts[i];
+  if (kind === 'ang') setCornerAngle(polys, p, i, value, (q.ang || {}).fwd !== false);
+  else if (kind === 'seg') setSegLen(polys, p, i, value);
+  else if (q.dim) setPointDim(polys, p, i, q.dim, value);
+}
+/* The one way a typed value reaches the drawing, so no entry point can be added that forgets
+   to ask whether the value is reachable. Returns false when it was refused. */
+function applyTypedValue(kind, p, i, value){
+  if (!state.polys[p] || !state.polys[p].pts[i]) return false;
+  if (!typedValueFits(state.polys, kind, p, i, value)){
+    alert('The rest of the drawing cannot reach that value. Remove or relax one of the ' +
+          'dimensions holding it, then try again.');
+    return false;
+  }
+  commitEdit(() => writeTypedValue(state.polys, kind, p, i, value));
+  return true;
+}
+/* A distance measured to a post standing on the corner is only safe because it stands there.
+   Two runs meeting keep their own copy of a junction post, so dragging one apart would strand
+   the allowance. Bind it to the corner post itself instead — the same place, but the actual
+   centre of the rotation, so no later drag can invalidate it. */
+function retargetToCorner(polys, p, i, anchorRef){
+  if (!anchorRef || anchorRef.k === 'wall') return anchorRef;
+  const pl = polys[p];
+  const pos = anchorRef.k === 'cnr' ? anchorRef
+            : (polys[anchorRef.p] || {pts:[]}).pts[anchorRef.i];
+  if (!pos) return anchorRef;
+  for (let k = 0; k < pl.pts.length; k++){
+    const a = pl.pts[k].ang;
+    if (!a) continue;
+    const [lo, hi] = angleSwingRange(pl, k, a.fwd !== false);
+    if (i < lo || i > hi) continue;
+    if (anchorRef.k === 'pt' && anchorRef.p === p && anchorRef.i === k) return anchorRef;
+    const V = pl.pts[k];
+    if (Math.hypot(pos.x - V.x, pos.y - V.y) < FENCE_JOIN_TOL) return { k:'pt', p, i:k };
+  }
+  return anchorRef;
+}
+const sharesSegment = (pl, i, j) => {
+  const n = pl.pts.length, d = Math.abs(i - j);
+  return d === 1 || (pl.closed && d === n-1);
+};
+// Following the anchor chain from `other` back to `pt` means the new reference closes a loop:
+// the two ends would each be driving the other. Catches the plain A->B, B->A case as well.
+function dimCycles(polys, pt, other){
+  const seen = new Set();
+  let cur = other;
+  while (cur && cur.dim && cur.dim.pid && !seen.has(cur.dim.pid)){
+    if (cur.dim.pid === pt.pid) return true;
+    seen.add(cur.dim.pid);
+    cur = findPoint(polys, cur.dim.pid);
+  }
+  return false;
+}
+// Why dimensioning point (p,i) off point (hp,hi) would be redundant — the distance between
+// them is already pinned, so a second dimension could only ever contradict the first.
+function dimRefusal(polys, p, i, hp, hi){
+  const pt = polys[p].pts[i], other = polys[hp].pts[hi];
+  if (pt === other) return 'Pick a different point — a point cannot be dimensioned to itself.';
+  if (p === hp && sharesSegment(polys[p], i, hi))
+    return 'Those two points are the ends of one segment. Set its Length on the segment instead.';
+  if (dimCycles(polys, pt, other))
+    return 'Those two points are already dimensioned. Remove that dimension first.';
+  return null;
+}
+function setPointDim(polys, p, i, ref, len){
+  const pt = polys[p].pts[i];
+  pt.dim = ref.axis ? { axis:ref.axis, v:ref.v, span:ref.span, len }
+         : ref.pid  ? { pid:ref.pid, x:ref.x, y:ref.y, len }
+                    : { x:ref.x, y:ref.y, len };
+  // retyping the value rebuilds the dim from the old one — keep where the user put it
+  if (ref.off != null) pt.dim.off = ref.off;
+  const pos = applyPointDim(pt, pt, polys);
+  pt.x = pos.x; pt.y = pos.y;
+}
 // Reverse a polyline so drawing can continue from its old start. Gate/lock flags live on
 // each segment's START point, so they must shift to the segment's new start when reversed.
 function reversePoly(pl){
   const n = pl.pts.length;
-  const flags = pl.pts.map(q => ({ g: q.gateAfter, l: q.lockAfter }));
+  const flags = pl.pts.map(q => ({ g: q.gateAfter, l: q.lockAfter, o: q.lockOff }));
   pl.pts.reverse();
   pl.pts.forEach((q, k) => {
-    const src = k < n-1 ? flags[n-2-k] : { g: undefined, l: undefined };
+    const src = k < n-1 ? flags[n-2-k] : { g: undefined, l: undefined, o: undefined };
     q.gateAfter = src.g; q.lockAfter = src.l == null ? null : src.l;
+    // a placement is measured off the segment's direction, which the reverse turns around
+    if (src.o == null) delete q.lockOff; else q.lockOff = -src.o;
+    if (q.ang){                                  // the legs swap ends with the run, and the
+      q.ang.fwd = !q.ang.fwd;                    // swing recorded against them turns with them
+      if (q.ang.d) q.ang.d = -q.ang.d;
+    }
   });
 }
 function translatePolyline(pl, start, dx, dy){
@@ -1556,6 +1951,12 @@ function freezeTree(value){
   m = calcMaterials([{pts:[{x:0,y:0},{x:10,y:0}], closed:false},
                      {pts:[{x:10,y:0},{x:10,y:10}], closed:false}], mat15);
   chk(m.shared===1 && m.posts===15, 'shared junction post');
+  const cornerTurn = 131.2 * Math.PI/180;
+  const joinedAngle = joinedFenceAngle([
+    {pts:[{x:1,y:0},{x:0,y:0}],closed:false},
+    {pts:[{x:0,y:0},{x:Math.cos(cornerTurn),y:Math.sin(cornerTurn)}],closed:false},
+  ], 0, 1);
+  chk(joinedAngle && near(joinedAngle.degrees,131.2), 'joined fence angle');
   m = calcMaterials([{pts:[{x:0,y:0},{x:10,y:0}], closed:false, excludeMaterials:true},
                      {pts:[{x:10,y:0},{x:20,y:0}], closed:false}], mat15);
   chk(m.shared===0 && m.posts===8, 'excluded run does not suppress an included end post');
@@ -1665,6 +2066,187 @@ function freezeTree(value){
   // typed length moves far end
   ps = [{pts:[{x:0,y:0},{x:4,y:0}], closed:false}]; setSegLen(ps, 0, 0, 7.5);
   chk(near(ps[0].pts[1].x, 7.5) && near(ps[0].pts[0].lockAfter, 7.5), 'set length');
+  // typed dimension pulls the point along the line to its anchor corner
+  ps = [{pts:[{x:0,y:0},{x:4,y:0}], closed:false}]; setPointDim(ps, 0, 1, {x:10,y:0}, 1.5);
+  chk(near(ps[0].pts[1].x, 8.5) && near(ps[0].pts[1].y, 0), 'dimension drives the point');
+  chk(near(applyPointDim(ps[0].pts[1], {x:10,y:9}).y, 1.5), 'dragging keeps the dimension');
+  chk(near(nearestCorner([{x:2,y:2,w:3,h:3}], {x:5.4,y:5.4}).d, Math.hypot(.4,.4)), 'nearest corner');
+  chk(applyPointDim({x:1,y:1}, {x:9,y:9}).x === 9, 'no dimension leaves the point alone');
+  // edge dimensions measure perpendicular to an axis-aligned wall
+  const bld = [{x:10,y:2,w:6,h:6}];
+  chk(nearestEdge(bld, {x:9.6,y:5}).axis==='x' && near(nearestEdge(bld, {x:9.6,y:5}).v, 10),
+      'nearest edge is the near wall');
+  chk(near(nearestEdge(bld, {x:13,y:1.5}).v, 2) && nearestEdge(bld, {x:13,y:1.5}).axis==='y',
+      'edge picks the side clicked');
+  ps = [{pts:[{x:2,y:4},{x:7,y:5}], closed:false}];
+  setPointDim(ps, 0, 1, {axis:'x', v:10, span:[2,8]}, 1.5);
+  chk(near(ps[0].pts[1].x, 8.5) && near(ps[0].pts[1].y, 5), 'edge dimension moves perpendicular');
+  chk(near(applyPointDim(ps[0].pts[1], {x:3,y:9}).x, 8.5), 'edge dimension holds through a drag');
+  chk(near(applyPointDim({dim:{axis:'x',v:10,len:1.5}}, {x:20,y:0}).x, 11.5), 'edge keeps its side');
+  chk(near(dimAnchor({x:4,y:5}, {axis:'x',v:10,len:1}).y, 5), 'edge anchor is the foot on the line');
+  // retyping a value must not throw away where the dimension was placed
+  ps = [{pts:[{x:0,y:0},{x:4,y:0}], closed:false}];
+  setPointDim(ps, 0, 1, {x:10,y:0}, 6); ps[0].pts[1].dim.off = 2.75;
+  setPointDim(ps, 0, 1, ps[0].pts[1].dim, 3);
+  chk(near(ps[0].pts[1].dim.off, 2.75) && near(ps[0].pts[1].dim.len, 3), 'placement survives a retype');
+  // corner angles: the typed value swings one leg about the shared post
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 90), 'reads a square corner');
+  setCornerAngle(ps, 0, 1, 45, true);            // the run after the corner swings
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 45), 'typed angle drives the corner');
+  chk(near(ps[0].pts[0].x, 0) && near(ps[0].pts[1].x, 5), 'the leg before the corner stays put');
+  chk(near(segLen(ps[0].pts[1], ps[0].pts[2]), 5), 'swinging a leg keeps its length');
+  const heldEnd = { x: ps[0].pts[2].x, y: ps[0].pts[2].y }, movedEnd = ps[0].pts[0].x;
+  setCornerAngle(ps, 0, 1, 90, false);           // now the run before it swings instead
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 90), 'the other leg can be the one that gives way');
+  chk(near(ps[0].pts[2].x, heldEnd.x) && near(ps[0].pts[2].y, heldEnd.y),
+      'the leg after the corner is the one left alone this time');
+  chk(Math.abs(ps[0].pts[0].x - movedEnd) > 1, 'the leg before the corner is what swung');
+  // swapping the moving side keeps the angle and hands the displacement to the other end
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  const home = ps[0].pts.map(q => ({x:q.x, y:q.y}));
+  setCornerAngle(ps, 0, 1, 45, true);            // the far end swings, the near end holds
+  chk(near(ps[0].pts[0].x, home[0].x) && near(ps[0].pts[0].y, home[0].y), 'near end held');
+  const swung = ps[0].pts.map(q => ({x:q.x, y:q.y}));
+  swapAngleSide(ps, 0, 1);
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 45), 'swapping does not disturb the angle');
+  chk(near(ps[0].pts[2].x, home[2].x) && near(ps[0].pts[2].y, home[2].y),
+      'after the swap the far end is back where it started');
+  chk(Math.hypot(ps[0].pts[0].x-home[0].x, ps[0].pts[0].y-home[0].y) > 1,
+      'and the near end is the one that moved instead');
+  chk(ps[0].pts[1].ang.fwd === false, 'the swap is recorded');
+  swapAngleSide(ps, 0, 1);                       // and back again
+  chk(ps[0].pts.every((q, j) => near(q.x, swung[j].x) && near(q.y, swung[j].y)),
+      'swapping back restores the first arrangement exactly');
+  chk(ps[0].pts[1].ang.fwd === true, 'and the recorded side goes back too');
+  // reversing a run turns the swing round with it, so a later swap still lands correctly
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  setCornerAngle(ps, 0, 1, 45, true);
+  reversePoly(ps[0]);                            // the swung post is now pts[0]
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 45), 'reversing leaves the angle alone');
+  swapAngleSide(ps, 0, 1);
+  chk(near(ps[0].pts[0].x, 5) && near(ps[0].pts[0].y, 5),
+      'swap after a reverse still sends the swung post home');
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 45), 'and the angle survives that too');
+  // a placement is measured off the segment direction, which reversing turns around
+  ps = [{pts:[{x:0,y:0,lockAfter:5,lockOff:2.5},{x:5,y:0},{x:10,y:0}], closed:false}];
+  reversePoly(ps[0]);
+  chk(ps[0].pts[1].lockAfter === 5 && near(ps[0].pts[1].lockOff, -2.5),
+      'a placed length keeps its offset, mirrored, on the segment it belongs to');
+  chk(ps[0].pts[2].lockOff === undefined, 'and leaves none behind on the old point');
+  // a dimensioned corner holds its angle when a post on a leg is moved
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  setCornerAngle(ps, 0, 1, 90, true);
+  ps[0].pts[0].y = 3;                            // shove the far post of the fixed leg
+  reapplyAngles(ps);
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 90), 'the corner holds its angle');
+  // and a dependent point follows an anchor moved by a length edit, not just by a drag
+  ps = [{pts:[{x:0,y:0},{x:4,y:0}], closed:false}, {pts:[{x:10,y:0},{x:12,y:0}], closed:false}];
+  setPointDim(ps, 1, 0, { pid: pointId(ps[0].pts[1], ps), x:4, y:0 }, 3);
+  setSegLen(ps, 0, 0, 9);
+  reapplyConstraints(ps);
+  chk(near(Math.abs(ps[1].pts[0].x - ps[0].pts[1].x), 3), 'the dependent follows a moved anchor');
+  // and when the whole anchoring run is dragged somewhere else
+  const runHome = ps[0].pts.map(q => ({x:q.x, y:q.y}));
+  translatePolyline(ps[0], runHome, 4, 2);
+  reapplyConstraints(ps);
+  chk(near(Math.hypot(ps[1].pts[0].x - ps[0].pts[1].x, ps[1].pts[0].y - ps[0].pts[1].y), 3),
+      'the dependent follows its whole run being moved');
+  // settling a drifted corner has to count towards the swing, or a later swap overshoots
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  setCornerAngle(ps, 0, 1, 45, true);
+  ps[0].pts[0].y = 3;                            // drag a post on the fixed leg
+  reapplyAngles(ps);
+  swapAngleSide(ps, 0, 1);
+  chk(near(ps[0].pts[2].x, 5) && near(ps[0].pts[2].y, 5),
+      'swap still lands the swung post home after the corner was settled');
+  // whether two dimensions can coexist is answered by trying to satisfy both, not by a rule
+  // per pairing: ask for a value the dimension does not have and see if the drawing follows
+  // the corner at post 1 turns posts 2..3; post 2 is the leg whose bearing the angle measures
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:5}], closed:false}];
+  chk(angleCanDrive(ps, 0, 1, true), 'a clear run lets its corner turn');
+  ps[0].pts[2].dim = { x:20, y:5, len:15 };      // the leg post pinned to a building corner
+  chk(!angleCanDrive(ps, 0, 1, true), 'a leg post pinned to a building stops that side turning');
+  chk(angleCanDrive(ps, 0, 1, false), 'the other side of the corner still turns');
+  ps[0].pts[1].pid = 'pA';
+  ps[0].pts[2].dim = { pid:'pA', x:5, y:0, len:5 };   // measured from the corner it turns about
+  chk(angleCanDrive(ps, 0, 1, true), 'a distance to the corner post turns with it');
+  ps[0].pts[2].dim = { axis:'x', v:20, span:[0,9], len:15 };
+  chk(!angleCanDrive(ps, 0, 1, true), 'a distance to a wall does not');
+  // an undimensioned segment stretching is not a contradiction — nothing written down is broken
+  delete ps[0].pts[2].dim;
+  ps[0].pts[1].ang = { deg:90, fwd:true };
+  ps[0].pts[3].dim = { x:20, y:5, len:11 };
+  chk(angleCanDrive(ps, 0, 1, true), 'a pinned post that is not a leg leaves the corner free');
+  // and the same question asked of a distance about to be created
+  delete ps[0].pts[3].dim; delete ps[0].pts[1].ang;
+  chk(distanceCanDrive(ps, 0, 2, {k:'cnr', x:20, y:5}), 'with no angle, any distance drives');
+  ps[0].pts[1].ang = { deg:90, fwd:true };
+  chk(!distanceCanDrive(ps, 0, 2, {k:'cnr', x:20, y:5}), 'pinning a leg post to a building is not');
+  chk(distanceCanDrive(ps, 0, 2, {k:'pt', p:0, i:1}), 'measuring from the corner is');
+  chk(distanceCanDrive(ps, 0, 0, {k:'cnr', x:20, y:5}), 'a post outside the swing is unaffected');
+  // and what gives is whatever is not written down: lock the leg too and there is no room left
+  const legPinned = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  legPinned[0].pts[2].dim = { x:5, y:7, len:2 };
+  chk(angleCanDrive(legPinned, 0, 1, true), 'an undimensioned leg can stretch to satisfy both');
+  legPinned[0].pts[1].lockAfter = segLen(legPinned[0].pts[1], legPinned[0].pts[2]);
+  chk(!angleCanDrive(legPinned, 0, 1, true), 'locking that leg leaves the two contradictory');
+  // a locked length is relaxed as well as measured, so it can meet a distance where they cross
+  const locked = [{pts:[{x:0,y:0,lockAfter:5},{x:3,y:4}], closed:false}];
+  chk(distanceCanDrive(locked, 0, 1, {k:'cnr', x:0, y:4}),
+      'a locked length and a distance meet where their circles cross');
+  setPointDim(locked, 0, 1, {x:0, y:4}, 3.37);
+  relaxConstraints(locked);
+  chk(constraintResidual(locked) < DIM_TOL, 'and settling satisfies both at once');
+  chk(!typedValueFits(locked, 'dim', 0, 1, 20), 'a value beyond reach is refused, not written down');
+  chk(typedValueFits(locked, 'dim', 0, 1, 2), 'one within reach is accepted');
+  // a junction post of another run, standing on the corner, binds to the corner post
+  ps.push({pts:[{x:5,y:0,pid:'pJ'},{x:11,y:-3}], closed:false});
+  // that allowance is bound to the corner post, so separating the junction can't strand it
+  const bound = retargetToCorner(ps, 0, 3, {k:'pt', p:1, i:0});
+  chk(bound.k === 'pt' && bound.p === 0 && bound.i === 1, 'a post on the corner binds to the corner');
+  chk(retargetToCorner(ps, 0, 3, {k:'cnr', x:5, y:0}).i === 1, 'so does a building corner on it');
+  chk(retargetToCorner(ps, 0, 3, {k:'pt', p:1, i:1}).p === 1, 'one standing apart is left alone');
+  chk(retargetToCorner(ps, 0, 3, {k:'wall', axis:'x', v:9}).k === 'wall', 'a wall is left alone');
+  chk(retargetToCorner(ps, 0, 0, {k:'pt', p:1, i:0}).p === 1,
+      'and a post outside the swing is left alone, there being nothing to strand');
+  // two fences make an angle only where they share a post of one open run
+  const ap = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:9}], closed:false},
+              {pts:[{x:0,y:9},{x:4,y:9}], closed:false}];
+  chk(angleTarget(ap, {k:'seg',p:0,i:0}, {k:'seg',p:0,i:1}).k === 1, 'adjacent fences share post 1');
+  chk(angleTarget(ap, {k:'seg',p:0,i:1}, {k:'seg',p:0,i:0}).fwd === false, 'second pick swings');
+  chk(!angleTarget(ap, {k:'seg',p:0,i:0}, {k:'seg',p:0,i:2}), 'refuses fences that do not meet');
+  chk(!angleTarget(ap, {k:'seg',p:0,i:0}, {k:'seg',p:1,i:0}), 'refuses fences on separate runs');
+  chk(!angleTarget([{pts:ap[0].pts, closed:true}], {k:'seg',p:0,i:0}, {k:'seg',p:0,i:1}),
+      'refuses a closed loop, which rotating would tear open');
+  // point-to-point: referenced by stable id, so it survives the anchor's index moving
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:9,y:0}], closed:false}];
+  let anchorId = pointId(ps[0].pts[0], ps);
+  chk(anchorId === 'p1' && pointId(ps[0].pts[0], ps) === 'p1', 'point id is stable');
+  chk(pointId(ps[0].pts[1], ps) === 'p2', 'ids do not collide');
+  setPointDim(ps, 0, 2, { pid:anchorId, x:0, y:0 }, 4);
+  chk(near(ps[0].pts[2].x, 4), 'point-to-point dimension drives the point');
+  ps[0].pts[0].x = -3; reapplyDims(ps);          // the anchor moves; the dimensioned point follows
+  chk(near(ps[0].pts[2].x, 1), 'dimensioned point follows its anchor');
+  deletePoint(ps, 0, 1);                         // an unrelated point goes: the id still resolves
+  reapplyDims(ps);
+  chk(near(ps[0].pts[1].x, 1), 'id survives a renumbering delete');
+  ps[0].pts.splice(0, 1); reapplyDims(ps);       // anchor deleted: falls back to its last position
+  chk(near(ps[0].pts[0].x, 1), 'deleted anchor falls back to its last position');
+  // a pair whose distance is already pinned must refuse a second, contradictable dimension
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:9,y:0}], closed:false}];
+  chk(dimRefusal(ps, 0, 0, 0, 0), 'refuses dimensioning a point to itself');
+  chk(dimRefusal(ps, 0, 0, 0, 1), 'refuses the two ends of one segment');
+  chk(!dimRefusal(ps, 0, 0, 0, 2), 'allows a non-adjacent pair');
+  chk(dimRefusal([{pts:[{x:0,y:0},{x:5,y:0},{x:9,y:0}], closed:true}], 0, 0, 0, 2),
+      'closed run: first and last share a segment too');
+  ps.push({pts:[{x:0,y:9},{x:5,y:9}], closed:false});
+  chk(!dimRefusal(ps, 0, 0, 1, 0), 'allows a pair on two different runs');
+  setPointDim(ps, 0, 0, { pid: pointId(ps[0].pts[2], ps), x:9, y:0 }, 4);
+  chk(dimRefusal(ps, 0, 2, 0, 0), 'refuses the mirror image of an existing dimension');
+  // A -> B -> C, so C -> A would close the loop
+  setPointDim(ps, 1, 0, { pid: pointId(ps[0].pts[0], ps), x:0, y:0 }, 3);
+  chk(dimRefusal(ps, 0, 2, 1, 0), 'refuses a longer reference cycle');
   // --- 3D geometry ---
   // posts follow the counting model: 10 m at 1.5 m = 7 panels = 8 posts, ends included
   let pa = postsAlong({x:0,y:0}, {x:10,y:0}, 1.5, false);
@@ -1815,6 +2397,7 @@ function freezeTree(value){
    ===================================================================== */
 const $ = id => document.getElementById(id);
 const cv = $('cv'), ctx = cv.getContext('2d'), wrap = $('wrap'), fdel = $('fdel');
+const fswap = $('fswap');
 let cw = 0, ch = 0;                           // canvas size in CSS px
 
 function resize(){
@@ -1859,6 +2442,45 @@ function fenceLabelLayout(pl, p){
   x = Math.max(w/2+4, Math.min(cw-w/2-4, x));
   y = Math.max(h/2+4, Math.min(ch-h/2-4, y));
   return { p, i, text, x, y, w, h, mx, my };
+}
+function drawCornerAngle(p, i, measure){
+  const point = state.polys[p] && state.polys[p].pts[i];
+  if (!measure || !point) return;
+  const P = W2S(point), rays = measure.rays.map(ray => {
+    const end = W2S({x:point.x+ray.x, y:point.y+ray.y});
+    return {angle:Math.atan2(end.y-P.y,end.x-P.x), length:Math.hypot(end.x-P.x,end.y-P.y)};
+  });
+  const start = rays[0].angle;
+  const delta = Math.atan2(Math.sin(rays[1].angle-start), Math.cos(rays[1].angle-start));
+  const mid = start + delta/2, radius = Math.max(22, Math.min(38, Math.min(...rays.map(ray => ray.length))*.38));
+  const label = formatFenceAngle(measure.degrees), textRadius = radius + 16;
+  const selectedPoint = sel && sel.t === 'pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+  const selected = selectedPoint && Math.hypot(selectedPoint.x-point.x, selectedPoint.y-point.y) < FENCE_JOIN_TOL;
+  let x = P.x + Math.cos(mid)*textRadius, y = P.y + Math.sin(mid)*textRadius;
+  ctx.save();
+  ctx.font = '700 12px system-ui';
+  const w = ctx.measureText(label).width + 10;
+  x = Math.max(w/2+4, Math.min(cw-w/2-4, x));
+  y = Math.max(12, Math.min(ch-12, y));
+  ctx.beginPath();
+  ctx.arc(P.x, P.y, radius, start, start+delta, delta < 0);
+  ctx.lineWidth = 5; ctx.strokeStyle = C.halo; ctx.stroke();
+  ctx.lineWidth = 2; ctx.strokeStyle = selected ? ACCENT : C.label; ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 4; ctx.strokeStyle = C.halo; ctx.strokeText(label, x, y);
+  ctx.fillStyle = selected ? ACCENT : C.label; ctx.fillText(label, x, y);
+  ctx.restore();
+}
+function drawCornerAngles(){
+  if (!sel || (sel.t !== 'seg' && sel.t !== 'pt') || !state.polys[sel.p]) return;
+  const seen = [];
+  const pl = state.polys[sel.p], p = sel.p;
+  pl.pts.forEach((point, i) => {
+    const measure = joinedFenceAngle(state.polys, p, i);
+    if (!measure || (measure.degrees > 179.9 && !(sel && sel.t === 'pt' && sel.p === p && sel.i === i)) ||
+        seen.some(q => Math.hypot(q.x-point.x, q.y-point.y) < FENCE_JOIN_TOL)) return;
+    seen.push(point); drawCornerAngle(p, i, measure);
+  });
 }
 function zoomAt(sx, sy, factor){
   const w = S2W(sx, sy);
@@ -2116,6 +2738,48 @@ function pick(sx, sy){
   return null;
 }
 
+/* What sits under the cursor that a dimension could measure, in the order a click should
+   prefer them: a post beats the corner behind it, a fence beats the wall behind it. */
+function dimRefAt(sx, sy){
+  for (let p = state.polys.length-1; p >= 0; p--)
+    for (let i = state.polys[p].pts.length-1; i >= 0; i--){
+      const s = W2S(state.polys[p].pts[i]);
+      if (Math.hypot(sx-s.x, sy-s.y) < HIT.pt) return { k:'pt', p, i };
+    }
+  const w = S2W(sx, sy);
+  const c = nearestCorner(state.builds, w);
+  if (c && c.d * view.s < HIT.corner) return { k:'cnr', x:c.x, y:c.y };
+  for (let p = state.polys.length-1; p >= 0; p--)
+    for (const [i,a,b] of segsOf(state.polys[p])){
+      const A = W2S(a), B = W2S(b);
+      if (dist2seg(sx,sy, A.x,A.y, B.x,B.y).d < HIT.seg) return { k:'seg', p, i };
+    }
+  const e = nearestEdge(state.builds, w);
+  if (e && e.d * view.s < HIT.edge) return { k:'wall', axis:e.axis, v:e.v, span:e.span };
+  return null;
+}
+const sameDimRef = (a, b) => !!a && !!b && a.k === b.k &&
+  (a.k === 'pt' || a.k === 'seg' ? a.p === b.p && a.i === b.i
+   : a.k === 'cnr' ? a.x === b.x && a.y === b.y
+   : a.axis === b.axis && a.v === b.v);
+// Only a fence point can be moved to satisfy a dimension, so one end of the pair must be one.
+// With two, the second click is the one that gives way — the same order Onshape drives in.
+// A fence segment is only ever measured on its own (its length), never used as an anchor.
+function dimPairing(first, second){
+  const anchorable = r => r.k === 'pt' || r.k === 'cnr' || r.k === 'wall';
+  if (second.k === 'pt' && anchorable(first)) return { driven: second, ref: first };
+  if (first.k === 'pt' && anchorable(second)) return { driven: first,  ref: second };
+  return null;
+}
+// A picked reference in the shape setPointDim stores. Mutates on 'pt' (assigns the anchor its
+// stable id), so it belongs inside the commitEdit that follows.
+function dimAnchorRef(ref, polys){
+  if (ref.k === 'cnr')  return { x:ref.x, y:ref.y };
+  if (ref.k === 'wall') return { axis:ref.axis, v:ref.v, span:ref.span };
+  const q = polys[ref.p].pts[ref.i];
+  return { pid: pointId(q, polys), x:q.x, y:q.y };
+}
+
 /* =====================================================================
    Mutations — every one snapshots first so Undo reverses it
    ===================================================================== */
@@ -2136,6 +2800,9 @@ function commitEdit(edit){
   if (readOnly) return false;
   const before = historySnapshot();
   edit();
+  // every committed edit can move an anchor — typing a length, swinging a corner, moving a run —
+  // so the things dimensioned off it settle here rather than only after a drag
+  reapplyConstraints(state.polys);
   if (historySnapshot() === before) return false;
   pushHistory(before);
   return true;
@@ -2207,6 +2874,14 @@ function deleteSelected(){
   if (sel.t==='pt')  deletePoint(state.polys, sel.p, sel.i);
   if (sel.t==='seg') deleteSegment(state.polys, sel.p, sel.i);
   if (sel.t==='bld') deleteBuildings(state.builds, bsel);
+  if (sel.t==='dim'){                           // the dimension goes, the geometry stays put
+    const pt = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+    if (pt){
+      if (sel.kind === 'seg'){ pt.lockAfter = null; delete pt.lockOff; }
+      else if (sel.kind === 'ang') delete pt.ang;
+      else delete pt.dim;
+    }
+  }
   sel = null; bsel.clear(); updateAll();
 }
 function clearAll(){
@@ -2216,7 +2891,8 @@ function clearAll(){
   state.polys = []; state.builds = []; sel = null; bsel.clear();
   updateAll();
 }
-// Move a dragged fence point: snap, then keep any locked neighbour segments at their length.
+// Move a dragged fence point: snap, then keep any locked neighbour segments at their length,
+// then honour a corner dimension (applied last, so it wins over a length lock).
 // ponytail: locks are enforced one neighbour at a time — with BOTH sides locked the first may
 // drift slightly; a real constraint solver is the upgrade if that ever matters.
 function movePoint(p, i, w){
@@ -2235,7 +2911,9 @@ function movePoint(p, i, w){
     const d = Math.hypot(pos.x-q.x, pos.y-q.y) || 1;
     pos = { x: q.x + (pos.x-q.x)/d*len, y: q.y + (pos.y-q.y)/d*len };
   }
+  pos = applyPointDim(pl.pts[i], pos, state.polys);
   pl.pts[i].x = pos.x; pl.pts[i].y = pos.y;
+  reapplyConstraints(state.polys);               // anything dimensioned off this point follows
 }
 
 /* =====================================================================
@@ -2264,12 +2942,420 @@ function setTheme(t){
   paint();
 }
 
+/* Drafting-style dimension: witness lines standing off the geometry, an offset dimension
+   line with arrowheads between them, and the driving value sitting in a break in the middle.
+   ponytail: the offset always falls to one side — flip it manually if it ever lands awkwardly. */
+const DIM = { gap: 6, off: 22, tail: 6, arrow: 9, half: 3.2 };
+function dimArrow(x, y, ux, uy){                 // filled triangle, tip at (x,y), pointing along u
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - ux*DIM.arrow - uy*DIM.half, y - uy*DIM.arrow + ux*DIM.half);
+  ctx.lineTo(x - ux*DIM.arrow + uy*DIM.half, y - uy*DIM.arrow - ux*DIM.half);
+  ctx.closePath(); ctx.fill();
+}
+/* Draw one dimension between two screen points, offset by `offPx` to the side the user placed
+   it. Returns the label's centre so it can be registered for picking or used to site the input.
+   opts: { picked, extendTo (screen pt for a wall's dotted run-past), ghost } */
+function renderDimension(A, B, txt, offPx, opts = {}){
+  const len = Math.hypot(B.x-A.x, B.y-A.y);
+  if (len < 1) return null;                      // the two ends coincide: nothing to draw
+  const ux = (B.x-A.x)/len, uy = (B.y-A.y)/len;  // along the measurement
+  const nx = -uy, ny = ux;                       // sideways, towards the placement
+  const off = offPx, side = off < 0 ? -1 : 1, gap = DIM.gap*side, tail = off + DIM.tail*side;
+  ctx.save();
+  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.setLineDash([]);
+  if (opts.ghost) ctx.globalAlpha = .65;
+  ctx.lineWidth = opts.picked ? 2 : 1;
+  const a = { x: A.x + nx*off, y: A.y + ny*off }, b = { x: B.x + nx*off, y: B.y + ny*off };
+  if (opts.picked){                              // selection halo, so it reads as picked
+    ctx.save();
+    ctx.globalAlpha = .18; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.restore();
+  }
+  for (const P of [A, B]){                       // witness lines, clear of the geometry
+    ctx.beginPath();
+    ctx.moveTo(P.x + nx*gap, P.y + ny*gap);
+    ctx.lineTo(P.x + nx*tail, P.y + ny*tail);
+    ctx.stroke();
+  }
+  if (opts.extendTo){                            // a wall measured past its own end
+    ctx.setLineDash([2,4]);
+    ctx.beginPath(); ctx.moveTo(opts.extendTo.x, opts.extendTo.y); ctx.lineTo(A.x, A.y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // too short for arrowheads to fit between the witness lines: put them outside, pointing in
+  const inward = len > DIM.arrow*2.6 ? 1 : -1;
+  const ext = inward < 0 ? DIM.arrow*1.4 : 0;
+  ctx.lineWidth = opts.picked ? 2.25 : 1.25;
+  ctx.beginPath();
+  ctx.moveTo(a.x - ux*ext, a.y - uy*ext); ctx.lineTo(b.x + ux*ext, b.y + uy*ext);
+  ctx.stroke();
+  dimArrow(a.x, a.y, -ux*inward, -uy*inward);
+  dimArrow(b.x, b.y,  ux*inward,  uy*inward);
+  let ang = Math.atan2(uy, ux);
+  if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI;
+  const mid = { x:(a.x+b.x)/2, y:(a.y+b.y)/2 }, lift = inward < 0 ? -11 : 0;
+  ctx.translate(mid.x, mid.y); ctx.rotate(ang);
+  ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 5; ctx.strokeStyle = C.halo;   // the halo IS the break in the dimension line
+  ctx.strokeText(txt, 0, lift);
+  ctx.fillStyle = ACCENT; ctx.fillText(txt, 0, lift);
+  const half = Math.max(24, ctx.measureText(txt).width/2 + 9);
+  ctx.restore();
+  // the whole dimension is pickable — the value box (in ITS OWN rotated frame, or a slanted
+  // label is only clickable dead centre) and the dimension line between the arrowheads
+  return { x: mid.x - Math.sin(ang)*lift, y: mid.y + Math.cos(ang)*lift, r: half, ang,
+           line: { ax:a.x, ay:a.y, bx:b.x, by:b.y } };
+}
+// Where the anchor and the measured point sit on screen, plus the wall run-past if there is one.
+function dimEnds(q, polys){
+  const foot = dimAnchor(q, q.dim, polys);
+  const out = { A: W2S(foot), B: W2S(q) };
+  if (q.dim.axis){
+    const along = q.dim.axis === 'x' ? foot.y : foot.x, [lo,hi] = q.dim.span;
+    if (along < lo || along > hi){
+      const end = along < lo ? lo : hi;
+      out.extendTo = W2S(q.dim.axis === 'x' ? {x:q.dim.v, y:end} : {x:end, y:q.dim.v});
+    }
+  }
+  return out;
+}
+// Placement is stored in metres so it holds its distance from the drawing as you zoom.
+const dimOffPx = d => (d.off == null ? DIM.off : d.off * view.s);
+function drawDimension(q, p, i){
+  const { A, B, extendTo } = dimEnds(q, state.polys);
+  const box = renderDimension(A, B, fmtLen(q.dim.len, state.unit), dimOffPx(q.dim), {
+    picked: sel && sel.t==='dim' && sel.kind==='dim' && sel.p===p && sel.i===i, extendTo });
+  if (box) dimHits.push({ kind:'dim', p, i, ...box });
+}
+// A locked segment length placed by the tool is drawn as a dimension in its own right.
+function drawSegDimension(pl, p, i){
+  const a = pl.pts[i], b = pl.pts[(i+1) % pl.pts.length];
+  const box = renderDimension(W2S(a), W2S(b), fmtLen(segLen(a,b), state.unit), a.lockOff * view.s,
+    { picked: sel && sel.t==='dim' && sel.kind==='seg' && sel.p===p && sel.i===i });
+  if (box) dimHits.push({ kind:'seg', p, i, ...box });
+}
+
+// Where a value sits on the drawing, so the inline input can open exactly on top of it.
+function dimLabelPos(kind, p, i){
+  const pl = state.polys[p];
+  const hit = dimHits.find(h => h.kind === kind && h.p === p && h.i === i);
+  if (hit) return hit;
+  if (kind === 'ang'){
+    const m = cornerAngleAt(pl, i), V = W2S(pl.pts[i]);
+    if (!m) return V;
+    const s1 = W2S(pl.pts[i-1]), s2 = W2S(pl.pts[i+1]);
+    const b1 = Math.atan2(s1.y-V.y, s1.x-V.x), b2 = Math.atan2(s2.y-V.y, s2.x-V.x);
+    let sw = b2-b1; while (sw <= -Math.PI) sw += 2*Math.PI; while (sw > Math.PI) sw -= 2*Math.PI;
+    const r = angRadPx(pl.pts[i]);
+    return { x: V.x + Math.cos(b1+sw/2)*r, y: V.y + Math.sin(b1+sw/2)*r };
+  }
+  if (kind === 'seg'){
+    const A = W2S(pl.pts[i]), B = W2S(pl.pts[(i+1) % pl.pts.length]);
+    return { x:(A.x+B.x)/2, y:(A.y+B.y)/2 };
+  }
+  const q = pl.pts[i];
+  const A = W2S(dimAnchor(q, q.dim, state.polys)), B = W2S(q);
+  const L = Math.hypot(B.x-A.x, B.y-A.y) || 1, off = dimOffPx(q.dim);
+  return { x:(A.x+B.x)/2 - (B.y-A.y)/L*off, y:(A.y+B.y)/2 + (B.x-A.x)/L*off };
+}
+// Test the value box in the label's own rotated frame — an axis-aligned box would make a
+// slanted dimension clickable only at its dead centre. The dimension line counts too.
+function dimHitAt(sx, sy){
+  return dimHits.find(h => {
+    const dx = sx-h.x, dy = sy-h.y, a = h.ang || 0;
+    const u = dx*Math.cos(a) + dy*Math.sin(a), v = -dx*Math.sin(a) + dy*Math.cos(a);
+    if (Math.abs(u) <= h.r && Math.abs(v) <= 12) return true;
+    if (h.line) return dist2seg(sx, sy, h.line.ax, h.line.ay, h.line.bx, h.line.by).d <= 7;
+    if (h.arc){                                  // on the arc itself: right radius, within sweep
+      const c = h.arc;
+      if (Math.abs(Math.hypot(sx-c.cx, sy-c.cy) - c.rad) > 7) return false;
+      let t = Math.atan2(sy-c.cy, sx-c.cx) - c.b1;   // measured from the arc's start, normalised
+      while (t <= -Math.PI) t += 2*Math.PI;
+      while (t > Math.PI) t -= 2*Math.PI;
+      return c.sweep >= 0 ? t >= -0.06 && t <= c.sweep + 0.06
+                          : t <= 0.06 && t >= c.sweep - 0.06;
+    }
+    return false;
+  });
+}
+
+function openDimEdit(target){
+  const pl = state.polys[target.p];
+  if (readOnly || !pl || !pl.pts[target.i]) return;
+  const pt = pl.pts[target.i];
+  const cur = target.kind === 'seg' ? segLen(pt, pl.pts[(target.i+1) % pl.pts.length])
+            : target.kind === 'ang' ? (cornerAngleAt(pl, target.i) || {}).degrees
+                                    : pt.dim && pt.dim.len;
+  if (cur == null) return;
+  dimEdit = target;
+  const pos = dimLabelPos(target.kind, target.p, target.i);
+  const el = $('dimin');
+  el.style.display = 'block';
+  el.style.left = Math.max(4, Math.min(cw-112, pos.x-54)) + 'px';
+  el.style.top  = Math.max(4, Math.min(ch-38,  pos.y-15)) + 'px';
+  el.value = target.kind === 'ang' ? +cur.toFixed(1)
+           : state.unit === 'm' ? +cur.toFixed(3) : ftStr(cur);
+  el.focus(); el.select();
+  paint();
+}
+function closeDimEdit(){
+  if (!dimEdit) return;
+  dimEdit = null;
+  const el = $('dimin');
+  el.style.display = 'none';
+  if (document.activeElement === el) el.blur();  // else the hidden input keeps eating shortcuts
+  paint();
+}
+function commitDimEdit(){
+  const t = dimEdit;
+  if (!t) return;
+  const typed = $('dimin').value;
+  closeDimEdit();                                // before the work, so the blur can't re-enter
+  const pl = state.polys[t.p];
+  if (!pl || !pl.pts[t.i]) return;
+  // whatever was just typed stays selected, so delete and swap are to hand straight away
+  // instead of hiding behind leaving the tool and clicking the dimension again
+  const keep = () => { sel = { t:'dim', kind:t.kind, p:t.p, i:t.i }; bsel.clear(); };
+  if (t.kind === 'ang'){                        // degrees, not a length
+    const deg = parseFloat(String(typed).replace(/,/g,'.'));
+    if (isFinite(deg) && deg >= 0.5 && deg <= 179.5) applyTypedValue('ang', t.p, t.i, deg);
+    keep(); updateAll();
+    return;
+  }
+  const v = parseLen(typed, state.unit);
+  if (v != null && v > 0.01) applyTypedValue(t.kind, t.p, t.i, v);
+  keep(); updateAll();
+}
+// Signed sideways distance, in metres, from the measured line to where the cursor is — this is
+// what the placement click stores, so the dimension keeps its position relative to the drawing.
+function dimPlacement(A, B, sx, sy){
+  const L = Math.hypot(B.x-A.x, B.y-A.y) || 1;
+  const nx = -(B.y-A.y)/L, ny = (B.x-A.x)/L;
+  return ((sx - (A.x+B.x)/2)*nx + (sy - (A.y+B.y)/2)*ny) / view.s;
+}
+/* An angle dimension: an arc struck about the corner, arrowheads tangent at each end, thin
+   extension lines where a leg is too short to reach the arc, and the value on the arc. */
+function renderAngle(pl, k, radPx, opts = {}){
+  const m = cornerAngleAt(pl, k);
+  if (!m || radPx < 6) return null;
+  const V = W2S(pl.pts[k]);
+  const s1 = W2S(pl.pts[k-1]), s2 = W2S(pl.pts[k+1]);
+  // screen y grows downward, so bearings measured in world flip sign on the way in
+  const b1 = Math.atan2(s1.y-V.y, s1.x-V.x), b2 = Math.atan2(s2.y-V.y, s2.x-V.x);
+  let sweep = b2 - b1;
+  while (sweep <= -Math.PI) sweep += 2*Math.PI;
+  while (sweep > Math.PI) sweep -= 2*Math.PI;
+  ctx.save();
+  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.setLineDash([]);
+  if (opts.ghost) ctx.globalAlpha = .65;
+  if (opts.picked){
+    ctx.save();
+    ctx.globalAlpha = .18; ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.arc(V.x, V.y, radPx, b1, b2, sweep < 0); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.lineWidth = 1;                             // reach out along a leg that stops short
+  for (const [s, b] of [[s1,b1],[s2,b2]]){
+    const legPx = Math.hypot(s.x-V.x, s.y-V.y);
+    if (legPx < radPx + DIM.tail){
+      ctx.beginPath();
+      ctx.moveTo(V.x + Math.cos(b)*legPx, V.y + Math.sin(b)*legPx);
+      ctx.lineTo(V.x + Math.cos(b)*(radPx + DIM.tail), V.y + Math.sin(b)*(radPx + DIM.tail));
+      ctx.stroke();
+    }
+  }
+  ctx.lineWidth = opts.picked ? 2.25 : 1.25;
+  ctx.beginPath(); ctx.arc(V.x, V.y, radPx, b1, b2, sweep < 0); ctx.stroke();
+  // arrowheads sit tangent to the arc, pointing the way it runs
+  const dir = sweep < 0 ? -1 : 1;
+  for (const [b, way] of [[b1, 1], [b2, -1]]){
+    const tx = -Math.sin(b)*dir*way, ty = Math.cos(b)*dir*way;
+    dimArrow(V.x + Math.cos(b)*radPx, V.y + Math.sin(b)*radPx, tx, ty);
+  }
+  const midB = b1 + sweep/2;
+  const tp = { x: V.x + Math.cos(midB)*radPx, y: V.y + Math.sin(midB)*radPx };
+  const txt = formatFenceAngle(m.degrees);
+  ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 5; ctx.strokeStyle = C.halo;
+  ctx.strokeText(txt, tp.x, tp.y);
+  ctx.fillStyle = ACCENT; ctx.fillText(txt, tp.x, tp.y);
+  const half = Math.max(20, ctx.measureText(txt).width/2 + 8);
+  ctx.restore();
+  return { x: tp.x, y: tp.y, r: half, ang: 0,
+           arc: { cx: V.x, cy: V.y, rad: radPx, b1, sweep } };
+}
+const angRadPx = pt => (pt.ang && pt.ang.r != null ? pt.ang.r * view.s : 46);
+function drawAngleDimension(pl, p, k){
+  const box = renderAngle(pl, k, angRadPx(pl.pts[k]),
+    { picked: sel && sel.t==='dim' && sel.kind==='ang' && sel.p===p && sel.i===k });
+  if (box) dimHits.push({ kind:'ang', p, i:k, ...box });
+}
+
+// The two screen ends of an existing dimension, which is what its placement is measured from.
+function dimEndsFor(kind, p, i){
+  const pl = state.polys[p];
+  if (kind === 'seg') return { A: W2S(pl.pts[i]), B: W2S(pl.pts[(i+1) % pl.pts.length]) };
+  return dimEnds(pl.pts[i], state.polys);
+}
+// The two screen ends of whatever the tool is about to dimension.
+function dimPendingEnds(pend){
+  if (pend.kind === 'seg'){
+    const pl = state.polys[pend.p];
+    return { A: W2S(pl.pts[pend.i]), B: W2S(pl.pts[(pend.i+1) % pl.pts.length]),
+             txt: fmtLen(segLen(pl.pts[pend.i], pl.pts[(pend.i+1) % pl.pts.length]), state.unit) };
+  }
+  const pt = state.polys[pend.p].pts[pend.i];
+  const ends = dimEnds({ ...pt, dim: pend.anchor }, state.polys);
+  return { ...ends, txt: fmtLen(dimDistance(pt, pend.anchor), state.unit) };
+}
+// Slide a placed dimension to a new offset — the CAD habit of nudging one clear of the drawing.
+function moveDimension(kind, p, i, sx, sy){
+  const pt = state.polys[p] && state.polys[p].pts[i];
+  if (!pt) return;
+  if (kind === 'ang'){                          // an arc slides in and out on its radius
+    const V = W2S(pt);
+    if (pt.ang) pt.ang.r = Math.max(18, Math.hypot(sx-V.x, sy-V.y)) / view.s;
+    return;
+  }
+  const { A, B } = dimEndsFor(kind, p, i);
+  const off = dimPlacement(A, B, sx, sy);
+  if (kind === 'seg') pt.lockOff = off;         // an inline label becomes a placed dimension
+  else if (pt.dim) pt.dim.off = off;
+}
+// One click of the dimension tool: pick a thing, close the pair, or drop the dimension in place.
+function dimToolClick(sx, sy){
+  if (sel && sel.t === 'dim') sel = null;       // starting the next one drops the last one's buttons
+  if (dimTool.pend){                            // second stage: this click places it
+    const pend = dimTool.pend;
+    // a length still waiting to be placed turns into an angle if a second fence is clicked
+    if (pend.kind === 'seg'){
+      const second = dimRefAt(sx, sy);
+      if (second && second.k === 'seg' && !sameDimRef(second, dimTool.a)){
+        const t = angleTarget(state.polys, dimTool.a, second);
+        const clash = t && !angleCanDrive(state.polys, t.p, t.k, t.fwd);
+        dimTool.pend = null; dimTool.a = null;  // refused or not, this pair is done with
+        if (!t) alert('Angles are measured where two fences meet at a shared post of one run.');
+        else if (clash)
+          alert('That side of the corner has a post held by its own dimension. Remove that one, ' +
+                'or dimension the angle from the other fence so the other side swings.');
+        else dimTool.pend = { kind:'ang', p:t.p, i:t.k, fwd:t.fwd };
+        updateAll(); return;
+      }
+    }
+    if (pend.kind === 'ang'){                   // placement sets the arc's radius
+      const V = W2S(state.polys[pend.p].pts[pend.i]);
+      const r = Math.max(18, Math.hypot(sx-V.x, sy-V.y)) / view.s;
+      dimTool.pend = null;
+      commitEdit(() => {
+        const pt = state.polys[pend.p].pts[pend.i];
+        pt.ang = { ...(pt.ang || {}), deg: cornerAngleAt(state.polys[pend.p], pend.i).degrees,
+                   fwd: pend.fwd, r };
+      });
+      updateAll();
+      openDimEdit({ kind:'ang', p:pend.p, i:pend.i });
+      return;
+    }
+    const ends = dimPendingEnds(pend);
+    const off = dimPlacement(ends.A, ends.B, sx, sy);
+    dimTool.pend = null;
+    dimTool.a = null;                           // a lone fence is held as both; both are done now
+    commitEdit(() => {
+      if (pend.kind === 'seg'){
+        const pl = state.polys[pend.p];
+        setSegLen(state.polys, pend.p, pend.i,
+                  segLen(pl.pts[pend.i], pl.pts[(pend.i+1) % pl.pts.length]));
+        pl.pts[pend.i].lockOff = off;
+      } else {
+        const pt = state.polys[pend.p].pts[pend.i];
+        setPointDim(state.polys, pend.p, pend.i, pend.anchor, dimDistance(pt, pend.anchor));
+        pt.dim.off = off;
+      }
+    });
+    updateAll();
+    openDimEdit({ kind:pend.kind, p:pend.p, i:pend.i });
+    return;
+  }
+  const ref = dimRefAt(sx, sy);
+  const first = dimTool.a;
+  if (!ref){ dimTool.a = null; updateAll(); return; }   // clicking off cancels the pending pick
+  if (!first && ref.k === 'seg'){
+    // one fence alone is its own length; picking a second fence at the same post makes it an
+    // angle instead, so hold it as both and let the next click decide
+    dimTool.a = ref; dimTool.pend = { kind:'seg', p:ref.p, i:ref.i };
+    updateAll(); return;
+  }
+  if (!first || sameDimRef(first, ref)){
+    dimTool.a = sameDimRef(first, ref) ? null : ref;    // clicking it again deselects it
+    updateAll(); return;
+  }
+  dimTool.a = null;
+  const pair = dimPairing(first, ref);
+  if (!pair){
+    alert('One end has to be a fence post — a building never moves to satisfy a dimension.');
+    updateAll(); return;
+  }
+  const { driven } = pair;
+  // a post standing on a dimensioned corner means the corner: bind it there while they coincide
+  const anchor = retargetToCorner(state.polys, driven.p, driven.i, pair.ref);
+  if (anchor.k === 'pt'){
+    const why = dimRefusal(state.polys, driven.p, driven.i, anchor.p, anchor.i);
+    if (why){ alert(why); updateAll(); return; }
+  }
+  if (!distanceCanDrive(state.polys, driven.p, driven.i, anchor)){
+    alert('That post is swung by a corner angle on this run, and this dimension would hold it ' +
+          'still. Remove the angle first, or measure from a post that swings with it.');
+    updateAll(); return;
+  }
+  // hold the anchor as a plain value; the placement click is what actually commits it
+  dimTool.pend = { kind:'dim', p:driven.p, i:driven.i,
+                   anchor: dimAnchorRef(anchor, state.polys) };
+  updateAll();
+}
+function setDimTool(on){
+  closeDimEdit();
+  dimTool = on ? { a:null, pend:null, at:null } : null;
+  dimHover = null;
+  if (on){ endLine(); sel = null; }             // the tool owns the canvas while it is armed
+  $('bDimTool').classList.toggle('on', !!dimTool);
+  $('bDimTool').setAttribute('aria-pressed', String(!!dimTool));
+  cv.style.cursor = dimTool ? 'crosshair' : '';
+  updateAll();
+}
+// Show what a click would grab, and what is already held.
+function highlightRef(ref, held){
+  ctx.save();
+  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT;
+  ctx.lineWidth = held ? 3 : 2; ctx.setLineDash([]);
+  if (ref.k === 'pt' || ref.k === 'cnr'){
+    const S = W2S(ref.k === 'pt' ? state.polys[ref.p].pts[ref.i] : ref);
+    ctx.globalAlpha = held ? .22 : .14;
+    ctx.beginPath(); ctx.arc(S.x, S.y, 11, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(S.x, S.y, 11, 0, 7); ctx.stroke();
+  } else {
+    let A, B;
+    if (ref.k === 'seg'){
+      const pl = state.polys[ref.p];
+      A = W2S(pl.pts[ref.i]); B = W2S(pl.pts[(ref.i+1) % pl.pts.length]);
+    } else {
+      A = W2S(ref.axis === 'x' ? {x:ref.v, y:ref.span[0]} : {x:ref.span[0], y:ref.v});
+      B = W2S(ref.axis === 'x' ? {x:ref.v, y:ref.span[1]} : {x:ref.span[1], y:ref.v});
+    }
+    ctx.globalAlpha = held ? .6 : .4; ctx.lineWidth = held ? 7 : 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 let raf = 0;
 function paint(){ if (!raf) raf = requestAnimationFrame(doPaint); }
 function doPaint(){
   raf = 0;
   ctx.clearRect(0,0,cw,ch);
-  if (mode3d){ fdel.style.display = 'none'; paint3d(); return; }
+  dimHits = [];                                 // rebuilt as the dimensions draw
+  if (mode3d){ fdel.style.display = fswap.style.display = 'none'; paint3d(); return; }
 
   // --- grid: spacing follows zoom, keeping squares readable without manual controls ---
   const step = gridStep();
@@ -2358,17 +3444,25 @@ function doPaint(){
       ctx.setLineDash([]);
       // label — fixed screen size so it stays readable at any zoom
       const px = Math.hypot(B.x-A.x, B.y-A.y);
-      if (px > 44){
+      if (a.lockOff != null) drawSegDimension(pl, p, i);   // placed by the tool: a real dimension
+      else if (px > 44){
         let ang = Math.atan2(B.y-A.y, B.x-A.x);
         if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI;
         const label = (a.lockAfter != null ? '🔒 ' : '') + (a.gateAfter ? 'Gate ' : '') +
                       fmtLen(segLen(a,b), state.unit);
+        const dimSel = sel && sel.t==='dim' && sel.kind==='seg' && sel.p===p && sel.i===i;
         ctx.save();
         ctx.translate((A.x+B.x)/2, (A.y+B.y)/2); ctx.rotate(ang);
         ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+        // a length locked from the panel has no placement, so it stays an inline label —
+        // but it is still a dimension: selectable and deletable like the rest
+        if (a.lockAfter != null && a.lockOff == null)
+          dimHits.push({ kind:'seg', p, i, ang, x:(A.x+B.x)/2 + 7*Math.sin(ang),
+                         y:(A.y+B.y)/2 - 7*Math.cos(ang),
+                         r: Math.max(24, ctx.measureText(label).width/2 + 9) });
         ctx.lineWidth = 4; ctx.strokeStyle = C.halo;
         ctx.strokeText(label, 0, -7);
-        ctx.fillStyle = a.gateAfter ? C.gate : C.label;
+        ctx.fillStyle = dimSel ? ACCENT : a.gateAfter ? C.gate : C.label;
         ctx.fillText(label, 0, -7);
         ctx.restore();
       }
@@ -2388,6 +3482,9 @@ function doPaint(){
       ctx.lineWidth = 2; ctx.strokeStyle = isSel ? ACCENT : C.fence; ctx.stroke();
       ctx.globalAlpha = 1;
     });
+    pl.pts.forEach((q, i) => { if (q.dim) drawDimension(q, p, i); });
+    pl.pts.forEach((q, i) => { if (q.ang) drawAngleDimension(pl, p, i); });
+
     // Match the per-fence materials list to the plan with a compact badge.
     const tag = showFenceLabels3 ? fenceLabelLayout(pl, p) : null;
     if (tag){
@@ -2404,6 +3501,8 @@ function doPaint(){
       ctx.globalAlpha = 1;
     }
   });
+
+  drawCornerAngles();
 
   // dashed guides back to whatever post/corner the point lined up with
   const gd = (hover && hover.guides) || ((drag && drag.t === 'pt') ? guides : null);
@@ -2458,8 +3557,26 @@ function doPaint(){
     ctx.setLineDash([]);
   }
 
-  // floating delete button beside the selection (the touch-friendly delete)
-  if (sel){
+  // dimension tool: what is held, what the cursor would grab, and where it would land
+  if (dimTool){
+    if (dimTool.pend && dimTool.at){            // drag to position, exactly as CAD does it
+      const pd = dimTool.pend;
+      if (pd.kind === 'ang'){
+        const V = W2S(state.polys[pd.p].pts[pd.i]);
+        renderAngle(state.polys[pd.p], pd.i,
+                    Math.max(18, Math.hypot(dimTool.at.x-V.x, dimTool.at.y-V.y)), { ghost:true });
+      } else {
+        const e = dimPendingEnds(pd);
+        renderDimension(e.A, e.B, e.txt, dimPlacement(e.A, e.B, dimTool.at.x, dimTool.at.y)*view.s,
+                        { extendTo: e.extendTo, ghost: true });
+      }
+    }
+    if (dimTool.a) highlightRef(dimTool.a, true);
+    if (dimHover && !sameDimRef(dimHover, dimTool.a)) highlightRef(dimHover, false);
+  }
+  // floating delete button beside the selection (the touch-friendly delete). A dimension keeps
+  // its buttons even while the tool is armed — they belong to what was just typed.
+  if (sel && (!dimTool || sel.t === 'dim')){
     let a = null;
     if (sel.t==='pt'  && state.polys[sel.p]) a = W2S(state.polys[sel.p].pts[sel.i]);
     if (sel.t==='seg' && state.polys[sel.p]){
@@ -2469,12 +3586,21 @@ function doPaint(){
     if (sel.t==='bld' && state.builds[sel.i]){
       const b = houseBox(state.builds, [...bsel]); a = W2S({ x:b.x+b.w, y:b.y });
     }
+    if (sel.t==='dim' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i])
+      a = dimLabelPos(sel.kind, sel.p, sel.i);
     if (a){
+      const left = Math.max(4, Math.min(cw-48, a.x+16)), top = Math.max(4, Math.min(ch-48, a.y-56));
       fdel.style.display = 'block';
-      fdel.style.left = Math.max(4, Math.min(cw-48, a.x+16)) + 'px';
-      fdel.style.top  = Math.max(4, Math.min(ch-48, a.y-56)) + 'px';
-    } else fdel.style.display = 'none';
-  } else fdel.style.display = 'none';
+      fdel.style.left = left + 'px';
+      fdel.style.top  = top + 'px';
+      // only an angle has a side to swap, so the button exists only then
+      if (sel.t === 'dim' && sel.kind === 'ang'){
+        fswap.style.display = 'block';
+        fswap.style.left = Math.max(4, left - 52) + 'px';
+        fswap.style.top  = top + 'px';
+      } else fswap.style.display = 'none';
+    } else { fdel.style.display = 'none'; fswap.style.display = 'none'; }
+  } else { fdel.style.display = 'none'; fswap.style.display = 'none'; }
 }
 
 /* =====================================================================
@@ -3160,8 +4286,6 @@ function syncMatInputs(){
   $('iAboveGroundHeight').textContent = fmtLen(fenceHeightOf(M),u);
   set('iRails', M.rails);
   if (document.activeElement !== $('iRailSide')) $('iRailSide').value = railSideOf(M);
-  if (document.activeElement !== $('iFencePostShape'))
-    $('iFencePostShape').value = postShapeOf(M);
   const roundPost = postShapeOf(M) === 'round';
   $('postSizePrefix').style.display = roundPost ? '' : 'none';
   $('postTimes').style.display = roundPost ? 'none' : '';
@@ -3177,9 +4301,18 @@ function syncMatInputs(){
     $('iOneEnd').value = oneEnd || 'end';
   const selectedPoint = sel && sel.t === 'pt' && state.polys[sel.p] &&
                         state.polys[sel.p].pts[sel.i];
-  $('postShapeWrap').style.display = selectedPoint ? 'flex' : 'none';
-  if (selectedPoint && document.activeElement !== $('iPostShape'))
-    $('iPostShape').value = ownPostShape(selectedPoint) || 'inherit';
+  const postShapeInput = $('iPostShape');
+  const selectedPostGroup = $('selectedPostShapeGroup');
+  const selectedPostKey = selectedPoint ? sel.p + '/' + sel.i : '';
+  if (selectedPostKey !== postShapePointKey){
+    postShapePointKey = selectedPostKey;
+    postShapeScope = selectedPoint ? 'post' : 'fence';
+  }
+  selectedPostGroup.hidden = !selectedPoint;
+  selectedPostGroup.disabled = !selectedPoint;
+  postShapeInput.value = selectedPoint && postShapeScope === 'post'
+    ? 'post:' + (ownPostShape(selectedPoint) || 'inherit')
+    : 'fence:' + postShapeOf(M);
   set('iPaling', small(M.paling));  set('iPalingT', small(palingTOf(M)));  set('iGap', small(M.gap));
   set('iPostSize', small(postSizeOf(M)));  set('iPostSizeD', small(postTOf(M)));
   set('iRailW', small(M.railW));    set('iRailT', small(railTOf(M)));  set('iRailGap', small(M.railGap));
@@ -3205,7 +4338,7 @@ let lastSelKey = '';
 function updateSelbox(){
   const box = $('selbox');
   if (readOnly){ box.style.display='none'; return; }
-  const key = sel ? sel.t + '/' + (sel.p ?? '') + '/' + (sel.i ?? '') +
+  const key = sel ? sel.t + '/' + (sel.kind ?? '') + '/' + (sel.p ?? '') + '/' + (sel.i ?? '') +
                     (sel.t==='bld' ? '/' + [...bsel].sort((a,b)=>a-b).join(',') : '') : '';
   if (!sel){ box.style.display='none'; lastSelKey=''; return; }
   box.style.display = 'block';
@@ -3222,8 +4355,10 @@ function updateSelbox(){
         '<p class="note">Drag this segment to move the whole fence. Locked lengths stay unchanged.</p>';
       $('iSegLen').addEventListener('change', e => {
         const v = parseLen(e.target.value, state.unit);
+        // the same gate the canvas uses, so a length typed here is checked and settled alike
         if (v != null && v > 0.01 && sel && sel.t==='seg'){
-          pushUndo(); setSegLen(state.polys, sel.p, sel.i, v); updateAll();
+          applyTypedValue('seg', sel.p, sel.i, v);
+          updateAll();
         } else updateSelbox();
       });
       $('iGate').addEventListener('change', e => {
@@ -3334,6 +4469,40 @@ function updateSelbox(){
     if (document.activeElement !== $('iBW')) $('iBW').value = u==='m' ? +hb.w.toFixed(2) : ftStr(hb.w);
     if (document.activeElement !== $('iBH')) $('iBH').value = u==='m' ? +hb.h.toFixed(2) : ftStr(hb.h);
 
+  } else if (sel.t === 'dim'){
+    const pl = state.polys[sel.p], pt = pl && pl.pts[sel.i];
+    const dim = pt && pt.dim;
+    const kindWord = sel.kind === 'seg' ? 'segment length'
+                   : sel.kind === 'ang' ? 'corner angle'
+                   : !dim ? '' : dim.axis ? 'distance to a wall'
+                   : dim.pid ? 'distance to another post' : 'distance to a corner';
+    const value = !pt ? '' : sel.kind === 'seg'
+      ? fmtLen(segLen(pt, pl.pts[(sel.i+1)%pl.pts.length]), u)
+      : sel.kind === 'ang'
+      ? formatFenceAngle((cornerAngleAt(pl, sel.i) || {degrees:0}).degrees)
+      : dim ? fmtLen(dim.len, u) : '';
+    if (key !== lastSelKey){
+      box.innerHTML = '<h2>Selected dimension</h2>' +
+        '<div class="row"><span id="dimKind"></span><b id="dimSelVal"></b></div>' +
+        (sel.kind === 'ang'
+          ? '<div class="row"><span>Moves</span><b id="angSide"></b></div>' +
+            '<button id="bAngSwap" style="width:100%">⇄ Swap the side that moves</button>'
+          : '') +
+        '<button id="bDimDel" class="danger" style="width:100%">Remove dimension</button>' +
+        '<p class="note" id="dimSelNote">Double-click it on the drawing to retype the value. ' +
+        'Removing it leaves the geometry where it is.</p>';
+      $('bDimDel').addEventListener('click', deleteSelected);
+      if ($('bAngSwap')) $('bAngSwap').addEventListener('click', requestAngleSwap);
+    }
+    $('dimKind').textContent = kindWord;
+    $('dimSelVal').textContent = value;
+    if ($('angSide') && pt && pt.ang){
+      const ends = physicalEndLabels(pl);
+      $('angSide').textContent = pt.ang.fwd ? ends.end + ' side' : ends.start + ' side';
+      $('dimSelNote').textContent = 'Double-click it on the drawing to retype the angle. ' +
+        'Swapping winds the run round the corner so the other end is the one that moved.';
+    }
+
   } else {
     const pl = state.polys[sel.p];
     // an end of an open run can be picked back up and drawn from
@@ -3341,11 +4510,35 @@ function updateSelbox(){
     const isFinish = pl && !pl.closed && sel.i === pl.pts.length-1;
     const isEnd = isStart || isFinish;
     const endLabels = physicalEndLabels(pl);
+    const cornerAngle = joinedFenceAngle(state.polys, sel.p, sel.i);
     if (key !== lastSelKey){
       box.innerHTML = '<h2>Selected '+(isStart ? endLabels.start : isFinish ? endLabels.end : 'fence point')+'</h2>' +
         (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
-        '<p class="note">Drag to move. Deleting it joins the neighbouring segments.</p>';
+        '<div class="row" id="cornerAngleRow" style="display:none"><span>Corner angle</span><b id="cornerAngle"></b></div>' +
+        '<div class="row" id="dimRow" style="display:none"><span id="dimLabel">To corner</span>' +
+          '<b id="dimVal"></b></div>' +
+        '<button id="bDimClear" style="width:100%;display:none">Remove dimension</button>' +
+        '<p class="note" id="dimNote">Drag to move. Deleting it joins the neighbouring segments. ' +
+        'Press D for the dimension tool, or click any value on the drawing to retype it.</p>';
       if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
+      $('bDimClear').addEventListener('click', () => {
+        const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+        if (pt && commitEdit(() => { delete pt.dim; })) updateAll();
+      });
+    }
+    const selPt = pl && pl.pts[sel.i];
+    if ($('dimRow')){
+      const has = !!(selPt && selPt.dim);
+      $('dimRow').style.display = has ? '' : 'none';
+      $('bDimClear').style.display = has ? '' : 'none';
+      $('dimLabel').textContent = !has ? '' : selPt.dim.axis ? 'To wall'
+                                            : selPt.dim.pid ? 'To point' : 'To corner';
+      if (has) $('dimVal').textContent = fmtLen(selPt.dim.len, u);
+    }
+    const cornerAngleRow = $('cornerAngleRow');
+    if (cornerAngleRow){
+      cornerAngleRow.style.display = cornerAngle ? '' : 'none';
+      $('cornerAngle').textContent = cornerAngle ? formatFenceAngle(cornerAngle.degrees) : '';
     }
   }
   // bring the panel into view when the selection changes (it lives at the top of the sidebar)
@@ -3357,6 +4550,12 @@ function updateAll(){
   // drop any selection that no longer points at a live object
   if (sel){
     if (sel.t==='bld' && !state.builds[sel.i]) sel = null;
+    else if (sel.t==='dim'){                    // gone once its point, dim, lock or angle goes
+      const pt = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+      const alive = pt && (sel.kind === 'seg' ? pt.lockAfter != null
+                         : sel.kind === 'ang' ? !!pt.ang : !!pt.dim);
+      if (!alive) sel = null;
+    }
     else if ((sel.t==='pt' || sel.t==='seg') &&
              (!state.polys[sel.p] || sel.i >= (sel.t==='pt' ? state.polys[sel.p].pts.length
                                                             : segsOf(state.polys[sel.p]).length))) sel = null;
@@ -3444,7 +4643,9 @@ cv.addEventListener('pointerdown', e => {
     return;
   }
   if (e.button === 2){ drag = { t:'pan' }; return; }
-  pend = { hit: pick(e.offsetX, e.offsetY), x:e.offsetX, y:e.offsetY, moved:false,
+  // while the tool is armed a press must not start a drag — every click is a pick
+  pend = { hit: dimTool ? null : pick(e.offsetX, e.offsetY), x:e.offsetX, y:e.offsetY, moved:false,
+           dim: dimTool ? null : dimHitAt(e.offsetX, e.offsetY),
            multi: e.shiftKey || e.ctrlKey || e.metaKey };
   // touch has no shift key: holding a building toggles it in the selection
   clearTimeout(holdTimer);
@@ -3482,10 +4683,17 @@ cv.addEventListener('pointermove', e => {
     else orbit(dx, dy);
     paint(); return;
   }
+  // dimension tool: preview where it would land, or what a click would grab
+  if (dimTool && !pointers.size && e.pointerType !== 'touch'){
+    if (dimTool.pend){ dimTool.at = { x:e.offsetX, y:e.offsetY }; paint(); return; }
+    const nh = dimRefAt(e.offsetX, e.offsetY);
+    if ((!nh !== !dimHover) || (nh && !sameDimRef(nh, dimHover))){ dimHover = nh; paint(); }
+    return;
+  }
   // live rubber-band preview of the next segment (mouse only; touch has no hover)
   if (!pointers.size && e.pointerType !== 'touch'){
     const hit = pick(e.offsetX, e.offsetY);
-    cv.classList.toggle('labelhit', !!(hit && hit.label));
+    cv.classList.toggle('labelhit', !!dimHitAt(e.offsetX, e.offsetY) || !!(hit && hit.label));
     if (readOnly) return;
     if (hit && hit.label){
       if (hover){ hover = null; paint(); }
@@ -3521,7 +4729,14 @@ cv.addEventListener('pointermove', e => {
     clearTimeout(holdTimer);                  // a drag is not a long press
     if (pend.done){ pend = null; return; }    // already selected under the finger
     const h = pend.hit;
-    if (h && h.t==='pt'){ pushUndo(); sel = h; drag = { t:'pt', p:h.p, i:h.i }; }
+    // a dimension under the press wins over the geometry behind it, same as a click does
+    if (pend.dim){
+      const d = pend.dim;
+      pushUndo();
+      sel = { t:'dim', kind:d.kind, p:d.p, i:d.i };
+      drag = { t:'dimoff', kind:d.kind, p:d.p, i:d.i };
+    }
+    else if (h && h.t==='pt'){ pushUndo(); sel = h; drag = { t:'pt', p:h.p, i:h.i }; }
     else if (h && h.t==='seg'){
       pushUndo(); sel = h;
       const pts = state.polys[h.p].pts.map(q => ({x:q.x,y:q.y}));
@@ -3549,12 +4764,16 @@ cv.addEventListener('pointermove', e => {
   }
   if (!drag) return;
   if (drag.t === 'pan'){ view.x -= dx/view.s; view.y -= dy/view.s; paint(); return; }
+  if (drag.t === 'dimoff'){
+    moveDimension(drag.kind, drag.p, drag.i, e.offsetX, e.offsetY); paint(); return;
+  }
   const w = S2W(e.offsetX, e.offsetY);
   if (drag.t === 'pt'){ movePoint(drag.p, drag.i, w); }
   if (drag.t === 'poly'){
     const p = snapObjectAxes({x:w.x-drag.ox, y:w.y-drag.oy},
                              drag.xs, drag.ys, null, drag.p);
     translatePolyline(state.polys[drag.p], drag.pts, p.x-drag.x, p.y-drag.y);
+    reapplyConstraints(state.polys);            // the whole run moved: its anchors moved with it
   }
   if (drag.t === 'bld'){
     const p = snapObjectAxes({ x:w.x-drag.ox, y:w.y-drag.oy },
@@ -3610,6 +4829,12 @@ function pointerEnd(e){
     pend = null; drag = null;
   }
 }
+// double-click a dimension to retype its value, the way a CAD sketch does
+cv.addEventListener('dblclick', e => {
+  if (readOnly || mode3d || dimTool) return;
+  const lab = dimHitAt(e.offsetX, e.offsetY);
+  if (lab){ e.preventDefault(); openDimEdit(lab); }
+});
 cv.addEventListener('pointerup', pointerEnd);
 cv.addEventListener('pointercancel', pointerEnd);
 cv.addEventListener('pointerleave', () => {
@@ -3638,6 +4863,12 @@ function resumeLine(p, i){
 //   idle + empty    -> clear the selection, or start a new fence if nothing was selected
 function handleClick(hit, sx, sy, multi){
   if (readOnly) return;
+  if (dimTool){ dimToolClick(sx, sy); return; }
+  const lab = dimHitAt(sx, sy);                 // a dimension selects like any other entity
+  if (lab && !drawTarget()){
+    sel = { t:'dim', kind:lab.kind, p:lab.p, i:lab.i };
+    bsel.clear(); updateAll(); return;
+  }
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
   if (hit && hit.label){
     if (drawTarget()) endLine();
@@ -3692,6 +4923,15 @@ window.addEventListener('keydown', e => {
     if (e.key === 'Escape'){ sel = null; updateAll(); }
     return;
   }
+  if (e.key === 'Escape' && dimTool){           // back out one stage at a time, then the tool
+    if (dimTool.pend){ dimTool.pend = null; dimTool.at = null; updateAll(); }
+    else if (dimTool.a){ dimTool.a = null; updateAll(); }
+    else setDimTool(false);
+    return;
+  }
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'd'){
+    e.preventDefault(); setDimTool(!dimTool); return;
+  }
   if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSelected(); }
   else if (e.key === 'Escape'){
     if ($('bkSec').open && !$('bkDialog').open){ $('bkSec').open = false; return; }
@@ -3720,6 +4960,17 @@ function updateHint(){
   }
   if (readOnly){
     $('hint').textContent = 'Tap a fence label to inspect it · drag to pan · scroll or pinch to zoom.';
+    return;
+  }
+  if (dimTool){
+    $('hint').textContent = dimTool.pend
+      ? 'Move to position the dimension, then click to place it · Esc to back out.'
+      : dimTool.a
+      ? 'Now click the post, building corner or wall to measure from · Esc to back out.'
+      : dimTool.a && dimTool.a.k === 'seg'
+      ? 'Place it for this fence’s length, or click the fence it meets for the corner angle.'
+      : 'Click a fence for its length, two fences for their angle, or a post then a corner, ' +
+        'wall or another post · Esc or D to leave the tool, then click a dimension to edit it.';
     return;
   }
   $('hint').textContent = drawing
@@ -3759,6 +5010,16 @@ $('bUndo').addEventListener('click', undo);
 $('bRedo').addEventListener('click', redo);
 $('bDelSel').addEventListener('click', deleteSelected);
 fdel.addEventListener('click', deleteSelected);
+fswap.addEventListener('click', () => {
+  requestAngleSwap();
+});
+$('bDimTool').addEventListener('click', () => setDimTool(!dimTool));
+$('dimin').addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Enter'){ e.preventDefault(); commitDimEdit(); }
+  else if (e.key === 'Escape'){ e.preventDefault(); closeDimEdit(); }
+});
+$('dimin').addEventListener('blur', commitDimEdit);
 $('bClear').addEventListener('click', clearAll);
 $('cSnapGrid').addEventListener('change', e => { state.snapGrid = e.target.checked; saveSoon(); });
 $('cSnapBld').addEventListener('change', e => { state.snapBld = e.target.checked; saveSoon(); });
@@ -3908,25 +5169,27 @@ $('iOneEnd').addEventListener('change', e => {
   });
   updateAll();
 });
-$('iFencePostShape').addEventListener('change', e => {
-  const M = curMat();
-  commitEdit(() => M.postShape = e.target.value === 'round' ? 'round' : 'square');
-  updateAll();
-});
 $('iRailSide').addEventListener('change', e => {
   const M = curMat();
   commitEdit(() => M.railSide = e.target.value === 'right' ? 'right' : 'left');
   updateAll();
 });
 $('iPostShape').addEventListener('change', e => {
-  if (!sel || sel.t !== 'pt') return;
-  const point = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
-  if (!point) return;
-  commitEdit(() => {
-    if (e.target.value === 'round' || e.target.value === 'square')
-      point.postShape = e.target.value;
-    else delete point.postShape;
-  });
+  const [scope, shape] = e.target.value.split(':');
+  if (scope === 'post'){
+    const point = sel && sel.t === 'pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+    if (!point) return;
+    postShapeScope = 'post';
+    commitEdit(() => {
+      if (shape === 'round' || shape === 'square')
+        point.postShape = shape;
+      else delete point.postShape;
+    });
+  } else if (scope === 'fence') {
+    const M = curMat();
+    postShapeScope = 'fence';
+    commitEdit(() => M.postShape = shape === 'round' ? 'round' : 'square');
+  }
   updateAll();
 });
 $('matInclude').addEventListener('change', e => {

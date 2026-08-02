@@ -45,6 +45,12 @@ dynamic grid — first match wins. The **Snap objects** toggle controls the
 post/corner/edge snaps; the grid spacing adapts to zoom so it stays useful at
 both building-scale and site-scale views.
 
+**Dimension it.** Press `D` for the dimension tool, click what you are
+measuring, position the dimension, then type the value — and the drawing moves
+to suit. Distances between posts, from a post to a building corner or wall,
+segment lengths and corner angles all drive the geometry rather than just
+annotating it. See [Dimensions](#dimensions).
+
 **Get the quantities.** Live totals for posts, rails, palings, handrail metres,
 gates and corners, with the working shown ("13 panels, 1 corner, 1 gate").
 `📋 Copy summary` puts a plain-text takeoff on the clipboard.
@@ -78,12 +84,16 @@ screens.
   corners and edges. Select several building parts and explicitly **Group**
   them to make one movable/resizable composite house; **Ungroup** restores the
   parts. Group boundaries show derived lengths on each continuous external
-  edge. Buildings are excluded from materials.
+  edge. Buildings are excluded from materials. A building never moves to satisfy
+  a dimension, and dimensions taken to its corners or walls are stored as
+  coordinates — move or resize the building and they stay where they were.
 - **Named, selectable fences.** Fence and gate labels are visible in plan and
   can be selected directly. The same labels can be selected in 3D to inspect
   their settings; the 3D label overlay can be turned off independently.
-- **Exact lengths.** Type a segment length and the far end moves along its line;
-  lock it so dragging a neighbouring post can't change it.
+- **Driving dimensions.** Distances, segment lengths and corner angles that move
+  the drawing when you type a value, and hold it when something moves nearby.
+  Placed, selected, dragged and deleted on the plan itself. See
+  [Dimensions](#dimensions).
 - **Per-fence 3D visibility.** Hide a fence from the 3D scene while retaining a
   muted dotted, labelled reference in plan and keeping its materials counted.
 - **Metric or imperial.** Everything is stored in metres; units only affect
@@ -101,6 +111,76 @@ screens.
 - **View-only sharing.** Publish a saved drawing as an expiring, revocable link.
   Viewers can use the plan, 3D controls, labels, units and materials summary,
   but cannot change or save the drawing.
+
+---
+
+## Dimensions
+
+Dimensions here work the way a CAD sketch does: they **drive** the geometry
+rather than reporting it. Type a value and the drawing moves to satisfy it.
+
+**Placing one.** Press `D` or the toolbar **Dimension** button, then:
+
+| Click | Gives |
+| --- | --- |
+| a fence | that segment's length |
+| a post, then a building corner | straight-line distance |
+| a post, then a building wall | perpendicular distance to that wall line |
+| a post, then another post | distance between them |
+| two fences meeting at a post | the corner angle |
+
+What the cursor would grab highlights before you click, and the pick you are
+holding stays highlighted while you choose the second. Then **move to position
+the dimension and click to place it** — the same drag-to-position step a CAD
+sketch uses — and type the value where it lands. `Enter` accepts, `Esc` backs
+out one stage at a time: the placement, then the held pick, then the tool.
+
+The tool stays armed for the next dimension, so leave it with `Esc` or `D`
+before selecting anything.
+
+**Living with them.** A dimension is an entity, not a label:
+
+- **Click** to select — the whole dimension picks, not just the number.
+- **Drag** to slide it clear of the drawing; the value and geometry don't move.
+- **Double-click** to retype the value in place.
+- **Delete** to remove it, leaving the geometry exactly where it stands.
+- Whatever you have just typed stays selected, so its **✕** and, for angles,
+  **⇄** are to hand immediately.
+
+**Which end moves.** Only a fence post can move to satisfy a dimension, so one
+end of a pair must be one; buildings never move. With two posts, the one
+clicked second gives way. An angle swings the leg clicked second, taking
+everything downstream with it so the rest of the run keeps its shape and its
+lengths — press **⇄** to hand the movement to the other leg instead, which
+winds the run round the corner without disturbing the angle.
+
+**Holding.** A dimension keeps its value when the geometry moves under it: drag
+a post, type a length, move a whole run, or swing a corner, and anything
+dimensioned off what moved settles with it.
+
+**Contradictions are refused**, because two values for one measurement means
+the drawing lies about itself. You can't dimension a pair whose distance is
+already pinned — the two ends of one segment (its Length *is* that dimension),
+or a reference that closes a loop back on itself.
+
+Whether two dimensions can share a post is not decided by a rule per pairing.
+The drawing is asked for a value the dimension doesn't have, on a copy, and if
+everything can still be satisfied at once the dimension genuinely drives and is
+allowed. Whatever is *not* written down gives way — an undimensioned segment
+will stretch to satisfy both an angle and a distance. Only when nothing is left
+to give is it refused. Each refusal says which way out it has; an angle is
+usually still available from the other fence, so the free side swings instead.
+
+Angles are refused on closed loops, where rotating part of the run would tear
+it open.
+
+**Stored** on the post the dimension belongs to. Other posts are referenced by a
+stable id rather than a position in the run, so a dimension survives points
+being deleted, runs splitting and runs being reversed; if its anchor is deleted
+outright it falls back to that anchor's last position instead of breaking.
+Placements are kept in metres, so a dimension holds its distance from the
+drawing as you zoom. Building corners and walls are stored as coordinates —
+they are assumed not to move.
 
 ---
 
@@ -162,9 +242,15 @@ against the near plane, then sort far-to-near.
   of their end posts. Gate leaves use the same fence face.
 
 Known simplifications, all marked `ponytail:` in the source: handrail corners
-butt rather than mitre, the handrail adds its thickness above the fence height,
-and length locks are enforced one neighbour at a time rather than by a
-constraint solver.
+butt rather than mitre, and the handrail adds its thickness above the fence
+height.
+
+Constraints settle by relaxation: each pass satisfies every dimension in turn
+and disturbs its neighbours less than the last, repeating until nothing moves
+or a pass budget runs out. That converges on the shapes a fence drawing makes,
+including chains of dimensions, but it is not a Newton solve — swap one in if a
+drawing ever appears that it cannot settle. A new dimension is still placed to
+whichever side you drop it on, with no awareness of what is underneath.
 
 ---
 
