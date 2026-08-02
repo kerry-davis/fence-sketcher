@@ -1596,8 +1596,38 @@ function reapplyAngles(polys){
    centimetre so one tolerance covers both). Zero everywhere means the drawing agrees with
    every value written on it. */
 const DIM_TOL = 5e-5;                            // a twentieth of a millimetre
-function constraintResidual(polys){
-  let worst = 0;
+/* Two runs meeting keep their own post at the shared spot. They are one post to the eye and one
+   post in the materials, so a settle has to keep them together — otherwise driving a dimension
+   on one run slides its end out from under its neighbour and the junction quietly comes apart. */
+function junctionGroups(polys){
+  const all = [];
+  polys.forEach(pl => pl.pts.forEach(q => all.push(q)));
+  const groups = [], taken = new Set();
+  for (let i = 0; i < all.length; i++){
+    if (taken.has(i)) continue;
+    const g = [all[i]];
+    for (let j = i+1; j < all.length; j++){
+      if (taken.has(j)) continue;
+      if (Math.hypot(all[i].x-all[j].x, all[i].y-all[j].y) < FENCE_JOIN_TOL){
+        g.push(all[j]); taken.add(j);
+      }
+    }
+    if (g.length > 1) groups.push(g);            // only posts already sharing a spot are joined,
+  }                                              // so pulling one away on purpose still parts them
+  return groups;
+}
+function reapplyJunctions(groups){
+  for (const g of groups){
+    const cx = g.reduce((s,q) => s+q.x, 0)/g.length, cy = g.reduce((s,q) => s+q.y, 0)/g.length;
+    g.forEach(q => { q.x = cx; q.y = cy; });
+  }
+}
+const junctionResidual = groups => groups.reduce((worst, g) => {
+  const cx = g.reduce((s,q) => s+q.x, 0)/g.length, cy = g.reduce((s,q) => s+q.y, 0)/g.length;
+  return g.reduce((w,q) => Math.max(w, Math.hypot(q.x-cx, q.y-cy)), worst);
+}, 0);
+function constraintResidual(polys, groups){
+  let worst = groups ? junctionResidual(groups) : 0;
   polys.forEach((pl, p) => pl.pts.forEach((q, k) => {
     if (q.dim){
       const A = dimAnchor(q, q.dim, polys);
@@ -1628,27 +1658,34 @@ function constraintResidual(polys){
    coincide — anchor, post and corner exactly collinear — is a saddle it cannot leave even when
    a solution exists just off the axis. Swap in a least-squares solve if that ever shows up. */
 const RELAX_PASSES = 24;
-function relaxConstraints(polys){
+function relaxConstraints(polys, priorJoins){
+  // whatever shared a spot BEFORE the edit — by now the edit may already have parted them
+  const live = new Set();
+  polys.forEach(pl => pl.pts.forEach(q => live.add(q)));
+  const joins = (priorJoins || junctionGroups(polys))
+    .map(g => g.filter(q => live.has(q))).filter(g => g.length > 1);
   let last = Infinity;
   for (let n = 0; n < RELAX_PASSES; n++){
     reapplyAngles(polys);
     reapplyLocks(polys);
     reapplyDims(polys);
-    const r = constraintResidual(polys);
+    reapplyJunctions(joins);
+    const r = constraintResidual(polys, joins);
     if (r < DIM_TOL) return r;                   // everything agrees
     if (r > last - 1e-9) return r;               // no longer improving: as close as it gets
     last = r;
   }
-  return constraintResidual(polys);
+  return constraintResidual(polys, joins);
 }
-function reapplyConstraints(polys){ relaxConstraints(polys); }
+function reapplyConstraints(polys, priorJoins){ relaxConstraints(polys, priorJoins); }
 // Would the drawing still be satisfiable with this dimension added? Rather than reason about
 // which dimensions can coexist, try it on a copy and see whether everything can be satisfied
 // at once. `add` receives the copy and puts the proposed dimension on it.
 function dimensionIsSatisfiable(polys, add){
   const copy = JSON.parse(JSON.stringify(polys));
+  const joins = junctionGroups(copy);            // recorded before the proposed change parts them
   try { add(copy); } catch { return false; }
-  return relaxConstraints(copy) < DIM_TOL;
+  return relaxConstraints(copy, joins) < DIM_TOL;
 }
 /* --- Corner angle dimensions: the value drives the corner, swinging one leg round --- */
 // The corner at vertex k, as the two ray bearings and the signed turn between them.
@@ -2799,10 +2836,11 @@ function pushUndo(){
 function commitEdit(edit){
   if (readOnly) return false;
   const before = historySnapshot();
+  const joins = junctionGroups(state.polys);     // note the shared posts before anything moves
   edit();
   // every committed edit can move an anchor — typing a length, swinging a corner, moving a run —
   // so the things dimensioned off it settle here rather than only after a drag
-  reapplyConstraints(state.polys);
+  reapplyConstraints(state.polys, joins);
   if (historySnapshot() === before) return false;
   pushHistory(before);
   return true;
