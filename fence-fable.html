@@ -146,6 +146,11 @@
          font:700 13px var(--font);color:var(--ink);background:var(--card);
          border:2px solid var(--accent);border-radius:9px;box-shadow:var(--shadow-2);z-index:6}
   #dimin:focus{outline:none;box-shadow:0 0 0 4px var(--accent-soft),var(--shadow-2)}
+  /* sits beside the delete button, only while an angle is selected — the one moment it means
+     anything, so it never has to live in a menu */
+  #fswap{position:absolute;display:none;width:44px;height:44px;border-radius:50%;padding:0;
+         background:var(--accent);color:#fff;border:0;font-size:19px;line-height:44px;
+         box-shadow:0 4px 12px rgb(5 150 105/.4)}
   #fdel{position:absolute;display:none;width:44px;height:44px;border-radius:50%;padding:0;
         background:var(--danger);color:#fff;border:0;font-size:18px;line-height:44px;
         box-shadow:0 4px 12px rgb(225 29 72/.4)}
@@ -348,7 +353,7 @@
   .dialogActions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 
   /* 3D view: the plan-only overlays have nothing to say */
-  body.d3 #snapover, body.d3 #fdel, body.d3 #gridcap{display:none}
+  body.d3 #snapover, body.d3 #fdel, body.d3 #fswap, body.d3 #gridcap{display:none}
   #bMore{display:none}         /* only shown on small screens */
   @media (max-width: 860px){
     main{flex-direction:column}
@@ -564,6 +569,8 @@
       <button id="bOrbitSpeed" title="Orbit speed: 15 degrees per second"
               aria-label="Orbit speed: 15 degrees per second">15°</button>
     </div>
+    <button id="fswap" class="editorOnly"
+            title="Swap which side of the corner moves">⇄</button>
     <button id="fdel" class="editorOnly" title="Delete">✕</button>
     <input id="dimin" class="editorOnly" inputmode="text" autocomplete="off"
            aria-label="Dimension value">
@@ -2124,6 +2131,7 @@ function freezeTree(value){
    ===================================================================== */
 const $ = id => document.getElementById(id);
 const cv = $('cv'), ctx = cv.getContext('2d'), wrap = $('wrap'), fdel = $('fdel');
+const fswap = $('fswap');
 let cw = 0, ch = 0;                           // canvas size in CSS px
 
 function resize(){
@@ -2980,6 +2988,7 @@ function dimToolClick(sx, sy){
     const ends = dimPendingEnds(pend);
     const off = dimPlacement(ends.A, ends.B, sx, sy);
     dimTool.pend = null;
+    dimTool.a = null;                           // a lone fence is held as both; both are done now
     commitEdit(() => {
       if (pend.kind === 'seg'){
         const pl = state.polys[pend.p];
@@ -3067,7 +3076,7 @@ function doPaint(){
   raf = 0;
   ctx.clearRect(0,0,cw,ch);
   dimHits = [];                                 // rebuilt as the dimensions draw
-  if (mode3d){ fdel.style.display = 'none'; paint3d(); return; }
+  if (mode3d){ fdel.style.display = fswap.style.display = 'none'; paint3d(); return; }
 
   // --- grid: spacing follows zoom, keeping squares readable without manual controls ---
   const step = gridStep();
@@ -3300,11 +3309,18 @@ function doPaint(){
     if (sel.t==='dim' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i])
       a = dimLabelPos(sel.kind, sel.p, sel.i);
     if (a){
+      const left = Math.max(4, Math.min(cw-48, a.x+16)), top = Math.max(4, Math.min(ch-48, a.y-56));
       fdel.style.display = 'block';
-      fdel.style.left = Math.max(4, Math.min(cw-48, a.x+16)) + 'px';
-      fdel.style.top  = Math.max(4, Math.min(ch-48, a.y-56)) + 'px';
-    } else fdel.style.display = 'none';
-  } else fdel.style.display = 'none';
+      fdel.style.left = left + 'px';
+      fdel.style.top  = top + 'px';
+      // only an angle has a side to swap, so the button exists only then
+      if (sel.t === 'dim' && sel.kind === 'ang'){
+        fswap.style.display = 'block';
+        fswap.style.left = Math.max(4, left - 52) + 'px';
+        fswap.style.top  = top + 'px';
+      } else fswap.style.display = 'none';
+    } else { fdel.style.display = 'none'; fswap.style.display = 'none'; }
+  } else { fdel.style.display = 'none'; fswap.style.display = 'none'; }
 }
 
 /* =====================================================================
@@ -4714,6 +4730,10 @@ $('bUndo').addEventListener('click', undo);
 $('bRedo').addEventListener('click', redo);
 $('bDelSel').addEventListener('click', deleteSelected);
 fdel.addEventListener('click', deleteSelected);
+fswap.addEventListener('click', () => {
+  if (sel && sel.t==='dim' && sel.kind==='ang' &&
+      commitEdit(() => swapAngleSide(state.polys, sel.p, sel.i))) updateAll();
+});
 $('bDimTool').addEventListener('click', () => setDimTool(!dimTool));
 $('dimin').addEventListener('keydown', e => {
   e.stopPropagation();
