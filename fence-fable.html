@@ -1457,9 +1457,18 @@ function setSegLen(polys, p, i, len){
   a.lockAfter = len;
 }
 
-/* --- Point-to-corner dimensions (CAD style: the typed value drives the point) --- */
+/* --- Dimensions to a building (CAD style: the typed value drives the point) ---
+   A point's `dim` references either a corner ({x,y,len}, straight-line distance) or an
+   edge ({axis,v,span,len}, perpendicular distance to that axis-aligned line). Buildings
+   are axis-aligned, so an edge is just "x = v" or "y = v" and the distance is along axis. */
 const bldCorners = b =>                          // clockwise from the top-left
   [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]].map(([x,y]) => ({x,y}));
+const bldEdges = b => [                          // axis = the direction the distance is measured
+  { axis:'y', v:b.y,     span:[b.x, b.x+b.w] },  // top
+  { axis:'y', v:b.y+b.h, span:[b.x, b.x+b.w] },  // bottom
+  { axis:'x', v:b.x,     span:[b.y, b.y+b.h] },  // left
+  { axis:'x', v:b.x+b.w, span:[b.y, b.y+b.h] },  // right
+];
 // Nearest building corner to a world point -> {x,y,d}, or null when there are no buildings.
 function nearestCorner(builds, w){
   let best = null, bd = Infinity;
@@ -1469,17 +1478,42 @@ function nearestCorner(builds, w){
   }
   return best;
 }
+// Nearest building edge -> {axis,v,span,d}. Distance is to the drawn edge (span-clamped) so
+// clicking picks the side you meant; the dimension itself measures to the infinite line.
+function nearestEdge(builds, w){
+  let best = null, bd = Infinity;
+  for (const b of builds) for (const e of bldEdges(b)){
+    const along = e.axis === 'x' ? w.y : w.x;
+    const t = Math.min(Math.max(along, e.span[0]), e.span[1]);
+    const d = Math.hypot(w.x - (e.axis === 'x' ? e.v : t), w.y - (e.axis === 'x' ? t : e.v));
+    if (d < bd){ bd = d; best = { ...e, d }; }
+  }
+  return best;
+}
+// The world point a dimension measures from: the corner, or the foot on the edge line.
+const dimAnchor = (pt, dim) => dim.axis
+  ? (dim.axis === 'x' ? { x:dim.v, y:pt.y } : { x:pt.x, y:dim.v })
+  : { x:dim.x, y:dim.y };
+const dimDistance = (pt, ref) => ref.axis ? Math.abs(pt[ref.axis] - ref.v)
+                                          : Math.hypot(pt.x-ref.x, pt.y-ref.y);
 // Hold a dimensioned point at its distance from the anchor, keeping the direction it's heading.
 function applyPointDim(pt, pos){
-  if (!pt.dim) return pos;
-  const dx = pos.x-pt.dim.x, dy = pos.y-pt.dim.y, d = Math.hypot(dx,dy);
+  const dim = pt.dim;
+  if (!dim) return pos;
+  if (dim.axis){                                 // perpendicular to an edge, staying on its side
+    const side = pos[dim.axis] >= dim.v ? 1 : -1; // exactly on the line: push to the positive side
+    return dim.axis === 'x' ? { x: dim.v + side*dim.len, y: pos.y }
+                            : { x: pos.x, y: dim.v + side*dim.len };
+  }
+  const dx = pos.x-dim.x, dy = pos.y-dim.y, d = Math.hypot(dx,dy);
   // sitting exactly on the anchor: no direction to keep, so head east
   const ux = d > 1e-9 ? dx/d : 1, uy = d > 1e-9 ? dy/d : 0;
-  return { x: pt.dim.x + ux*pt.dim.len, y: pt.dim.y + uy*pt.dim.len };
+  return { x: dim.x + ux*dim.len, y: dim.y + uy*dim.len };
 }
-function setPointDim(polys, p, i, anchor, len){
+function setPointDim(polys, p, i, ref, len){
   const pt = polys[p].pts[i];
-  pt.dim = { x:anchor.x, y:anchor.y, len };
+  pt.dim = ref.axis ? { axis:ref.axis, v:ref.v, span:ref.span, len }
+                    : { x:ref.x, y:ref.y, len };
   const pos = applyPointDim(pt, pt);
   pt.x = pos.x; pt.y = pos.y;
 }
@@ -1720,6 +1754,18 @@ function freezeTree(value){
   chk(near(applyPointDim(ps[0].pts[1], {x:10,y:9}).y, 1.5), 'dragging keeps the dimension');
   chk(near(nearestCorner([{x:2,y:2,w:3,h:3}], {x:5.4,y:5.4}).d, Math.hypot(.4,.4)), 'nearest corner');
   chk(applyPointDim({x:1,y:1}, {x:9,y:9}).x === 9, 'no dimension leaves the point alone');
+  // edge dimensions measure perpendicular to an axis-aligned wall
+  const bld = [{x:10,y:2,w:6,h:6}];
+  chk(nearestEdge(bld, {x:9.6,y:5}).axis==='x' && near(nearestEdge(bld, {x:9.6,y:5}).v, 10),
+      'nearest edge is the near wall');
+  chk(near(nearestEdge(bld, {x:13,y:1.5}).v, 2) && nearestEdge(bld, {x:13,y:1.5}).axis==='y',
+      'edge picks the side clicked');
+  ps = [{pts:[{x:2,y:4},{x:7,y:5}], closed:false}];
+  setPointDim(ps, 0, 1, {axis:'x', v:10, span:[2,8]}, 1.5);
+  chk(near(ps[0].pts[1].x, 8.5) && near(ps[0].pts[1].y, 5), 'edge dimension moves perpendicular');
+  chk(near(applyPointDim(ps[0].pts[1], {x:3,y:9}).x, 8.5), 'edge dimension holds through a drag');
+  chk(near(applyPointDim({dim:{axis:'x',v:10,len:1.5}}, {x:20,y:0}).x, 11.5), 'edge keeps its side');
+  chk(near(dimAnchor({x:4,y:5}, {axis:'x',v:10,len:1}).y, 5), 'edge anchor is the foot on the line');
   // --- 3D geometry ---
   // posts follow the counting model: 10 m at 1.5 m = 7 panels = 8 posts, ends included
   let pa = postsAlong({x:0,y:0}, {x:10,y:0}, 1.5, false);
@@ -2360,6 +2406,65 @@ function setTheme(t){
   paint();
 }
 
+/* Drafting-style dimension: witness lines standing off the geometry, an offset dimension
+   line with arrowheads between them, and the driving value sitting in a break in the middle.
+   ponytail: the offset always falls to one side — flip it manually if it ever lands awkwardly. */
+const DIM = { gap: 6, off: 22, tail: 6, arrow: 9, half: 3.2 };
+function dimArrow(x, y, ux, uy){                 // filled triangle, tip at (x,y), pointing along u
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - ux*DIM.arrow - uy*DIM.half, y - uy*DIM.arrow + ux*DIM.half);
+  ctx.lineTo(x - ux*DIM.arrow + uy*DIM.half, y - uy*DIM.arrow - ux*DIM.half);
+  ctx.closePath(); ctx.fill();
+}
+function drawDimension(q){
+  const foot = dimAnchor(q, q.dim);
+  const A = W2S(foot), B = W2S(q);
+  const len = Math.hypot(B.x-A.x, B.y-A.y);
+  if (len < 1) return;                           // on top of the anchor: nothing to draw
+  const ux = (B.x-A.x)/len, uy = (B.y-A.y)/len;  // along the measurement
+  const nx = -uy, ny = ux;                       // sideways, where the dimension line sits
+  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.lineWidth = 1; ctx.setLineDash([]);
+  for (const P of [A, B]){                       // witness lines, clear of the geometry
+    ctx.beginPath();
+    ctx.moveTo(P.x + nx*DIM.gap, P.y + ny*DIM.gap);
+    ctx.lineTo(P.x + nx*(DIM.off+DIM.tail), P.y + ny*(DIM.off+DIM.tail));
+    ctx.stroke();
+  }
+  // an edge dimension measures to the infinite wall line — show where it runs past the wall
+  if (q.dim.axis){
+    const along = q.dim.axis === 'x' ? foot.y : foot.x, [lo,hi] = q.dim.span;
+    if (along < lo || along > hi){
+      const end = along < lo ? lo : hi;
+      const E = W2S(q.dim.axis === 'x' ? {x:q.dim.v, y:end} : {x:end, y:q.dim.v});
+      ctx.setLineDash([2,4]);
+      ctx.beginPath(); ctx.moveTo(E.x, E.y); ctx.lineTo(A.x, A.y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+  const a = { x: A.x + nx*DIM.off, y: A.y + ny*DIM.off };
+  const b = { x: B.x + nx*DIM.off, y: B.y + ny*DIM.off };
+  // too short for arrowheads to fit between the witness lines: put them outside, pointing in
+  const inward = len > DIM.arrow*2.6 ? 1 : -1;
+  const ext = inward < 0 ? DIM.arrow*1.4 : 0;
+  ctx.lineWidth = 1.25;
+  ctx.beginPath();
+  ctx.moveTo(a.x - ux*ext, a.y - uy*ext); ctx.lineTo(b.x + ux*ext, b.y + uy*ext);
+  ctx.stroke();
+  dimArrow(a.x, a.y, -ux*inward, -uy*inward);
+  dimArrow(b.x, b.y,  ux*inward,  uy*inward);
+  const txt = fmtLen(q.dim.len, state.unit);
+  let ang = Math.atan2(uy, ux);
+  if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI;
+  ctx.save();
+  ctx.translate((a.x+b.x)/2, (a.y+b.y)/2); ctx.rotate(ang);
+  ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 5; ctx.strokeStyle = C.halo;   // the halo IS the break in the dimension line
+  ctx.strokeText(txt, 0, inward < 0 ? -11 : 0);
+  ctx.fillStyle = ACCENT; ctx.fillText(txt, 0, inward < 0 ? -11 : 0);
+  ctx.restore();
+}
+
 let raf = 0;
 function paint(){ if (!raf) raf = requestAnimationFrame(doPaint); }
 function doPaint(){
@@ -2484,25 +2589,7 @@ function doPaint(){
       ctx.lineWidth = 2; ctx.strokeStyle = isSel ? ACCENT : C.fence; ctx.stroke();
       ctx.globalAlpha = 1;
     });
-    // corner dimensions — dashed witness line back to the anchor, with the driving value
-    pl.pts.forEach(q => {
-      if (!q.dim) return;
-      const A = W2S({x:q.dim.x, y:q.dim.y}), B = W2S(q);
-      ctx.setLineDash([5,4]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = ACCENT; ctx.fillRect(A.x-3, A.y-3, 6, 6);
-      let dang = Math.atan2(B.y-A.y, B.x-A.x);
-      if (dang > Math.PI/2 || dang < -Math.PI/2) dang += Math.PI;
-      ctx.save();
-      ctx.translate((A.x+B.x)/2, (A.y+B.y)/2); ctx.rotate(dang);
-      ctx.font = '12px system-ui'; ctx.textAlign = 'center';
-      ctx.lineWidth = 4; ctx.strokeStyle = C.halo;
-      ctx.strokeText(fmtLen(q.dim.len, state.unit), 0, -7);
-      ctx.fillStyle = ACCENT;
-      ctx.fillText(fmtLen(q.dim.len, state.unit), 0, -7);
-      ctx.restore();
-    });
+    pl.pts.forEach(q => { if (q.dim) drawDimension(q); });
     // Match the per-fence materials list to the plan with a compact badge.
     const tag = showFenceLabels3 ? fenceLabelLayout(pl, p) : null;
     if (tag){
@@ -3470,17 +3557,22 @@ function updateSelbox(){
       box.innerHTML = '<h2>Selected '+(isStart ? endLabels.start : isFinish ? endLabels.end : 'fence point')+'</h2>' +
         (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
         '<div class="row" id="cornerAngleRow" style="display:none"><span>Corner angle</span><b id="cornerAngle"></b></div>' +
-        '<button id="bDim" style="width:100%">📐 Dimension to a building corner</button>' +
-        '<div class="row" id="dimRow" style="display:none"><span>To corner</span>' +
+        '<div class="grp"><button id="bDim" style="flex:1">📐 To corner</button>' +
+          '<button id="bDimEdge" style="flex:1">📐 To wall</button></div>' +
+        '<div class="row" id="dimRow" style="display:none"><span id="dimLabel">To corner</span>' +
           '<span><input id="iDim" inputmode="text"> <span class="unit">'+(u==='m'?'m':'')+'</span></span></div>' +
         '<button id="bDimClear" style="width:100%;display:none">Remove dimension</button>' +
         '<p class="note" id="dimNote">Drag to move. Deleting it joins the neighbouring segments. Select a fence to show its joined-post angles.</p>';
       if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
-      $('bDim').addEventListener('click', () => {
-        if (!state.builds.length){ alert('Draw a building first — dimensions anchor to its corners.'); return; }
-        dimPick = true; cv.style.cursor = 'crosshair';
-        $('dimNote').textContent = 'Click the building corner to measure from.';
-      });
+      const armDim = kind => {
+        if (!state.builds.length){ alert('Draw a building first — dimensions anchor to it.'); return; }
+        dimPick = kind; cv.style.cursor = 'crosshair';
+        $('dimNote').textContent = kind === 'edge'
+          ? 'Click the building wall to measure from.'
+          : 'Click the building corner to measure from.';
+      };
+      $('bDim').addEventListener('click', () => armDim('corner'));
+      $('bDimEdge').addEventListener('click', () => armDim('edge'));
       $('iDim').addEventListener('change', e => {
         const v = parseLen(e.target.value, state.unit);
         const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
@@ -3498,7 +3590,7 @@ function updateSelbox(){
       const has = !!(selPt && selPt.dim);
       $('dimRow').style.display = has ? '' : 'none';
       $('bDimClear').style.display = has ? '' : 'none';
-      $('bDim').textContent = has ? '📐 Re-anchor to another corner' : '📐 Dimension to a building corner';
+      $('dimLabel').textContent = has && selPt.dim.axis ? 'To wall' : 'To corner';
       if (has && document.activeElement !== $('iDim'))
         $('iDim').value = u==='m' ? +selPt.dim.len.toFixed(3) : ftStr(selPt.dim.len);
     }
@@ -3798,12 +3890,14 @@ function resumeLine(p, i){
 //   idle + empty    -> clear the selection, or start a new fence if nothing was selected
 function handleClick(hit, sx, sy, multi){
   if (readOnly) return;
-  if (dimPick){                                 // picking the corner a dimension measures from
+  if (dimPick){                                 // picking what a dimension measures from
+    const kind = dimPick;
     dimPick = false; cv.style.cursor = '';
-    const c = nearestCorner(state.builds, S2W(sx, sy));
+    const w = S2W(sx, sy);
+    const ref = kind === 'edge' ? nearestEdge(state.builds, w) : nearestCorner(state.builds, w);
     const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
-    if (c && pt) commitEdit(() => setPointDim(state.polys, sel.p, sel.i, c,
-                                              Math.hypot(pt.x-c.x, pt.y-c.y)));
+    if (ref && pt) commitEdit(() => setPointDim(state.polys, sel.p, sel.i, ref,
+                                                dimDistance(pt, ref)));
     lastSelKey = ''; updateAll(); return;        // force the panel to rebuild with the input
   }
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
