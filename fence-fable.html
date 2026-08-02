@@ -1623,8 +1623,10 @@ function constraintResidual(polys){
    settling one link per edit. Dimensions that genuinely contradict each other have no
    arrangement to reach, so the residual stalls above tolerance — which is what makes them
    detectable rather than something to reason about rule by rule.
-   ponytail: relaxation, not a Newton solve. It converges on the shapes a fence drawing makes;
-   swap in a proper least-squares solve if a drawing ever appears that it cannot settle. */
+   ponytail: relaxation, not a Newton solve. It converges on the shapes a fence drawing makes,
+   but every projection moves along the line it measures, so a configuration where those lines
+   coincide — anchor, post and corner exactly collinear — is a saddle it cannot leave even when
+   a solution exists just off the axis. Swap in a least-squares solve if that ever shows up. */
 const RELAX_PASSES = 24;
 function relaxConstraints(polys){
   let last = Infinity;
@@ -1722,20 +1724,29 @@ const angleSwingRange = (pl, k, fwd) => fwd ? [k+1, pl.pts.length-1] : [0, k-1];
 /* Can this dimension actually drive, or is the drawing already pinned against it? Asking for a
    value different from the one it has and seeing whether everything can still be satisfied
    answers that for any combination, without a rule per pairing. */
+/* The question is whether the value is free to move at all, so the nudge is small and tried
+   both ways. Asking for a large excursion would refuse a dimension that is perfectly drivable
+   but only within a short range — free is free, however little room there is. */
+const NUDGE = 0.02, NUDGE_DEG = 1.5;
 function angleCanDrive(polys, p, k, fwd){
   const m = cornerAngleAt(polys[p], k);
   if (!m) return false;
-  const probe = m.degrees > 90 ? m.degrees - 12 : m.degrees + 12;
-  return dimensionIsSatisfiable(polys, c => {
-    c[p].pts[k].ang = { ...(c[p].pts[k].ang || {}), deg: probe, fwd };
-    setCornerAngle(c, p, k, probe, fwd);
+  return [NUDGE_DEG, -NUDGE_DEG].some(step => {
+    const probe = Math.max(0.5, Math.min(179.5, m.degrees + step));
+    if (Math.abs(probe - m.degrees) < 1e-9) return false;
+    return dimensionIsSatisfiable(polys, c => {
+      c[p].pts[k].ang = { ...(c[p].pts[k].ang || {}), deg: probe, fwd };
+      setCornerAngle(c, p, k, probe, fwd);
+    });
   });
 }
 function distanceCanDrive(polys, p, i, anchorRef){
-  return dimensionIsSatisfiable(polys, c => {
+  return [NUDGE, -NUDGE].some(step => dimensionIsSatisfiable(polys, c => {
     const a = dimAnchorRef(anchorRef, c);
-    setPointDim(c, p, i, a, dimDistance(c[p].pts[i], a) + 0.37);
-  });
+    const want = dimDistance(c[p].pts[i], a) + step;
+    if (want <= 0.01) throw new Error('too short to test the other way');
+    setPointDim(c, p, i, a, want);
+  }));
 }
 // Retyping a value asks for something specific, so the probe uses the value itself rather than
 // an arbitrary nudge: a figure the drawing cannot reach must not be written down as if it had.
