@@ -2619,7 +2619,10 @@ function renderDimension(A, B, txt, offPx, opts = {}){
   ctx.fillStyle = ACCENT; ctx.fillText(txt, 0, lift);
   const half = Math.max(24, ctx.measureText(txt).width/2 + 9);
   ctx.restore();
-  return { x: mid.x - Math.sin(ang)*lift, y: mid.y + Math.cos(ang)*lift, r: half };
+  // the whole dimension is pickable — the value box (in ITS OWN rotated frame, or a slanted
+  // label is only clickable dead centre) and the dimension line between the arrowheads
+  return { x: mid.x - Math.sin(ang)*lift, y: mid.y + Math.cos(ang)*lift, r: half, ang,
+           line: { ax:a.x, ay:a.y, bx:b.x, by:b.y } };
 }
 // Where the anchor and the measured point sit on screen, plus the wall run-past if there is one.
 function dimEnds(q, polys){
@@ -2664,8 +2667,16 @@ function dimLabelPos(kind, p, i){
   const L = Math.hypot(B.x-A.x, B.y-A.y) || 1, off = dimOffPx(q.dim);
   return { x:(A.x+B.x)/2 - (B.y-A.y)/L*off, y:(A.y+B.y)/2 + (B.x-A.x)/L*off };
 }
-const dimHitAt = (sx, sy) =>
-  dimHits.find(h => Math.abs(sx-h.x) <= h.r && Math.abs(sy-h.y) <= 13);
+// Test the value box in the label's own rotated frame — an axis-aligned box would make a
+// slanted dimension clickable only at its dead centre. The dimension line counts too.
+function dimHitAt(sx, sy){
+  return dimHits.find(h => {
+    const dx = sx-h.x, dy = sy-h.y, a = h.ang || 0;
+    const u = dx*Math.cos(a) + dy*Math.sin(a), v = -dx*Math.sin(a) + dy*Math.cos(a);
+    if (Math.abs(u) <= h.r && Math.abs(v) <= 12) return true;
+    return h.line && dist2seg(sx, sy, h.line.ax, h.line.ay, h.line.bx, h.line.by).d <= 7;
+  });
+}
 
 function openDimEdit(target){
   const pl = state.polys[target.p];
@@ -2916,7 +2927,7 @@ function doPaint(){
         // a length locked from the panel has no placement, so it stays an inline label —
         // but it is still a dimension: selectable and deletable like the rest
         if (a.lockAfter != null && a.lockOff == null)
-          dimHits.push({ kind:'seg', p, i, x:(A.x+B.x)/2 + 7*Math.sin(ang),
+          dimHits.push({ kind:'seg', p, i, ang, x:(A.x+B.x)/2 + 7*Math.sin(ang),
                          y:(A.y+B.y)/2 - 7*Math.cos(ang),
                          r: Math.max(24, ctx.measureText(label).width/2 + 9) });
         ctx.lineWidth = 4; ctx.strokeStyle = C.halo;
