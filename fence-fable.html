@@ -1490,14 +1490,31 @@ function nearestEdge(builds, w){
   }
   return best;
 }
-// The world point a dimension measures from: the corner, or the foot on the edge line.
-const dimAnchor = (pt, dim) => dim.axis
-  ? (dim.axis === 'x' ? { x:dim.v, y:pt.y } : { x:pt.x, y:dim.v })
-  : { x:dim.x, y:dim.y };
+// Referencing another fence point by index would rot the moment a point is deleted or a run
+// splits, so anchors get a stable id instead. Seeded from what's already in the drawing, which
+// keeps it correct across save/load and undo without a global counter.
+function pointId(pt, polys){
+  if (pt.pid) return pt.pid;
+  let max = 0;
+  for (const pl of polys) for (const q of pl.pts)
+    if (q.pid) max = Math.max(max, parseInt(q.pid.slice(1), 10) || 0);
+  return (pt.pid = 'p' + (max + 1));
+}
+const findPoint = (polys, pid) => {
+  for (const pl of polys) for (const q of pl.pts) if (q.pid === pid) return q;
+  return null;
+};
+// The world point a dimension measures from: another fence point, a corner, or the foot on
+// the edge line. A referenced point that has been deleted falls back to its last position.
+function dimAnchor(pt, dim, polys){
+  if (dim.pid) return findPoint(polys || [], dim.pid) || { x:dim.x, y:dim.y };
+  if (dim.axis) return dim.axis === 'x' ? { x:dim.v, y:pt.y } : { x:pt.x, y:dim.v };
+  return { x:dim.x, y:dim.y };
+}
 const dimDistance = (pt, ref) => ref.axis ? Math.abs(pt[ref.axis] - ref.v)
                                           : Math.hypot(pt.x-ref.x, pt.y-ref.y);
 // Hold a dimensioned point at its distance from the anchor, keeping the direction it's heading.
-function applyPointDim(pt, pos){
+function applyPointDim(pt, pos, polys){
   const dim = pt.dim;
   if (!dim) return pos;
   if (dim.axis){                                 // perpendicular to an edge, staying on its side
@@ -1505,16 +1522,30 @@ function applyPointDim(pt, pos){
     return dim.axis === 'x' ? { x: dim.v + side*dim.len, y: pos.y }
                             : { x: pos.x, y: dim.v + side*dim.len };
   }
-  const dx = pos.x-dim.x, dy = pos.y-dim.y, d = Math.hypot(dx,dy);
+  const A = dimAnchor(pt, dim, polys);
+  const dx = pos.x-A.x, dy = pos.y-A.y, d = Math.hypot(dx,dy);
   // sitting exactly on the anchor: no direction to keep, so head east
   const ux = d > 1e-9 ? dx/d : 1, uy = d > 1e-9 ? dy/d : 0;
-  return { x: dim.x + ux*dim.len, y: dim.y + uy*dim.len };
+  return { x: A.x + ux*dim.len, y: A.y + uy*dim.len };
+}
+// A point dimensioned off another point has to follow when that anchor moves.
+// ponytail: one pass, so a chain of them settles over successive edits rather than at once —
+// and a cycle just wobbles instead of hanging. Solve properly only if chains turn up in real use.
+function reapplyDims(polys){
+  polys.forEach(pl => pl.pts.forEach(q => {
+    if (!q.dim || !q.dim.pid) return;
+    const A = findPoint(polys, q.dim.pid);
+    if (A){ q.dim.x = A.x; q.dim.y = A.y; }      // keep the fallback fresh while it still exists
+    const pos = applyPointDim(q, q, polys);
+    q.x = pos.x; q.y = pos.y;
+  }));
 }
 function setPointDim(polys, p, i, ref, len){
   const pt = polys[p].pts[i];
   pt.dim = ref.axis ? { axis:ref.axis, v:ref.v, span:ref.span, len }
+         : ref.pid  ? { pid:ref.pid, x:ref.x, y:ref.y, len }
                     : { x:ref.x, y:ref.y, len };
-  const pos = applyPointDim(pt, pt);
+  const pos = applyPointDim(pt, pt, polys);
   pt.x = pos.x; pt.y = pos.y;
 }
 // Reverse a polyline so drawing can continue from its old start. Gate/lock flags live on
@@ -1766,6 +1797,20 @@ function freezeTree(value){
   chk(near(applyPointDim(ps[0].pts[1], {x:3,y:9}).x, 8.5), 'edge dimension holds through a drag');
   chk(near(applyPointDim({dim:{axis:'x',v:10,len:1.5}}, {x:20,y:0}).x, 11.5), 'edge keeps its side');
   chk(near(dimAnchor({x:4,y:5}, {axis:'x',v:10,len:1}).y, 5), 'edge anchor is the foot on the line');
+  // point-to-point: referenced by stable id, so it survives the anchor's index moving
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:9,y:0}], closed:false}];
+  let anchorId = pointId(ps[0].pts[0], ps);
+  chk(anchorId === 'p1' && pointId(ps[0].pts[0], ps) === 'p1', 'point id is stable');
+  chk(pointId(ps[0].pts[1], ps) === 'p2', 'ids do not collide');
+  setPointDim(ps, 0, 2, { pid:anchorId, x:0, y:0 }, 4);
+  chk(near(ps[0].pts[2].x, 4), 'point-to-point dimension drives the point');
+  ps[0].pts[0].x = -3; reapplyDims(ps);          // the anchor moves; the dimensioned point follows
+  chk(near(ps[0].pts[2].x, 1), 'dimensioned point follows its anchor');
+  deletePoint(ps, 0, 1);                         // an unrelated point goes: the id still resolves
+  reapplyDims(ps);
+  chk(near(ps[0].pts[1].x, 1), 'id survives a renumbering delete');
+  ps[0].pts.splice(0, 1); reapplyDims(ps);       // anchor deleted: falls back to its last position
+  chk(near(ps[0].pts[0].x, 1), 'deleted anchor falls back to its last position');
   // --- 3D geometry ---
   // posts follow the counting model: 10 m at 1.5 m = 7 panels = 8 posts, ends included
   let pa = postsAlong({x:0,y:0}, {x:10,y:0}, 1.5, false);
@@ -2376,8 +2421,9 @@ function movePoint(p, i, w){
     const d = Math.hypot(pos.x-q.x, pos.y-q.y) || 1;
     pos = { x: q.x + (pos.x-q.x)/d*len, y: q.y + (pos.y-q.y)/d*len };
   }
-  pos = applyPointDim(pl.pts[i], pos);
+  pos = applyPointDim(pl.pts[i], pos, state.polys);
   pl.pts[i].x = pos.x; pl.pts[i].y = pos.y;
+  reapplyDims(state.polys);                      // anything dimensioned off this point follows
 }
 
 /* =====================================================================
@@ -2418,7 +2464,7 @@ function dimArrow(x, y, ux, uy){                 // filled triangle, tip at (x,y
   ctx.closePath(); ctx.fill();
 }
 function drawDimension(q){
-  const foot = dimAnchor(q, q.dim);
+  const foot = dimAnchor(q, q.dim, state.polys);
   const A = W2S(foot), B = W2S(q);
   const len = Math.hypot(B.x-A.x, B.y-A.y);
   if (len < 1) return;                           // on top of the anchor: nothing to draw
@@ -2590,6 +2636,7 @@ function doPaint(){
       ctx.globalAlpha = 1;
     });
     pl.pts.forEach(q => { if (q.dim) drawDimension(q); });
+
     // Match the per-fence materials list to the plan with a compact badge.
     const tag = showFenceLabels3 ? fenceLabelLayout(pl, p) : null;
     if (tag){
@@ -3557,22 +3604,26 @@ function updateSelbox(){
       box.innerHTML = '<h2>Selected '+(isStart ? endLabels.start : isFinish ? endLabels.end : 'fence point')+'</h2>' +
         (isEnd ? '<button id="bCont" style="width:100%">✏️ Continue this fence</button>' : '') +
         '<div class="row" id="cornerAngleRow" style="display:none"><span>Corner angle</span><b id="cornerAngle"></b></div>' +
-        '<div class="grp"><button id="bDim" style="flex:1">📐 To corner</button>' +
-          '<button id="bDimEdge" style="flex:1">📐 To wall</button></div>' +
+        '<div class="grp"><button id="bDim" style="flex:1">📐 Corner</button>' +
+          '<button id="bDimEdge" style="flex:1">📐 Wall</button>' +
+          '<button id="bDimPt" style="flex:1">📐 Point</button></div>' +
         '<div class="row" id="dimRow" style="display:none"><span id="dimLabel">To corner</span>' +
           '<span><input id="iDim" inputmode="text"> <span class="unit">'+(u==='m'?'m':'')+'</span></span></div>' +
         '<button id="bDimClear" style="width:100%;display:none">Remove dimension</button>' +
         '<p class="note" id="dimNote">Drag to move. Deleting it joins the neighbouring segments. Select a fence to show its joined-post angles.</p>';
       if (isEnd) $('bCont').addEventListener('click', () => resumeLine(sel.p, sel.i));
       const armDim = kind => {
-        if (!state.builds.length){ alert('Draw a building first — dimensions anchor to it.'); return; }
+        if (kind !== 'point' && !state.builds.length){
+          alert('Draw a building first — corner and wall dimensions anchor to it.'); return;
+        }
         dimPick = kind; cv.style.cursor = 'crosshair';
-        $('dimNote').textContent = kind === 'edge'
-          ? 'Click the building wall to measure from.'
-          : 'Click the building corner to measure from.';
+        $('dimNote').textContent = kind === 'edge' ? 'Click the building wall to measure from.'
+                                 : kind === 'point' ? 'Click the other fence point to measure from.'
+                                 : 'Click the building corner to measure from.';
       };
       $('bDim').addEventListener('click', () => armDim('corner'));
       $('bDimEdge').addEventListener('click', () => armDim('edge'));
+      $('bDimPt').addEventListener('click', () => armDim('point'));
       $('iDim').addEventListener('change', e => {
         const v = parseLen(e.target.value, state.unit);
         const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
@@ -3590,7 +3641,8 @@ function updateSelbox(){
       const has = !!(selPt && selPt.dim);
       $('dimRow').style.display = has ? '' : 'none';
       $('bDimClear').style.display = has ? '' : 'none';
-      $('dimLabel').textContent = has && selPt.dim.axis ? 'To wall' : 'To corner';
+      $('dimLabel').textContent = !has ? '' : selPt.dim.axis ? 'To wall'
+                                            : selPt.dim.pid ? 'To point' : 'To corner';
       if (has && document.activeElement !== $('iDim'))
         $('iDim').value = u==='m' ? +selPt.dim.len.toFixed(3) : ftStr(selPt.dim.len);
     }
@@ -3894,10 +3946,17 @@ function handleClick(hit, sx, sy, multi){
     const kind = dimPick;
     dimPick = false; cv.style.cursor = '';
     const w = S2W(sx, sy);
-    const ref = kind === 'edge' ? nearestEdge(state.builds, w) : nearestCorner(state.builds, w);
     const pt = sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
-    if (ref && pt) commitEdit(() => setPointDim(state.polys, sel.p, sel.i, ref,
-                                                dimDistance(pt, ref)));
+    if (pt) commitEdit(() => {
+      let ref;
+      if (kind === 'point'){
+        // must be a different fence point — measuring to itself means nothing
+        if (!hit || hit.t !== 'pt' || (hit.p === sel.p && hit.i === sel.i)) return;
+        const other = state.polys[hit.p].pts[hit.i];
+        ref = { pid: pointId(other, state.polys), x: other.x, y: other.y };
+      } else ref = kind === 'edge' ? nearestEdge(state.builds, w) : nearestCorner(state.builds, w);
+      if (ref) setPointDim(state.polys, sel.p, sel.i, ref, dimDistance(pt, ref));
+    });
     lastSelKey = ''; updateAll(); return;        // force the panel to rebuild with the input
   }
   if (hit && hit.t === 'hdl') return;           // building resize handle: drag only
