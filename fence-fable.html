@@ -249,8 +249,8 @@
   .bkHead p{font-size:12px;color:var(--muted);margin:2px 0 0}
   .bkCurrent{margin:0 16px 12px;padding:11px 13px;background:var(--bg);
              border:1px solid var(--line);border-radius:12px}
-  .bkCurrent span,.bkLibrary>label{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;
-                                  text-transform:uppercase;color:var(--muted)}
+  .bkCurrent span{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;
+                  text-transform:uppercase;color:var(--muted)}
   #bkCur{margin:3px 0 0;font-size:14px;font-weight:600;color:var(--ink);
          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bkPrimaryActions{display:grid;grid-template-columns:1.15fr 1fr;gap:8px;padding:0 16px 16px}
@@ -263,31 +263,14 @@
   .bkLocalHead small{display:block;margin-top:3px;color:var(--muted);font-size:12px}
   .bkLocalActions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .bkLocalActions button{width:100%}
-  #bkShare{display:none;width:calc(100% - 32px);margin:0 16px 16px}
-  .bkLibrary{padding:15px 16px 16px;border-top:1px solid var(--line)}
-  .bkLibrary>label{margin-bottom:7px}
-  #bkList{width:100%}
-  .bkFileActions{display:grid;grid-template-columns:1fr 44px 44px;gap:8px;margin-top:8px}
-  .bkFileActions .iconBtn{display:grid;place-items:center;width:44px;padding:0}
-  .bkFileActions svg{width:17px;height:17px;stroke:currentColor}
-  #bkDel{background:transparent}
-  .bkShares{padding:15px 16px 16px;border-top:1px solid var(--line)}
-  .bkSharesHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
-  .bkSharesHead span{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
-                     color:var(--muted)}
-  #bkSharesCount{font-size:11px;color:var(--muted)}
-  #bkSharesList{display:grid;gap:9px}
-  .bkShareCard{padding:11px;background:var(--bg);border:1px solid var(--line);border-radius:12px}
-  .bkShareSummary{display:flex;align-items:flex-start;gap:8px;min-width:0}
-  .bkShareDot{width:8px;height:8px;flex:none;margin-top:5px;background:var(--accent);
-              border-radius:50%;box-shadow:0 0 0 3px var(--accent-soft)}
-  .bkShareText{min-width:0}
-  .bkShareText strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-                      font-size:13px}
-  .bkShareText small{display:block;margin-top:2px;color:var(--muted);font-size:11px}
-  .bkShareActions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:9px}
-  .bkShareActions button{min-height:36px;padding:6px 8px;border-radius:9px;font-size:12px}
-  #bkSharesEmpty{margin:0;color:var(--muted);font-size:12px}
+  .bkOpenRow{padding:0 16px 16px}
+  .bkShareRow{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 16px 16px}
+  .bkShareRow[hidden]{display:none}
+  .bkOpenRow button,.bkShareRow button{width:100%}
+  .bkCount{display:inline-grid;place-items:center;min-width:20px;height:19px;margin-left:7px;
+           padding:0 6px;font-size:11px;font-weight:700;color:var(--muted);background:var(--field);
+           border-radius:999px}
+  button:disabled .bkCount{opacity:.5}
   #bkStatus{margin:0;padding:10px 16px;border-top:1px solid var(--line)}
   #bkStatus:empty{display:none}
   #bkStatus[data-kind="success"]{background:var(--accent-faint);color:var(--accent)}
@@ -349,8 +332,28 @@
   .dialogBody input:focus{outline:0;background:var(--card);border-color:var(--accent);
                           box-shadow:0 0 0 3px var(--accent-soft)}
   .dialogBody .fieldHint{font-size:12px;color:var(--muted);margin:5px 0 0}
+  .dialogBody .fieldHint:empty{display:none}
   #bkDialogError{min-height:18px;font-size:12px;margin:5px 0 0}
   .dialogActions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+  #pickDialog{width:min(520px,calc(100vw - 28px))}
+  .pickList{display:grid;gap:8px;max-height:min(52vh,340px);overflow-y:auto;margin-top:12px}
+  .pickList:empty{display:none}
+  .pickRow{display:flex;align-items:center;gap:10px;padding:10px 11px;background:var(--bg);
+           border:1px solid var(--line);border-radius:12px}
+  .pickRow.current{background:var(--accent-faint);border-color:var(--accent-soft)}
+  .pickText{flex:1;min-width:0}
+  .pickText strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+  .pickText small{display:block;margin-top:2px;color:var(--muted);font-size:11px}
+  .pickActions{display:flex;flex:none;gap:6px}
+  .pickActions button{min-height:34px;padding:6px 10px;border-radius:9px;font-size:12px}
+  .pickActions .iconBtn{display:grid;place-items:center;width:34px;padding:0}
+  .pickActions svg{width:16px;height:16px;stroke:currentColor}
+  #pickEmpty:empty{display:none}
+  @media (max-width:430px){
+    .pickRow{flex-wrap:wrap}
+    .pickActions{width:100%}
+    .pickActions button:not(.iconBtn){flex:1}
+  }
 
   /* 3D view: the plan-only overlays have nothing to say */
   body.d3 #snapover, body.d3 #fdel, body.d3 #fswap, body.d3 #gridcap{display:none}
@@ -473,6 +476,23 @@
         <button id="bkSave" class="primary">Save changes</button>
         <button id="bkSaveAs" title="Save as a new drawing">Save as new</button>
       </div>
+      <div class="bkOpenRow">
+        <button id="bkOpen">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"
+                  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>Open drawing<span class="bkCount" id="bkOpenCount"></span></button>
+      </div>
+      <section class="bkShareRow" id="bkShareRow" hidden aria-label="Sharing">
+        <button id="bkShare">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="18" cy="5" r="3" stroke-width="1.8"/>
+            <circle cx="6" cy="12" r="3" stroke-width="1.8"/>
+            <circle cx="18" cy="19" r="3" stroke-width="1.8"/>
+            <path d="m8.7 13.5 6.6 3.9M15.3 6.6 8.7 10.5" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>Share view</button>
+        <button id="bkShares">Shared links<span class="bkCount" id="bkSharesCount"></span></button>
+      </section>
       <section class="bkLocal" aria-labelledby="bkLocalTitle">
         <div class="bkLocalHead">
           <span id="bkLocalTitle">External backup</span>
@@ -483,42 +503,6 @@
           <button id="bkRestore">Restore all files</button>
         </div>
         <input id="bkRestoreInput" type="file" accept=".json,application/json" hidden>
-      </section>
-      <button id="bkShare">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="18" cy="5" r="3" stroke-width="1.8"/>
-          <circle cx="6" cy="12" r="3" stroke-width="1.8"/>
-          <circle cx="18" cy="19" r="3" stroke-width="1.8"/>
-          <path d="m8.7 13.5 6.6 3.9M15.3 6.6 8.7 10.5" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>Share view</button>
-      <div class="bkLibrary">
-        <label for="bkList">Saved drawings</label>
-        <select id="bkList" aria-label="Saved drawing"></select>
-        <div class="bkFileActions">
-          <button id="bkLoad">Open selected</button>
-          <button id="bkRen" class="iconBtn" title="Rename saved drawing"
-                  aria-label="Rename saved drawing">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="m4 20 4.2-1 10.7-10.7a2.1 2.1 0 0 0-3-3L5.2 16zM14.5 6.7l3 3"
-                    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-          <button id="bkDel" class="danger iconBtn" title="Delete saved drawing"
-                  aria-label="Delete saved drawing">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4.5 7h15M9 7V4.5h6V7m-8.5 0 .8 13h9.4l.8-13M10 11v5M14 11v5"
-                    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-      <section id="bkShares" class="bkShares" hidden aria-labelledby="bkSharesTitle">
-        <div class="bkSharesHead">
-          <span id="bkSharesTitle">Shared drawings</span>
-          <small id="bkSharesCount"></small>
-        </div>
-        <div id="bkSharesList"></div>
-        <p id="bkSharesEmpty">No active shared drawings.</p>
       </section>
       <p class="note" id="bkStatus" role="status" aria-live="polite"></p>
       <div class="bkSync">
@@ -735,6 +719,26 @@
       </div>
     </div>
   </form>
+</dialog>
+
+<dialog id="pickDialog" aria-labelledby="pickTitle">
+  <div class="dialogBody">
+    <div class="dlgHead">
+      <span class="dlgIcon" id="pickIcon" aria-hidden="true"></span>
+      <div>
+        <h2 id="pickTitle"></h2>
+        <p id="pickSub"></p>
+      </div>
+    </div>
+    <label class="srOnly" for="pickSearch">Search by name</label>
+    <input id="pickSearch" type="search" autocomplete="off" spellcheck="false"
+           placeholder="Search by name">
+    <div id="pickList" class="pickList"></div>
+    <p id="pickEmpty" class="fieldHint"></p>
+    <div class="dialogActions">
+      <button id="pickClose">Close</button>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="shareDialog" aria-labelledby="shareDialogTitle">
@@ -1953,6 +1957,9 @@ function freezeTree(value){
   chk(fmtLen(12*FT+6*IN,'ft') === "12' 6\"", 'fmt ft');
   chk(fmtLen(2.4,'m') === '2.4 m', 'fmt m');
   chk(fmtLen(11.999*IN + 11*FT,'ft') === "12' 0\"", 'fmt inch carry');
+  const pickable = [{name:'Back-fence'},{name:'front-FENCE'},{name:'shed'}];
+  chk(pickMatches(pickable,'  FENCE ').length === 2 && pickMatches(pickable,'  ') === pickable,
+      'file picker filters by name, ignoring case and padding');
   const frozen = freezeTree({items:[{x:1}]});
   let frozenSplice = false;
   try { frozen.items.splice(0,1); } catch { frozenSplice = true; }
@@ -4990,6 +4997,7 @@ cv.addEventListener('wheel', e => {
 // keyboard: Delete/Backspace, Esc, Undo/Redo
 window.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (document.querySelector('dialog[open]')) return;   // a modal owns the keyboard, Escape included
   if (readOnly){
     if (e.key === 'Escape'){ sel = null; updateAll(); }
     return;
@@ -5005,7 +5013,7 @@ window.addEventListener('keydown', e => {
   }
   if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSelected(); }
   else if (e.key === 'Escape'){
-    if ($('bkSec').open && !$('bkDialog').open){ $('bkSec').open = false; return; }
+    if ($('bkSec').open){ $('bkSec').open = false; return; }
     endLine(); sel = null; updateAll();
   }
   else if ((e.ctrlKey || e.metaKey) &&
@@ -5706,7 +5714,6 @@ function bkAutoName(){
   const d = new Date(), p = n => String(n).padStart(2,'0');
   return `fence-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
-const bkSelected = () => $('bkList').value;
 const bkPath = name => 'backups/' + encodeURIComponent(name);
 function externalLibraryFileName(){
   const d = new Date(), p = n => String(n).padStart(2,'0');
@@ -5758,11 +5765,10 @@ function setBkStatus(message, kind=''){
   $('bkStatus').dataset.kind = kind;
 }
 function syncBkActions(){
-  const hasSelection = !!bkSelected();
-  $('bkList').disabled = bkBusy || !bkItems.length;
   $('bkSave').disabled = bkBusy || !bkServerAvailable;
   $('bkSaveAs').disabled = bkBusy || !bkServerAvailable;
-  for (const id of ['bkLoad','bkRen','bkDel']) $(id).disabled = bkBusy || !bkServerAvailable || !hasSelection;
+  $('bkOpen').disabled = bkBusy || !bkServerAvailable || !bkItems.length;
+  $('bkOpenCount').textContent = bkItems.length || '';
   $('bkDownload').disabled = bkBusy || !bkServerAvailable;
   $('bkRestore').disabled = bkBusy || !bkServerAvailable;
   $('bkSec').setAttribute('aria-busy', String(bkBusy));
@@ -5787,11 +5793,15 @@ async function bkRequest(path, options, fallback){
   return body;
 }
 function syncShareAction(){
-  $('bkShare').style.display = shareAvailable ? 'block' : 'none';
+  $('bkShareRow').hidden = !shareAvailable;
   $('bkShare').disabled = bkBusy || !bkServerAvailable || !bkCurrent;
   $('bkShare').title = bkCurrent
     ? `Share a view-only snapshot of “${bkCurrent}”`
     : 'Save this drawing before sharing it';
+  $('bkShares').disabled = bkBusy || !bkServerAvailable || !sharedItems.length;
+  $('bkShares').title = sharedItems.length
+    ? 'Review every active view-only link' : 'Nothing is shared right now';
+  $('bkSharesCount').textContent = sharedItems.length || '';
 }
 async function refreshShareConfig(){
   try {
@@ -5801,32 +5811,13 @@ async function refreshShareConfig(){
   } catch { shareAvailable = false; }
   syncShareAction();
   if (shareAvailable) await refreshSharedDrawings();
-  else $('bkShares').hidden = true;
 }
 function shareListExpiry(value){
   return value ? 'Expires ' + new Date(value).toLocaleString() : 'Does not expire';
 }
 function renderSharedDrawings(){
-  $('bkShares').hidden = false;
-  $('bkSharesEmpty').textContent = 'No active shared drawings.';
-  $('bkSharesCount').textContent = sharedItems.length
-    ? sharedItems.length + ' active' : '';
-  $('bkSharesEmpty').hidden = !!sharedItems.length;
-  $('bkSharesList').innerHTML = sharedItems.map((item, i) =>
-    `<article class="bkShareCard">
-      <div class="bkShareSummary">
-        <span class="bkShareDot" aria-hidden="true"></span>
-        <div class="bkShareText">
-          <strong title="${escHTML(item.name)}">${escHTML(item.name)}</strong>
-          <small>${escHTML(shareListExpiry(item.expiresAt))}</small>
-        </div>
-      </div>
-      <div class="bkShareActions">
-        <button data-share-action="open" data-share-index="${i}">Open</button>
-        <button data-share-action="copy" data-share-index="${i}">Copy</button>
-        <button data-share-action="manage" data-share-index="${i}">Manage</button>
-      </div>
-    </article>`).join('');
+  syncShareAction();
+  if (pickMode === 'shares') renderPicker();
 }
 async function refreshSharedDrawings(){
   if (!shareAvailable) return;
@@ -5838,9 +5829,81 @@ async function refreshSharedDrawings(){
   } catch(error) {
     sharedItems = [];
     renderSharedDrawings();
-    $('bkSharesEmpty').hidden = false;
-    $('bkSharesEmpty').textContent = error.message;
+    setPickMessage(error.message);
+    setBkStatus(error.message, 'error');
   }
+}
+
+/* ---- One searchable, scrolling list — the menu never grows with the library ---- */
+const PICK_SEARCH_MIN = 8;   // ponytail: a search box only earns its space once the list scrolls
+let pickMode = '';
+const ICON_RENAME =
+  `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 20 4.2-1 10.7-10.7a2.1 2.1 0 0 0-3-3L5.2 16zM14.5 6.7l3 3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_DELETE =
+  `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 7h15M9 7V4.5h6V7m-8.5 0 .8 13h9.4l.8-13M10 11v5M14 11v5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_FOLDER =
+  `<svg viewBox="0 0 24 24" fill="none"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_SHARE =
+  `<svg viewBox="0 0 24 24" fill="none"><circle cx="18" cy="5" r="3" stroke-width="1.8"/><circle cx="6" cy="12" r="3" stroke-width="1.8"/><circle cx="18" cy="19" r="3" stroke-width="1.8"/><path d="m8.7 13.5 6.6 3.9M15.3 6.6 8.7 10.5" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const savedWhen = mtime => mtime ? 'Saved ' + new Date(mtime).toLocaleString() : 'Saved drawing';
+const setPickMessage = text => { $('pickEmpty').textContent = text; };
+function pickAll(){ return pickMode === 'shares' ? sharedItems : bkItems; }
+function pickMatches(items, query){
+  const needle = query.trim().toLowerCase();
+  return needle ? items.filter(item => item.name.toLowerCase().includes(needle)) : items;
+}
+function pickRows(){ return pickMatches(pickAll(), $('pickSearch').value); }
+function pickRowHTML(item){
+  const name = escHTML(item.name);
+  if (pickMode === 'shares')
+    return `<article class="pickRow">
+      <div class="pickText"><strong title="${name}">${name}</strong>
+        <small>${escHTML(shareListExpiry(item.expiresAt))}</small></div>
+      <div class="pickActions">
+        <button data-pick="open" data-name="${name}">Open</button>
+        <button data-pick="copy" data-name="${name}">Copy</button>
+        <button data-pick="manage" data-name="${name}">Manage</button>
+      </div></article>`;
+  const current = item.name === bkCurrent;
+  return `<article class="pickRow${current ? ' current' : ''}">
+      <div class="pickText"><strong title="${name}">${name}</strong>
+        <small>${current ? 'Open now · ' : ''}${escHTML(savedWhen(item.mtime))}</small></div>
+      <div class="pickActions">
+        <button data-pick="open" data-name="${name}" class="primary">Open</button>
+        <button data-pick="rename" data-name="${name}" class="iconBtn"
+                title="Rename “${name}”" aria-label="Rename ${name}">${ICON_RENAME}</button>
+        <button data-pick="delete" data-name="${name}" class="danger iconBtn"
+                title="Delete “${name}”" aria-label="Delete ${name}">${ICON_DELETE}</button>
+      </div></article>`;
+}
+function renderPicker(){
+  if (!$('pickDialog').open) return;
+  const shares = pickMode === 'shares', all = pickAll(), rows = pickRows();
+  $('pickSub').textContent = shares
+    ? `${all.length} active link${all.length === 1 ? '' : 's'}`
+    : `${all.length} drawing${all.length === 1 ? '' : 's'} saved on gbot`;
+  $('pickSearch').hidden = all.length < PICK_SEARCH_MIN;
+  $('pickList').innerHTML = rows.map(pickRowHTML).join('');
+  setPickMessage(rows.length ? ''
+    : all.length ? 'No name matches that search.'
+    : shares ? 'No active shared drawings.' : 'Nothing saved yet — use Save as new.');
+}
+function openPicker(mode){
+  pickMode = mode;
+  $('pickSearch').value = '';
+  $('pickTitle').textContent = mode === 'shares' ? 'Shared links' : 'Open a drawing';
+  $('pickIcon').innerHTML = mode === 'shares' ? ICON_SHARE : ICON_FOLDER;
+  $('pickDialog').showModal();
+  renderPicker();
+  if (mode === 'shares') refreshSharedDrawings(); else refreshBackups();
+  requestAnimationFrame(() => {
+    const first = $('pickSearch').hidden ? $('pickList').querySelector('button') : $('pickSearch');
+    (first || $('pickClose')).focus();
+  });
+}
+function closePicker(){
+  if ($('pickDialog').open) $('pickDialog').close();
+  pickMode = '';
 }
 function setShareStatus(message, kind=''){
   $('shareDialogStatus').textContent = message;
@@ -5962,27 +6025,24 @@ async function stopSharing(){
   } catch(error) { setShareStatus(error.message, 'error'); }
   finally { setShareBusy(false); }
 }
-async function refreshBackups(preferred=''){
+async function refreshBackups(){
   try {
     const list = await bkRequest('backups', {}, 'Could not load saved drawings.');
     bkServerAvailable = true;
     bkItems = list;
     $('bkSec').style.display = '';
-    $('bkList').innerHTML = list.length
-      ? list.map(b => `<option value="${b.name}">${b.name}</option>`).join('')
-      : '<option value="">No saved drawings</option>';
     if (bkCurrent && !list.some(b => b.name === bkCurrent)) setBkCurrent('');
-    const selected = preferred || bkCurrent;
-    if (selected && list.some(b => b.name === selected)) $('bkList').value = selected;
     setBkCurrent(bkCurrent);
     syncBkActions();
+    renderPicker();
     if (shareAvailable) refreshSharedDrawings();
   } catch(e) {
     bkServerAvailable = false;
     bkItems = [];
     $('bkSec').style.display = '';
-    $('bkList').innerHTML = '<option value="">Server backups unavailable</option>';
     syncBkActions();
+    renderPicker();
+    setPickMessage(e.message);
     setBkStatus(e.message + ' Full external backup requires the file server.', 'error');
   }
 }
@@ -6010,6 +6070,8 @@ function openBkDialog(type, name=''){
   const restoreAll = type === 'restoreAll' ? pendingExternalRestore : null;
   const restoreCount = restoreAll ? restoreAll.library.drawings.length : 0;
   const config = {
+    saved:  ['Drawing saved',`“${name}” is saved on gbot, ${new Date().toLocaleTimeString()}.`,'Done'],
+    created:['Drawing saved',`“${name}” is saved on gbot and is now your current drawing.`,'Done'],
     create: ['Save as new drawing','Choose a name before creating this saved copy.','Save drawing'],
     rename: ['Rename saved drawing',`Choose a new name for “${name}”.`,'Rename'],
     open:   ['Open saved drawing?',`Open “${name}” and replace the drawing currently on the canvas? You can Undo this change.`,'Open'],
@@ -6021,6 +6083,10 @@ function openBkDialog(type, name=''){
   $('bkDialogText').textContent = config[1];
   $('bkDialogConfirm').textContent = config[2];
   $('bkDialogConfirm').className = type === 'delete' ? 'danger' : 'primary';
+  const acknowledge = type === 'saved' || type === 'created';
+  $('bkDialogCancel').style.display = acknowledge ? 'none' : '';
+  // the error line reserves space so validation never shifts the buttons — nothing to reserve here
+  $('bkDialogError').style.minHeight = acknowledge ? '0' : '';
   const needsName = type === 'create' || type === 'rename';
   $('bkNameWrap').style.display = $('bkNameHint').style.display = needsName ? '' : 'none';
   $('bkRestoreModeWrap').style.display = type === 'restoreAll' ? '' : 'none';
@@ -6116,7 +6182,7 @@ async function restoreExternalLibrary(){
       pending.library.drawings.some(item => item.name === pending.library.currentDrawing) &&
       (replace || !conflicts.has(pending.library.currentDrawing));
     setBkCurrent(currentRestored ? pending.library.currentDrawing : '');
-    await refreshBackups(currentRestored ? pending.library.currentDrawing : '');
+    await refreshBackups();
     closeBkDialog();
     $('bkSec').open = false;
     const skippedText = skipped ? ` ${skipped} existing drawing${skipped === 1 ? '' : 's'} skipped.` : '';
@@ -6137,9 +6203,10 @@ async function saveBackup(name, create=false){
       body:JSON.stringify(statePayload())
     }, 'Could not save the drawing.');
     setBkCurrent(name);
-    await refreshBackups(name);
+    await refreshBackups();
     closeBkDialog();
     setBkStatus(create ? `Created “${name}”.` : `Saved “${name}”.`, 'success');
+    openBkDialog(create ? 'created' : 'saved', name);
   } catch(e) {
     if ($('bkDialog').open) $('bkDialogError').textContent = e.message;
     else setBkStatus(e.message, 'error');
@@ -6158,6 +6225,7 @@ async function openBackup(name){
     closeBkDialog();
     $('bkSec').open = false;
     setBkStatus(`Opened “${name}”.`, 'success');
+    closePicker();
   } catch(e) {
     $('bkDialogError').textContent = e.message;
   } finally {
@@ -6171,7 +6239,7 @@ async function renameBackup(name, to){
       method:'PATCH', headers:{'content-type':'application/json'}, body:JSON.stringify({name:to})
     }, 'Could not rename the drawing.');
     if (name === bkCurrent) setBkCurrent(to);
-    await refreshBackups(to);
+    await refreshBackups();
     closeBkDialog();
     setBkStatus(`Renamed to “${to}”.`, 'success');
   } catch(e) {
@@ -6205,12 +6273,21 @@ $('bkRestoreInput').addEventListener('change', e => {
   chooseExternalLibrary(file);
 });
 $('bkShare').addEventListener('click', () => openShareDialog());
-$('bkSharesList').addEventListener('click', async e => {
-  const button = e.target.closest('button[data-share-action]');
-  if (!button) return;
-  const item = sharedItems[+button.dataset.shareIndex];
+$('bkShares').addEventListener('click', () => openPicker('shares'));
+$('bkOpen').addEventListener('click', () => openPicker('drawings'));
+$('pickSearch').addEventListener('input', renderPicker);
+$('pickClose').addEventListener('click', closePicker);
+$('pickDialog').addEventListener('close', () => { pickMode = ''; });
+$('pickList').addEventListener('click', async e => {
+  const button = e.target.closest('button[data-pick]');
+  if (!button || bkBusy) return;
+  const {pick:action, name} = button.dataset;
+  if (pickMode !== 'shares'){
+    if (action === 'open' || action === 'rename' || action === 'delete') openBkDialog(action, name);
+    return;
+  }
+  const item = sharedItems.find(share => share.name === name);
   if (!item) return;
-  const action = button.dataset.shareAction;
   if (action === 'open') {
     const link = document.createElement('a');
     link.href = item.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
@@ -6222,14 +6299,10 @@ $('bkSharesList').addEventListener('click', async e => {
       await copyPublicLink(item.url);
       button.textContent = 'Copied';
       setTimeout(() => button.textContent = label, 1500);
-    } catch(error) { setBkStatus(error.message, 'error'); }
+    } catch(error) { setPickMessage(error.message); }
   }
   if (action === 'manage') openShareDialog(item.name);
 });
-$('bkLoad').addEventListener('click', () => { if (bkSelected()) openBkDialog('open', bkSelected()); });
-$('bkRen').addEventListener('click', () => { if (bkSelected()) openBkDialog('rename', bkSelected()); });
-$('bkDel').addEventListener('click', () => { if (bkSelected()) openBkDialog('delete', bkSelected()); });
-$('bkList').addEventListener('change', syncBkActions);
 $('bkName').addEventListener('input', syncBkDialog);
 $('bkDialogCancel').addEventListener('click', closeBkDialog);
 $('bkSec').addEventListener('toggle', () => {
@@ -6239,13 +6312,14 @@ $('bkSec').addEventListener('toggle', () => {
   }
 });
 document.addEventListener('click', e => {
-  if ($('bkSec').open && !e.target.closest('#bkSec') && !e.target.closest('#bkDialog'))
+  if ($('bkSec').open && !e.target.closest('#bkSec') && !e.target.closest('dialog'))
     $('bkSec').open = false;
 });
 $('bkDialogForm').addEventListener('submit', e => {
   e.preventDefault();
   if (!bkDialogAction || $('bkDialogConfirm').disabled) return;
   const {type,name} = bkDialogAction, to = $('bkName').value.trim();
+  if (type === 'saved' || type === 'created') closeBkDialog();
   if (type === 'create') saveBackup(to, true);
   if (type === 'rename') renameBackup(name, to);
   if (type === 'open') openBackup(name);

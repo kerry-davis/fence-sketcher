@@ -310,11 +310,17 @@ possible.
 
 ### Full external backup and restore
 
-Open the top-right **Files** menu. It manages the normal CRUD lifecycle
-(`Save changes`, `Save as new`, `Open selected`, `Rename`, and `Delete`) and also
-lists active shared drawings. The **External backup** section is separate from
-those individual operations. The file server must be reachable because the
-library is read from and restored to the server's named drawings:
+Open the top-right **Files** menu. The menu itself holds only fixed actions —
+`Save changes`, `Save as new`, `Open drawing`, `Share view`, `Shared links` and
+the external backup pair — so it stays the same height whether you have three
+drawings or three hundred. `Open drawing` and `Shared links` each open a
+searchable, scrolling picker that carries the per-item actions (`Open`,
+`Rename`, `Delete` for drawings; `Open`, `Copy`, `Manage` for links); the search
+box appears once a list passes eight entries. Every successful save confirms
+itself in a dialog rather than only in the status line. The **External backup**
+section is separate from those individual operations. The file server must be
+reachable because the library is read from and restored to the server's named
+drawings:
 
 - **Download all files** fetches every named server drawing plus the current
   canvas state and downloads one portable JSON file.
@@ -342,9 +348,9 @@ Sharing deliberately uses two security boundaries:
 
 The public link is a 256-bit random bearer token. Snapshots are separate from
 saved drawings, use `no-store`/`noindex` response headers, and expire after 7
-or 30 days unless the owner explicitly chooses no expiry. The Files menu lists
-all active shared drawings with Open, Copy and Manage actions; Manage can update
-or explicitly remove a link. Deleting a saved drawing also revokes its active
+or 30 days unless the owner explicitly chooses no expiry. **Shared links** in the
+Files menu lists every active shared drawing with Open, Copy and Manage actions;
+Manage can update or explicitly remove a link. Deleting a saved drawing also revokes its active
 share before removing the file.
 
 The shared page is genuinely read-only: it freezes the loaded drawing state and
