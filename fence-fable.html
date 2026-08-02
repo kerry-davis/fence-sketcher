@@ -2846,21 +2846,24 @@ function commitDimEdit(){
   closeDimEdit();                                // before the work, so the blur can't re-enter
   const pl = state.polys[t.p];
   if (!pl || !pl.pts[t.i]) return;
+  // whatever was just typed stays selected, so delete and swap are to hand straight away
+  // instead of hiding behind leaving the tool and clicking the dimension again
+  const keep = () => { sel = { t:'dim', kind:t.kind, p:t.p, i:t.i }; bsel.clear(); };
   if (t.kind === 'ang'){                        // degrees, not a length
     const deg = parseFloat(String(typed).replace(/,/g,'.'));
-    if (!isFinite(deg) || deg < 0.5 || deg > 179.5) return;
+    if (!isFinite(deg) || deg < 0.5 || deg > 179.5){ keep(); updateAll(); return; }
     commitEdit(() => setCornerAngle(state.polys, t.p, t.i, deg,
                                     (pl.pts[t.i].ang || {}).fwd !== false));
-    updateAll();
+    keep(); updateAll();
     return;
   }
   const v = parseLen(typed, state.unit);
-  if (v == null || v <= 0.01) return;
+  if (v == null || v <= 0.01){ keep(); updateAll(); return; }
   commitEdit(() => {
     if (t.kind === 'seg') setSegLen(state.polys, t.p, t.i, v);
     else if (pl.pts[t.i].dim) setPointDim(state.polys, t.p, t.i, pl.pts[t.i].dim, v);
   });
-  updateAll();
+  keep(); updateAll();
 }
 // Signed sideways distance, in metres, from the measured line to where the cursor is — this is
 // what the placement click stores, so the dimension keeps its position relative to the drawing.
@@ -2960,6 +2963,7 @@ function moveDimension(kind, p, i, sx, sy){
 }
 // One click of the dimension tool: pick a thing, close the pair, or drop the dimension in place.
 function dimToolClick(sx, sy){
+  if (sel && sel.t === 'dim') sel = null;       // starting the next one drops the last one's buttons
   if (dimTool.pend){                            // second stage: this click places it
     const pend = dimTool.pend;
     // a length still waiting to be placed turns into an angle if a second fence is clicked
@@ -3295,8 +3299,9 @@ function doPaint(){
     if (dimTool.a) highlightRef(dimTool.a, true);
     if (dimHover && !sameDimRef(dimHover, dimTool.a)) highlightRef(dimHover, false);
   }
-  // floating delete button beside the selection (the touch-friendly delete)
-  if (sel && !dimTool){
+  // floating delete button beside the selection (the touch-friendly delete). A dimension keeps
+  // its buttons even while the tool is armed — they belong to what was just typed.
+  if (sel && (!dimTool || sel.t === 'dim')){
     let a = null;
     if (sel.t==='pt'  && state.polys[sel.p]) a = W2S(state.polys[sel.p].pts[sel.i]);
     if (sel.t==='seg' && state.polys[sel.p]){
