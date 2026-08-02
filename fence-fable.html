@@ -1566,6 +1566,21 @@ function reapplyDims(polys){
     q.x = pos.x; q.y = pos.y;
   }));
 }
+// A dimensioned corner has to hold its angle when a post on either leg is moved, the same way
+// a locked length holds. Without this the geometry drifts away from the value that drove it.
+function reapplyAngles(polys){
+  polys.forEach((pl, p) => pl.pts.forEach((q, k) => {
+    if (!q.ang || q.ang.deg == null) return;
+    if (Math.abs((cornerAngleAt(pl, k) || {degrees:q.ang.deg}).degrees - q.ang.deg) < 1e-9) return;
+    setCornerAngle(polys, p, k, q.ang.deg, q.ang.fwd !== false);
+  }));
+}
+// ponytail: angles then distances, one pass each — enough while a drawing holds a handful of
+// dimensions. Interacting constraints want a real solver, which is the standing upgrade.
+function reapplyConstraints(polys){
+  reapplyAngles(polys);
+  reapplyDims(polys);
+}
 /* --- Corner angle dimensions: the value drives the corner, swinging one leg round --- */
 // The corner at vertex k, as the two ray bearings and the signed turn between them.
 function cornerAngleAt(pl, k){
@@ -1663,12 +1678,17 @@ function setPointDim(polys, p, i, ref, len){
 // each segment's START point, so they must shift to the segment's new start when reversed.
 function reversePoly(pl){
   const n = pl.pts.length;
-  const flags = pl.pts.map(q => ({ g: q.gateAfter, l: q.lockAfter }));
+  const flags = pl.pts.map(q => ({ g: q.gateAfter, l: q.lockAfter, o: q.lockOff }));
   pl.pts.reverse();
   pl.pts.forEach((q, k) => {
-    const src = k < n-1 ? flags[n-2-k] : { g: undefined, l: undefined };
+    const src = k < n-1 ? flags[n-2-k] : { g: undefined, l: undefined, o: undefined };
     q.gateAfter = src.g; q.lockAfter = src.l == null ? null : src.l;
-    if (q.ang) q.ang.fwd = !q.ang.fwd;           // the legs swap ends with the run
+    // a placement is measured off the segment's direction, which the reverse turns around
+    if (src.o == null) delete q.lockOff; else q.lockOff = -src.o;
+    if (q.ang){                                  // the legs swap ends with the run, and the
+      q.ang.fwd = !q.ang.fwd;                    // swing recorded against them turns with them
+      if (q.ang.d) q.ang.d = -q.ang.d;
+    }
   });
 }
 function translatePolyline(pl, start, dx, dy){
@@ -1944,6 +1964,33 @@ function freezeTree(value){
   chk(ps[0].pts.every((q, j) => near(q.x, swung[j].x) && near(q.y, swung[j].y)),
       'swapping back restores the first arrangement exactly');
   chk(ps[0].pts[1].ang.fwd === true, 'and the recorded side goes back too');
+  // reversing a run turns the swing round with it, so a later swap still lands correctly
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  setCornerAngle(ps, 0, 1, 45, true);
+  reversePoly(ps[0]);                            // the swung post is now pts[0]
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 45), 'reversing leaves the angle alone');
+  swapAngleSide(ps, 0, 1);
+  chk(near(ps[0].pts[0].x, 5) && near(ps[0].pts[0].y, 5),
+      'swap after a reverse still sends the swung post home');
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 45), 'and the angle survives that too');
+  // a placement is measured off the segment direction, which reversing turns around
+  ps = [{pts:[{x:0,y:0,lockAfter:5,lockOff:2.5},{x:5,y:0},{x:10,y:0}], closed:false}];
+  reversePoly(ps[0]);
+  chk(ps[0].pts[1].lockAfter === 5 && near(ps[0].pts[1].lockOff, -2.5),
+      'a placed length keeps its offset, mirrored, on the segment it belongs to');
+  chk(ps[0].pts[2].lockOff === undefined, 'and leaves none behind on the old point');
+  // a dimensioned corner holds its angle when a post on a leg is moved
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  setCornerAngle(ps, 0, 1, 90, true);
+  ps[0].pts[0].y = 3;                            // shove the far post of the fixed leg
+  reapplyAngles(ps);
+  chk(near(cornerAngleAt(ps[0], 1).degrees, 90), 'the corner holds its angle');
+  // and a dependent point follows an anchor moved by a length edit, not just by a drag
+  ps = [{pts:[{x:0,y:0},{x:4,y:0}], closed:false}, {pts:[{x:10,y:0},{x:12,y:0}], closed:false}];
+  setPointDim(ps, 1, 0, { pid: pointId(ps[0].pts[1], ps), x:4, y:0 }, 3);
+  setSegLen(ps, 0, 0, 9);
+  reapplyConstraints(ps);
+  chk(near(Math.abs(ps[1].pts[0].x - ps[0].pts[1].x), 3), 'the dependent follows a moved anchor');
   // two fences make an angle only where they share a post of one open run
   const ap = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:9}], closed:false},
               {pts:[{x:0,y:9},{x:4,y:9}], closed:false}];
@@ -2534,6 +2581,9 @@ function commitEdit(edit){
   if (readOnly) return false;
   const before = historySnapshot();
   edit();
+  // every committed edit can move an anchor — typing a length, swinging a corner, moving a run —
+  // so the things dimensioned off it settle here rather than only after a drag
+  reapplyConstraints(state.polys);
   if (historySnapshot() === before) return false;
   pushHistory(before);
   return true;
@@ -2644,7 +2694,7 @@ function movePoint(p, i, w){
   }
   pos = applyPointDim(pl.pts[i], pos, state.polys);
   pl.pts[i].x = pos.x; pl.pts[i].y = pos.y;
-  reapplyDims(state.polys);                      // anything dimensioned off this point follows
+  reapplyConstraints(state.polys);               // anything dimensioned off this point follows
 }
 
 /* =====================================================================
