@@ -1991,6 +1991,20 @@ function freezeTree(value){
   setSegLen(ps, 0, 0, 9);
   reapplyConstraints(ps);
   chk(near(Math.abs(ps[1].pts[0].x - ps[0].pts[1].x), 3), 'the dependent follows a moved anchor');
+  // and when the whole anchoring run is dragged somewhere else
+  const runHome = ps[0].pts.map(q => ({x:q.x, y:q.y}));
+  translatePolyline(ps[0], runHome, 4, 2);
+  reapplyConstraints(ps);
+  chk(near(Math.hypot(ps[1].pts[0].x - ps[0].pts[1].x, ps[1].pts[0].y - ps[0].pts[1].y), 3),
+      'the dependent follows its whole run being moved');
+  // settling a drifted corner has to count towards the swing, or a later swap overshoots
+  ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  setCornerAngle(ps, 0, 1, 45, true);
+  ps[0].pts[0].y = 3;                            // drag a post on the fixed leg
+  reapplyAngles(ps);
+  swapAngleSide(ps, 0, 1);
+  chk(near(ps[0].pts[2].x, 5) && near(ps[0].pts[2].y, 5),
+      'swap still lands the swung post home after the corner was settled');
   // two fences make an angle only where they share a post of one open run
   const ap = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:9}], closed:false},
               {pts:[{x:0,y:9},{x:4,y:9}], closed:false}];
@@ -4131,7 +4145,9 @@ function updateSelbox(){
       $('iSegLen').addEventListener('change', e => {
         const v = parseLen(e.target.value, state.unit);
         if (v != null && v > 0.01 && sel && sel.t==='seg'){
-          pushUndo(); setSegLen(state.polys, sel.p, sel.i, v); updateAll();
+          // through commitEdit, so whatever is dimensioned off this run settles with it
+          commitEdit(() => setSegLen(state.polys, sel.p, sel.i, v));
+          updateAll();
         } else updateSelbox();
       });
       $('iGate').addEventListener('change', e => {
@@ -4549,6 +4565,7 @@ cv.addEventListener('pointermove', e => {
     const p = snapObjectAxes({x:w.x-drag.ox, y:w.y-drag.oy},
                              drag.xs, drag.ys, null, drag.p);
     translatePolyline(state.polys[drag.p], drag.pts, p.x-drag.x, p.y-drag.y);
+    reapplyConstraints(state.polys);            // the whole run moved: its anchors moved with it
   }
   if (drag.t === 'bld'){
     const p = snapObjectAxes({ x:w.x-drag.ox, y:w.y-drag.oy },
