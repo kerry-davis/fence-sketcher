@@ -163,14 +163,13 @@ the drawing lies about itself. You can't dimension a pair whose distance is
 already pinned — the two ends of one segment (its Length *is* that dimension),
 or a reference that closes a loop back on itself.
 
-An angle and a distance can share a post, as long as the swing doesn't
-contradict the distance. Measured from the corner the angle turns about, or
-from another post the same swing carries round, the distance is unchanged by
-the rotation and the two live together happily. Measured from something the
-swing leaves behind — a building corner, a wall, a post outside the swept
-stretch — they would pull against each other, and that is refused. Each refusal
-says which way out it has; an angle is usually still available from the other
-fence, so the free side swings instead.
+Whether two dimensions can share a post is not decided by a rule per pairing.
+The drawing is asked for a value the dimension doesn't have, on a copy, and if
+everything can still be satisfied at once the dimension genuinely drives and is
+allowed. Whatever is *not* written down gives way — an undimensioned segment
+will stretch to satisfy both an angle and a distance. Only when nothing is left
+to give is it refused. Each refusal says which way out it has; an angle is
+usually still available from the other fence, so the free side swings instead.
 
 Angles are refused on closed loops, where rotating part of the run would tear
 it open.
@@ -246,14 +245,12 @@ Known simplifications, all marked `ponytail:` in the source: handrail corners
 butt rather than mitre, and the handrail adds its thickness above the fence
 height.
 
-Constraints are settled by applying them in turn — angles, then distances, one
-pass each — rather than by a constraint solver. That is enough for the handful
-of dimensions a fence drawing carries, but a *chain* of post-to-post dimensions
-settles over successive edits rather than all at once, a cycle wobbles instead
-of converging, and a post locked on both sides can drift slightly on the first
-neighbour. A real solver is the standing upgrade if any of that starts to
-matter. A new dimension is also placed to whichever side you drop it on, with no
-awareness of what is underneath.
+Constraints settle by relaxation: each pass satisfies every dimension in turn
+and disturbs its neighbours less than the last, repeating until nothing moves
+or a pass budget runs out. That converges on the shapes a fence drawing makes,
+including chains of dimensions, but it is not a Newton solve — swap one in if a
+drawing ever appears that it cannot settle. A new dimension is still placed to
+whichever side you drop it on, with no awareness of what is underneath.
 
 ---
 

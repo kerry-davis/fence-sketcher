@@ -1559,9 +1559,13 @@ function applyPointDim(pt, pos, polys){
 // and a cycle just wobbles instead of hanging. Solve properly only if chains turn up in real use.
 function reapplyDims(polys){
   polys.forEach(pl => pl.pts.forEach(q => {
-    if (!q.dim || !q.dim.pid) return;
-    const A = findPoint(polys, q.dim.pid);
-    if (A){ q.dim.x = A.x; q.dim.y = A.y; }      // keep the fallback fresh while it still exists
+    if (!q.dim) return;
+    if (q.dim.pid){
+      const A = findPoint(polys, q.dim.pid);
+      if (A){ q.dim.x = A.x; q.dim.y = A.y; }    // keep the fallback fresh while it still exists
+    }
+    // a building corner or wall stays put, but the post can still be moved by something else,
+    // so its distance to them needs restoring the same as any other
     const pos = applyPointDim(q, q, polys);
     q.x = pos.x; q.y = pos.y;
   }));
@@ -1575,11 +1579,60 @@ function reapplyAngles(polys){
     setCornerAngle(polys, p, k, q.ang.deg, q.ang.fwd !== false);
   }));
 }
-// ponytail: angles then distances, one pass each — enough while a drawing holds a handful of
-// dimensions. Interacting constraints want a real solver, which is the standing upgrade.
-function reapplyConstraints(polys){
-  reapplyAngles(polys);
-  reapplyDims(polys);
+/* How far each dimension is from being satisfied, in metres (an angle counts a degree as a
+   centimetre so one tolerance covers both). Zero everywhere means the drawing agrees with
+   every value written on it. */
+const DIM_TOL = 5e-5;                            // a twentieth of a millimetre
+function constraintResidual(polys){
+  let worst = 0;
+  polys.forEach((pl, p) => pl.pts.forEach((q, k) => {
+    if (q.dim){
+      const A = dimAnchor(q, q.dim, polys);
+      const at = q.dim.axis ? Math.abs(q[q.dim.axis] - q.dim.v)
+                            : Math.hypot(q.x-A.x, q.y-A.y);
+      worst = Math.max(worst, Math.abs(at - q.dim.len));
+    }
+    if (q.ang && q.ang.deg != null){
+      const m = cornerAngleAt(pl, k);
+      if (m) worst = Math.max(worst, Math.abs(m.degrees - q.ang.deg) / 100);
+    }
+    if (q.lockAfter != null){
+      const b = pl.pts[(k+1) % pl.pts.length];
+      if (b && (pl.closed || k < pl.pts.length-1))
+        worst = Math.max(worst, Math.abs(segLen(q, b) - q.lockAfter));
+    }
+  }));
+  return worst;
+}
+/* Settle the drawing by applying each dimension in turn and repeating until nothing moves.
+   Sweeping one constraint at a time is a relaxation: each pass satisfies each dimension exactly
+   and disturbs its neighbours less than the last, so a chain of them converges instead of
+   settling one link per edit. Dimensions that genuinely contradict each other have no
+   arrangement to reach, so the residual stalls above tolerance — which is what makes them
+   detectable rather than something to reason about rule by rule.
+   ponytail: relaxation, not a Newton solve. It converges on the shapes a fence drawing makes;
+   swap in a proper least-squares solve if a drawing ever appears that it cannot settle. */
+const RELAX_PASSES = 24;
+function relaxConstraints(polys){
+  let last = Infinity;
+  for (let n = 0; n < RELAX_PASSES; n++){
+    reapplyAngles(polys);
+    reapplyDims(polys);
+    const r = constraintResidual(polys);
+    if (r < DIM_TOL) return r;                   // everything agrees
+    if (r > last - 1e-9) return r;               // no longer improving: as close as it gets
+    last = r;
+  }
+  return constraintResidual(polys);
+}
+function reapplyConstraints(polys){ relaxConstraints(polys); }
+// Would the drawing still be satisfiable with this dimension added? Rather than reason about
+// which dimensions can coexist, try it on a copy and see whether everything can be satisfied
+// at once. `add` receives the copy and puts the proposed dimension on it.
+function dimensionIsSatisfiable(polys, add){
+  const copy = JSON.parse(JSON.stringify(polys));
+  try { add(copy); } catch { return false; }
+  return relaxConstraints(copy) < DIM_TOL;
 }
 /* --- Corner angle dimensions: the value drives the corner, swinging one leg round --- */
 // The corner at vertex k, as the two ray bearings and the signed turn between them.
@@ -1641,34 +1694,23 @@ function angleTarget(polys, first, second){
    post where it is. Both driving the same post means they pull against each other on every
    settle, so whichever is asked for second is refused. */
 const angleSwingRange = (pl, k, fwd) => fwd ? [k+1, pl.pts.length-1] : [0, k-1];
-// A distance only fights the swing if it reaches something the swing leaves behind. Measured
-// from the corner post itself, or from another post carried round by the same swing, the
-// distance is unchanged by the rotation and the two can live together.
-function ridesTheSwing(pl, k, lo, hi, anchorIndex, anchorPos){
-  if (anchorIndex === k || (anchorIndex >= lo && anchorIndex <= hi)) return true;
-  // anything standing on the corner is the centre of the rotation, so the distance to it is
-  // unchanged whatever run that post belongs to — junction posts are shared here
-  const V = pl.pts[k];
-  return !!anchorPos && Math.hypot(anchorPos.x - V.x, anchorPos.y - V.y) < FENCE_JOIN_TOL;
+/* Can this dimension actually drive, or is the drawing already pinned against it? Asking for a
+   value different from the one it has and seeing whether everything can still be satisfied
+   answers that for any combination, without a rule per pairing. */
+function angleCanDrive(polys, p, k, fwd){
+  const m = cornerAngleAt(polys[p], k);
+  if (!m) return false;
+  const probe = m.degrees > 90 ? m.degrees - 12 : m.degrees + 12;
+  return dimensionIsSatisfiable(polys, c => {
+    c[p].pts[k].ang = { ...(c[p].pts[k].ang || {}), deg: probe, fwd };
+    setCornerAngle(c, p, k, probe, fwd);
+  });
 }
-const anchorIndexIn = (pl, dim) =>
-  dim && dim.pid ? pl.pts.findIndex(q => q.pid === dim.pid) : -1;
-// Where a dimension's far end stands, or null when it has none that a rotation could preserve.
-function anchorPosOf(polys, dim){
-  if (!dim || dim.axis) return null;             // a wall is a line, never preserved by a turn
-  if (!dim.pid) return { x:dim.x, y:dim.y };
-  return findPoint(polys, dim.pid) || { x:dim.x, y:dim.y };
-}
-// -> the index of a post the angle would fight over, or -1
-function angleSwingConflict(polys, p, k, fwd){
-  const pl = polys[p], [lo, hi] = angleSwingRange(pl, k, fwd);
-  for (let i = Math.max(0, lo); i <= Math.min(hi, pl.pts.length-1); i++){
-    const dim = pl.pts[i].dim;
-    if (!dim) continue;
-    const j = anchorIndexIn(pl, dim);            // a wall, a building corner or another run: -1
-    if (!ridesTheSwing(pl, k, lo, hi, j, anchorPosOf(polys, dim))) return i;
-  }
-  return -1;
+function distanceCanDrive(polys, p, i, anchorRef){
+  return dimensionIsSatisfiable(polys, c => {
+    const a = dimAnchorRef(anchorRef, c);
+    setPointDim(c, p, i, a, dimDistance(c[p].pts[i], a) + 0.37);
+  });
 }
 /* A distance measured to a post standing on the corner is only safe because it stands there.
    Two runs meeting keep their own copy of a junction post, so dragging one apart would strand
@@ -1690,23 +1732,6 @@ function retargetToCorner(polys, p, i, anchorRef){
     if (Math.hypot(pos.x - V.x, pos.y - V.y) < FENCE_JOIN_TOL) return { k:'pt', p, i:k };
   }
   return anchorRef;
-}
-// -> the corner whose angle would fight a new dimension on this post, or -1. `anchorRef` is
-// what the new dimension would measure from, so a distance the swing preserves is allowed.
-function angleSweepingPost(polys, p, i, anchorRef){
-  const pl = polys[p];
-  const refPos = !anchorRef || anchorRef.k === 'wall' ? null
-               : anchorRef.k === 'cnr' ? { x:anchorRef.x, y:anchorRef.y }
-               : (polys[anchorRef.p] || {pts:[]}).pts[anchorRef.i] || null;
-  for (let k = 0; k < pl.pts.length; k++){
-    const a = pl.pts[k].ang;
-    if (!a) continue;
-    const [lo, hi] = angleSwingRange(pl, k, a.fwd !== false);
-    if (i < lo || i > hi) continue;
-    const j = anchorRef && anchorRef.k === 'pt' && anchorRef.p === p ? anchorRef.i : -1;
-    if (!ridesTheSwing(pl, k, lo, hi, j, refPos)) return k;
-  }
-  return -1;
 }
 const sharesSegment = (pl, i, j) => {
   const n = pl.pts.length, d = Math.abs(i - j);
@@ -2076,38 +2101,39 @@ function freezeTree(value){
   swapAngleSide(ps, 0, 1);
   chk(near(ps[0].pts[2].x, 5) && near(ps[0].pts[2].y, 5),
       'swap still lands the swung post home after the corner was settled');
-  // an angle and a distance must not both drive the same post
+  // whether two dimensions can coexist is answered by trying to satisfy both, not by a rule
+  // per pairing: ask for a value the dimension does not have and see if the drawing follows
+  // the corner at post 1 turns posts 2..3; post 2 is the leg whose bearing the angle measures
   ps = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5},{x:9,y:5}], closed:false}];
-  chk(angleSwingConflict(ps, 0, 1, true) === -1, 'a clear run has nothing to fight over');
-  ps[0].pts[3].dim = { x:20, y:5, len:4 };       // pinned to a building corner: rotation breaks it
-  chk(angleSwingConflict(ps, 0, 1, true) === 3, 'the swinging side reports the pinned post');
-  chk(angleSwingConflict(ps, 0, 1, false) === -1, 'the other side of the corner is still free');
-  // but a distance the swing carries round with it is no conflict at all
-  ps[0].pts[1].pid = 'pA'; ps[0].pts[2].pid = 'pB';
-  ps[0].pts[3].dim = { pid:'pA', x:5, y:0, len:9 };   // measured from the corner post itself
-  chk(angleSwingConflict(ps, 0, 1, true) === -1, 'a distance to the corner post rides the swing');
-  ps[0].pts[3].dim = { pid:'pB', x:5, y:5, len:4 };   // measured from another swept post
-  chk(angleSwingConflict(ps, 0, 1, true) === -1, 'a distance between two swept posts rides too');
-  ps[0].pts[3].dim = { axis:'x', v:20, span:[0,9], len:15 };
-  chk(angleSwingConflict(ps, 0, 1, true) === 3, 'a distance to a wall does not ride the swing');
-  // and the same test the other way round, for a dimension about to be created
-  delete ps[0].pts[3].dim;
-  chk(angleSweepingPost(ps, 0, 3, {k:'cnr'}) === -1, 'no angle yet, so nothing swings that post');
+  chk(angleCanDrive(ps, 0, 1, true), 'a clear run lets its corner turn');
+  ps[0].pts[2].dim = { x:20, y:5, len:15 };      // the leg post pinned to a building corner
+  chk(!angleCanDrive(ps, 0, 1, true), 'a leg post pinned to a building stops that side turning');
+  chk(angleCanDrive(ps, 0, 1, false), 'the other side of the corner still turns');
+  ps[0].pts[1].pid = 'pA';
+  ps[0].pts[2].dim = { pid:'pA', x:5, y:0, len:5 };   // measured from the corner it turns about
+  chk(angleCanDrive(ps, 0, 1, true), 'a distance to the corner post turns with it');
+  ps[0].pts[2].dim = { axis:'x', v:20, span:[0,9], len:15 };
+  chk(!angleCanDrive(ps, 0, 1, true), 'a distance to a wall does not');
+  // an undimensioned segment stretching is not a contradiction — nothing written down is broken
+  delete ps[0].pts[2].dim;
   ps[0].pts[1].ang = { deg:90, fwd:true };
-  chk(angleSweepingPost(ps, 0, 3, {k:'cnr'}) === 1, 'pinning it to a building is refused');
-  chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:0, i:1}) === -1, 'measuring from the corner is fine');
-  chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:0, i:2}) === -1, 'so is measuring from a swept post');
-  chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:0, i:0}) === 1, 'but not from one left behind');
-  chk(angleSweepingPost(ps, 0, 0, {k:'cnr'}) === -1, 'a post before the corner is not swung by it');
-  // a junction post of another run, standing on the corner, is the centre of the turn as well
+  ps[0].pts[3].dim = { x:20, y:5, len:11 };
+  chk(angleCanDrive(ps, 0, 1, true), 'a pinned post that is not a leg leaves the corner free');
+  // and the same question asked of a distance about to be created
+  delete ps[0].pts[3].dim; delete ps[0].pts[1].ang;
+  chk(distanceCanDrive(ps, 0, 2, {k:'cnr', x:20, y:5}), 'with no angle, any distance drives');
+  ps[0].pts[1].ang = { deg:90, fwd:true };
+  chk(!distanceCanDrive(ps, 0, 2, {k:'cnr', x:20, y:5}), 'pinning a leg post to a building is not');
+  chk(distanceCanDrive(ps, 0, 2, {k:'pt', p:0, i:1}), 'measuring from the corner is');
+  chk(distanceCanDrive(ps, 0, 0, {k:'cnr', x:20, y:5}), 'a post outside the swing is unaffected');
+  // and what gives is whatever is not written down: lock the leg too and there is no room left
+  const legPinned = [{pts:[{x:0,y:0},{x:5,y:0},{x:5,y:5}], closed:false}];
+  legPinned[0].pts[2].dim = { x:5, y:7, len:2 };
+  chk(angleCanDrive(legPinned, 0, 1, true), 'an undimensioned leg can stretch to satisfy both');
+  legPinned[0].pts[1].lockAfter = segLen(legPinned[0].pts[1], legPinned[0].pts[2]);
+  chk(!angleCanDrive(legPinned, 0, 1, true), 'locking that leg leaves the two contradictory');
+  // a junction post of another run, standing on the corner, binds to the corner post
   ps.push({pts:[{x:5,y:0,pid:'pJ'},{x:11,y:-3}], closed:false});
-  chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:1, i:0}) === -1,
-      'measuring from a shared post on the corner is fine, whichever run owns it');
-  chk(angleSweepingPost(ps, 0, 3, {k:'pt', p:1, i:1}) === 1, 'but not from one that stands apart');
-  ps[0].pts[3].dim = { pid:'pJ', x:5, y:0, len:9 };
-  chk(angleSwingConflict(ps, 0, 1, true) === -1, 'and the same holds for one already placed');
-  chk(angleSweepingPost(ps, 0, 3, {k:'cnr', x:5, y:0}) === -1,
-      'a building corner on the corner post is invariant too');
   // that allowance is bound to the corner post, so separating the junction can't strand it
   const bound = retargetToCorner(ps, 0, 3, {k:'pt', p:1, i:0});
   chk(bound.k === 'pt' && bound.p === 0 && bound.i === 1, 'a post on the corner binds to the corner');
@@ -3146,7 +3172,7 @@ function dimToolClick(sx, sy){
       const second = dimRefAt(sx, sy);
       if (second && second.k === 'seg' && !sameDimRef(second, dimTool.a)){
         const t = angleTarget(state.polys, dimTool.a, second);
-        const clash = t && angleSwingConflict(state.polys, t.p, t.k, t.fwd) >= 0;
+        const clash = t && !angleCanDrive(state.polys, t.p, t.k, t.fwd);
         dimTool.pend = null; dimTool.a = null;  // refused or not, this pair is done with
         if (!t) alert('Angles are measured where two fences meet at a shared post of one run.');
         else if (clash)
@@ -3215,7 +3241,7 @@ function dimToolClick(sx, sy){
     const why = dimRefusal(state.polys, driven.p, driven.i, anchor.p, anchor.i);
     if (why){ alert(why); updateAll(); return; }
   }
-  if (angleSweepingPost(state.polys, driven.p, driven.i, anchor) >= 0){
+  if (!distanceCanDrive(state.polys, driven.p, driven.i, anchor)){
     alert('That post is swung by a corner angle on this run, and this dimension would hold it ' +
           'still. Remove the angle first, or measure from a post that swings with it.');
     updateAll(); return;
@@ -4928,7 +4954,7 @@ fdel.addEventListener('click', deleteSelected);
 fswap.addEventListener('click', () => {
   if (!sel || sel.t!=='dim' || sel.kind!=='ang') return;
   const pt = state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
-  if (pt && pt.ang && angleSwingConflict(state.polys, sel.p, sel.i, pt.ang.fwd === false) >= 0){
+  if (pt && pt.ang && !angleCanDrive(state.polys, sel.p, sel.i, pt.ang.fwd === false)){
     alert('The other side has a post held by its own dimension, so it cannot be the one to swing.');
     return;
   }
