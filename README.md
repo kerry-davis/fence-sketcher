@@ -263,7 +263,11 @@ against the near plane, then sort far-to-near.
   | every post bay, then the run itself | ground to the first rail, each rail, each gap between them, the last rail to the top, the handrail cap, then the height itself | paling width and gap |
 
   The vertical chain is taken at mid-span of whichever run faces the camera, not
-  at an end post, so it measures the fence rather than the corner timber.
+  at an end post, so it measures the fence rather than the corner timber. A
+  panel is preferred over a gate; when the run is a gate the chain describes the
+  **leaf** that was built — its ground clearance and its own two rails — rather
+  than the panel rails a gate does not carry. `gateLeafBuild()` is the single
+  definition of that, used to push the leaf and to dimension it.
 
   Bays come from the same `postsAlong()` the 3D scene builds with, and the rail
   chain from the same `railYs()`, so a dimension can never disagree with the

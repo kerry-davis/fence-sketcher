@@ -23,11 +23,13 @@ test('3D measures every part of the fence, not just its outline', () => {
   // rail spacing: a chain of the drawn rail edges, so the ground gap, each rail and each
   // gap between them all read off — the cap continues the same chain
   assert.match(html, /for \(const ry of railYs\(mat\)\)\{\s*\n\s*if \(ry \+ mat\.railW\/2 > H \+ 1e-6\) break;\s*\n\s*bounds\.push\(ry - mat\.railW\/2, ry \+ mat\.railW\/2\);/);
-  assert.match(html, /if \(hr\.on\) bounds\.push\(H \+ hr\.t\);/);
+  assert.match(html, /if \(hr\.on && !station\.gate\) bounds\.push\(H \+ hr\.t\);/);
   // taken at mid-span of the run facing the camera, not at an end post
-  assert.match(html, /const m = \{ x:\(a\.x\+b\.x\)\/2, y:\(a\.y\+b\.y\)\/2 \};[\s\S]{0,160}?if \(c\[2\] >= NEAR && \(!station \|\| c\[2\] < station\.z\)\) station = \{ m, z:c\[2\] \};/);
+  assert.match(html, /const m = \{ x:\(a\.x\+b\.x\)\/2, y:\(a\.y\+b\.y\)\/2 \};/);
+  assert.match(html, /station = \{ m, z:c\[2\], gate \};/);
   assert.match(html, /const at = y => \[station\.m\.x, y, station\.m\.y\];/);
-  assert.match(html, /txt: fmtSmall\(bounds\[k\+1\]-y, u\) \}\)\) : \[\];/);
+  assert.match(html, /txt: fmtSmall\(bounds\[k\+1\]-y, u\) \}\] : \[\]\) : \[\];/);
+  assert.match(html, /bounds\[k\+1\] - y > 1e-6/);   // never a zero-length rung
   // paling width and gap, matching build3's half-gap start
   assert.match(html, /const s = mat\.gap\/2;/);
   assert.match(html, /txt:fmtSmall\(mat\.paling, u\)/);
@@ -35,6 +37,18 @@ test('3D measures every part of the fence, not just its outline', () => {
   // the whole run and height stand clear of however far the chain reached
   assert.match(html, /dim3\(B, \[a\.x,0,a\.y\], \[b\.x,0,b\.y\], fmtLen\(L, u\), reach \+ CHAIN_OFF\*1\.6, overTop\);/);
   assert.match(html, /dim3\(B, at\(0\), at\(H\), fmtLen\(H, u\), reach \+ CHAIN_OFF\*1\.6, keepOff\);/);
+});
+
+test('a gate is measured as the leaf that was built, not as a fence panel', () => {
+  // one definition of the leaf's vertical build, used to push it and to dimension it
+  assert.match(html, /function gateLeafBuild\(H, mat\)\{/);
+  assert.match(html, /const built = gateLeafBuild\(H, mat\), bottom = built\.bottom, leafH = built\.leafH;/);
+  assert.match(html, /for \(const ry of built\.rails\)\s*\n\s*pushBox\(F,mid\.x,ry,mid\.y,leaf\.len\/2,mat\.railW\/2/);
+  assert.doesNotMatch(html, /bottom\+leafH\*0\.28,bottom\+leafH\*0\.72/);   // no second copy
+  // the chain: ground clearance, then the leaf's own rails
+  assert.match(html, /if \(station\.gate\)\{\s*\n\s*const leaf = gateLeafBuild\(H, mat\);\s*\n\s*bounds\.push\(leaf\.bottom\);/);
+  // a panel is preferred as the station; a gate-only run has nothing else
+  assert.match(html, /if \(!station \|\| \(station\.gate && !gate\) \|\| \(station\.gate === gate && c\[2\] < station\.z\)\)/);
 });
 
 test('a tight chain staggers into columns instead of dropping its small values', () => {

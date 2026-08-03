@@ -3928,13 +3928,25 @@ function pushHouse(F, builds, g){
 // A closed gate leaf. Its frame is fixed to the same side of the posts as the fence.
 // Rail gates reuse the fence's rail heights; paling gates add two frame rails behind
 // their boards. The BOM uses the same leaf geometry for its rail/paling quantities.
+/* A gate leaf is not a fence panel: it hangs clear of the ground and carries its own rails,
+   so the fence's rail heights say nothing about it. One definition, used to build the leaf
+   and to dimension it, is the only way those two can't disagree. */
+function gateLeafBuild(H, mat){
+  const bottom = Math.min(GATE_BOTTOM, H*0.15), leafH = Math.max(0.2, H-bottom);
+  if (mat.style === 'rail')
+    return { bottom, leafH, railW: mat.railW,
+             rails: railYs(mat).filter(ry => ry-mat.railW/2 >= bottom-1e-6 &&
+                                             ry+mat.railW/2 <= H+1e-6) };
+  return { bottom, leafH, railW: Math.min(0.18, Math.max(0.08, mat.railW || 0.1)),
+           rails: [bottom+leafH*0.28, bottom+leafH*0.72] };
+}
 function pushGate(F, a, b, H, mat){
   const L = segLen(a,b);
   const inset = gateLeafInset(mat);
   if (L <= 2*inset) return;
   const leaf = gateLeafBounds(a,b,inset), ang = Math.atan2(b.y-a.y,b.x-a.x);
   const ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
-  const bottom = Math.min(GATE_BOTTOM, H*0.15), leafH = Math.max(0.2, H-bottom);
+  const built = gateLeafBuild(H, mat), bottom = built.bottom, leafH = built.leafH;
   const side = mat.style === 'rail' && typeof railSideOf === 'function' ? railSideOf(mat) : 'left';
   const sign = side === 'right' ? -1 : 1;
   const pointOnSide = (q,off) => ({x:q.x-uy*off*sign, y:q.y+ux*off*sign});
@@ -3945,10 +3957,8 @@ function pushGate(F, a, b, H, mat){
   for (const q of [A,B])
     pushBox(F,q.x,bottom+leafH/2,q.y,GATE_STILE/2,leafH/2,railTOf(mat)/2,ang,WOOD.rail);
   if (mat.style === 'rail'){
-    for (const ry of railYs(mat)){
-      if (ry-mat.railW/2 < bottom-1e-6 || ry+mat.railW/2 > H+1e-6) continue;
+    for (const ry of built.rails)
       pushBox(F,mid.x,ry,mid.y,leaf.len/2,mat.railW/2,railTOf(mat)/2,ang,WOOD.rail);
-    }
     return;
   }
   // paling leaf: boards on the post face, with two rails immediately behind them
@@ -3959,10 +3969,10 @@ function pushGate(F, a, b, H, mat){
       pushBox(F,q.x,bottom+leafH/2,q.y,mat.paling/2,leafH/2,palingTOf(mat)/2,ang,WOOD.paling);
     }
   }
-  const gateRailW = Math.min(0.18,Math.max(0.08,mat.railW||0.1));
+  const gateRailW = built.railW;
   // Short render pieces sort correctly against the many paling faces at oblique angles.
   const pieces = Math.max(1,Math.ceil(leaf.len/0.35));
-  for (const ry of [bottom+leafH*0.28,bottom+leafH*0.72])
+  for (const ry of built.rails)
     for (let k = 0; k < pieces; k++){
       const t0=k/pieces, t1=(k+1)/pieces;
       const p={x:A.x+(B.x-A.x)*t0,y:A.y+(B.y-A.y)*t0};
@@ -4199,7 +4209,12 @@ function drawFenceDims3(B){
   for (const [, a, b] of segsOf(pl)){
     const m = { x:(a.x+b.x)/2, y:(a.y+b.y)/2 };
     const c = toCam(B, [m.x, 0, m.y]);
-    if (c[2] >= NEAR && (!station || c[2] < station.z)) station = { m, z:c[2] };
+    if (c[2] < NEAR) continue;
+    // a panel describes the fence better than a gate leaf does, so it wins even from further
+    // back; a gate-only run has nothing else to measure
+    const gate = !!a.gateAfter;
+    if (!station || (station.gate && !gate) || (station.gate === gate && c[2] < station.z))
+      station = { m, z:c[2], gate };
   }
   if (!station) return;
   for (const q of pl.pts){                  // the far end: the chain stands on the near side
@@ -4209,17 +4224,25 @@ function drawFenceDims3(B){
   const at = y => [station.m.x, y, station.m.y];
   const keepOff = far ? [far.q.x, 0, far.q.y] : [centre.x, 0, centre.y];
   // rail spacing as a chain up the fence: ground to the first rail, each rail, each gap,
-  // then the last rail to the top of the fence.
+  // then the last rail to the top. A gate leaf is measured as the leaf that was built —
+  // its ground clearance and its own two rails, not the panel rails it doesn't carry.
   const bounds = [0];
-  for (const ry of railYs(mat)){
-    if (ry + mat.railW/2 > H + 1e-6) break;
-    bounds.push(ry - mat.railW/2, ry + mat.railW/2);
+  if (station.gate){
+    const leaf = gateLeafBuild(H, mat);
+    bounds.push(leaf.bottom);
+    for (const ry of leaf.rails) bounds.push(ry - leaf.railW/2, ry + leaf.railW/2);
+  } else {
+    for (const ry of railYs(mat)){
+      if (ry + mat.railW/2 > H + 1e-6) break;
+      bounds.push(ry - mat.railW/2, ry + mat.railW/2);
+    }
   }
   bounds.push(H);
   const hr = hrOf(mat);
-  if (hr.on) bounds.push(H + hr.t);        // the cap continues the same chain
-  const rungs = bounds.length > 2 ? bounds.slice(0,-1).map((y,k) => ({
-    p: at(y), q: at(bounds[k+1]), txt: fmtSmall(bounds[k+1]-y, u) })) : [];
+  if (hr.on && !station.gate) bounds.push(H + hr.t);   // the cap continues the chain, but skips gates
+  const rungs = bounds.length > 2 ? bounds.slice(0,-1).flatMap((y,k) =>
+    bounds[k+1] - y > 1e-6                      // an odd mat can stack two edges at one height
+      ? [{ p: at(y), q: at(bounds[k+1]), txt: fmtSmall(bounds[k+1]-y, u) }] : []) : [];
   const reach = dimChain(B, rungs, keepOff);
   dim3(B, at(0), at(H), fmtLen(H, u), reach + CHAIN_OFF*1.6, keepOff);
 }
