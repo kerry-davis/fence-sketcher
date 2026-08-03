@@ -33,6 +33,21 @@ test('canvas guidance shrinks to phone length rather than being truncated', () =
   assert.match(html, /matchMedia\(PHONE_MQ\)\.addEventListener\('change'/);
 });
 
+test('one delete affordance, and 3D is never buried in the More menu', () => {
+  assert.doesNotMatch(html, /bDelSel/);                 // the canvas ✕ is the delete
+  assert.match(html, /fdel\.addEventListener\('click', deleteSelected\)/);
+  // #b3d must sit outside .grp.sec, which the phone toolbar collapses
+  const bar = html.slice(html.indexOf('<div id="bar">'), html.indexOf('<main>'));
+  const group = bar.slice(bar.lastIndexOf('<div', bar.indexOf('id="b3d"')), bar.indexOf('id="b3d"'));
+  assert.doesNotMatch(group, /class="grp sec/);
+});
+
+test('3D controls cannot grow into each other on a phone', () => {
+  // orbit hangs off the top, zoom off the bottom — no shared edge to fight over
+  assert.match(html, /#orbitctl\{left:auto;right:8px;top:48px;bottom:auto/);
+  assert.match(html, /#zoomctl\{right:8px;bottom:8px\}/);
+});
+
 test('the peek line says what is behind it', () => {
   assert.match(html, /updateSheetSummary\(t, sc\);/);
   assert.match(html, /sc\.pl\s*\n?\s*\? fenceName\(sc\.pl, sc\.idx\) \+ ' · tap for its settings'/);

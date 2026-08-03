@@ -376,8 +376,10 @@
     body.readonly #bar .viewTools{display:flex}
     #bar .toolbarEnd{display:contents}
     #bMore{display:inline-flex}
-    #bkSec{margin-left:auto}
-    .lbl{display:none}         /* icon-only Undo / Redo / Delete */
+    /* 3D is a view, not an edit — it stays out on the phone, beside Files */
+    #b3d{margin-left:auto}
+    #bkSec{margin-left:0}
+    .lbl{display:none}         /* icon-only Undo / Redo */
     button{padding:8px 12px}
     .seg2 button{min-width:60px}
     #hint{font-size:11px}
@@ -411,10 +413,13 @@
     #label3ctl{top:8px;right:8px;min-height:32px}
     #hint{top:auto;bottom:34px;left:8px;max-width:calc(100% - 74px);font-size:11px;
           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    body.d3 #hint{top:8px;bottom:auto}   /* the foot belongs to the orientation cube in 3D */
     #gridcap{left:8px;bottom:8px}
     #zoomctl{right:8px;bottom:8px}
     #bZoomIn,#bZoomOut{display:none}   /* pinch does this, and the edge is worth more */
-    #orbitctl{left:auto;right:10px;bottom:64px;transform:none;flex-direction:column;
+    /* orbit sits under the labels chip, not above the zoom stack: no arithmetic against
+       another control's height, so neither can grow into the other */
+    #orbitctl{left:auto;right:8px;top:48px;bottom:auto;transform:none;flex-direction:column;
               padding:0;background:transparent;border:0;box-shadow:none}
     #orbitctl button{width:46px;height:46px;min-height:46px;padding:0;font-size:20px;
                      background:var(--chip)}
@@ -445,11 +450,6 @@
         <path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13"
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
       </svg><span class="lbl">Redo</span></button>
-    <button id="bDelSel" class="danger" title="Delete selected">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M4.5 7h15M9 7V4.5h6V7m-8.5 0 .8 13h9.4l.8-13M10 11v5M14 11v5"
-              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg><span class="lbl">Delete</span></button>
   </div>
   <button id="bMore" class="editorOnly" aria-expanded="false">⋯ More</button>
   <div class="grp sec editorOnly">
@@ -470,8 +470,8 @@
     <button id="bClear" class="danger">Clear all</button>
   </div>
   <div class="grp toolbarEnd">
-    <div class="grp sec units viewTools">
     <button id="b3d" title="Plan / 3D view">3D</button>
+    <div class="grp sec units viewTools">
     <div class="seg2" id="unitTog">
       <button data-u="m"  class="on">Metres</button>
       <button data-u="ft">Feet</button>
@@ -4707,7 +4707,6 @@ function updateAll(){
   syncMatInputs();                            // panel follows the selected fence's settings
   $('bUndo').disabled = !undoStack.length;
   $('bRedo').disabled = !redoStack.length;
-  $('bDelSel').disabled = !sel;
   $('bClose').disabled = !(drawTarget() && drawTarget().pts.length >= 3);
   updateTotals(); updateSelbox(); syncReadOnlyDetails(); paint(); saveSoon();
 }
@@ -4897,7 +4896,7 @@ cv.addEventListener('pointermove', e => {
                items:ids.map(i => ({i, x:state.builds[i].x, y:state.builds[i].y})) };
     }
     else drag = { t:'pan' };                  // empty space (or a segment): drag pans
-    updateSelbox(); $('bDelSel').disabled = !sel;
+    updateSelbox();
   }
   if (!drag) return;
   if (drag.t === 'pan'){ view.x -= dx/view.s; view.y -= dy/view.s; paint(); return; }
@@ -5163,7 +5162,6 @@ $('bBuild').addEventListener('click', addBuilding);
 $('bClose').addEventListener('click', closeLoop);
 $('bUndo').addEventListener('click', undo);
 $('bRedo').addEventListener('click', redo);
-$('bDelSel').addEventListener('click', deleteSelected);
 fdel.addEventListener('click', deleteSelected);
 fswap.addEventListener('click', () => {
   requestAngleSwap();
@@ -6378,7 +6376,7 @@ $('pickList').addEventListener('click', async e => {
       await copyPublicLink(item.url);
       button.textContent = 'Copied';
       setTimeout(() => button.textContent = label, 1500);
-    } catch(error) { setPickMessage(error.message); }
+    } catch(error) { setPickMessage(error.message, 'shares'); }
   }
   if (action === 'manage') openShareDialog(item.name);
 });

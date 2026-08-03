@@ -109,7 +109,9 @@ screens.
   line (`13 posts · 24 rails · 24.5 m`, or the name of whatever is selected).
   Tap the sheet to open it, tap the drawing or press `Esc` to dismiss it. The
   canvas chips shorten to one word, guidance is written to fit one line and
-  fades once read, and the zoom buttons give way to pinch.
+  fades once read, and the zoom buttons give way to pinch. Undo, redo, 3D and
+  Files stay out of the `⋯ More` menu; deleting is the **✕** beside whatever is
+  selected, or the `Delete` key.
 - **Light / dark theme**, remembered.
 - **Autosave** to `localStorage`, plus named server backups managed from the
   top-right **Files** menu.
