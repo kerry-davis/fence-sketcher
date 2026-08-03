@@ -43,9 +43,14 @@ test('one delete affordance, and 3D is never buried in the More menu', () => {
 });
 
 test('3D controls cannot grow into each other on a phone', () => {
-  // orbit hangs off the top, zoom off the bottom — no shared edge to fight over
-  assert.match(html, /#orbitctl\{left:auto;right:8px;top:48px;bottom:auto/);
+  // orbit is a fixed-height row off the top, zoom a column off the bottom: a short
+  // landscape canvas cannot squeeze them together
+  assert.match(html, /#orbitctl\{left:auto;right:8px;top:48px;bottom:auto;transform:none;flex-direction:row/);
   assert.match(html, /#zoomctl\{right:8px;bottom:8px\}/);
+});
+
+test('3D is inspection-only — no path deletes from it', () => {
+  assert.match(html, /function deleteSelected\(\)\{\s*\n\s*if \(readOnly\) return;[\s\S]{0,220}?\n\s*if \(mode3d\) return;/);
 });
 
 test('the peek line says what is behind it', () => {

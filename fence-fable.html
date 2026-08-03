@@ -417,9 +417,9 @@
     #gridcap{left:8px;bottom:8px}
     #zoomctl{right:8px;bottom:8px}
     #bZoomIn,#bZoomOut{display:none}   /* pinch does this, and the edge is worth more */
-    /* orbit sits under the labels chip, not above the zoom stack: no arithmetic against
-       another control's height, so neither can grow into the other */
-    #orbitctl{left:auto;right:8px;top:48px;bottom:auto;transform:none;flex-direction:column;
+    /* orbit is a row under the labels chip, zoom a column off the bottom: one is 46px tall
+       whatever it holds, so a short landscape canvas can't make them collide */
+    #orbitctl{left:auto;right:8px;top:48px;bottom:auto;transform:none;flex-direction:row;
               padding:0;background:transparent;border:0;box-shadow:none}
     #orbitctl button{width:46px;height:46px;min-height:46px;padding:0;font-size:20px;
                      background:var(--chip)}
@@ -2989,6 +2989,9 @@ function addBuilding(){
 }
 function deleteSelected(){
   if (readOnly) return;
+  // 3D is for looking: a label tap there selects a fence to inspect, and the canvas ✕ is
+  // hidden, so the keyboard must not be the one path that quietly deletes it.
+  if (mode3d) return;
   if (!sel) return;
   pushUndo();
   if (sel.t==='pt')  deletePoint(state.polys, sel.p, sel.i);

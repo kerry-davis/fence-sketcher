@@ -254,6 +254,11 @@ against the near plane, then sort far-to-near.
 - **Fence labels** can be selected directly in 3D to inspect a run. Toggle the
   label overlay when the scene is busy; hidden fences are omitted from the 3D
   scene but remain dotted and selectable in plan.
+- **3D looks, it doesn't edit.** Selecting a label there inspects it; nothing
+  deletes from 3D, including the `Delete` key. Go back to plan to change the
+  drawing.
+- On a phone the orbit controls sit under the labels chip and the zoom controls
+  at the foot, so a short landscape canvas never squeezes them together.
 - Rails are built per bay on the chosen left/right face, so interior bays meet
   at post centres and only the first/last outer bays extend to the outside face
   of their end posts. Gate leaves use the same fence face.
