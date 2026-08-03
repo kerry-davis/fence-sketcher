@@ -254,6 +254,32 @@ against the near plane, then sort far-to-near.
 - **Fence labels** can be selected directly in 3D to inspect a run. Toggle the
   label overlay when the scene is busy; hidden fences are omitted from the 3D
   scene but remain dotted and selectable in plan.
+- **Fence sizes.** Select a fence in 3D and it measures itself, drawn with the
+  plan's own dimension renderer so there is one dimension style rather than two
+  that drift:
+
+  | Along the ground | Up the fence | On the top edge |
+  | --- | --- | --- |
+  | every post bay, then the run itself | ground to the first rail, each rail, each gap between them, the last rail to the top, the handrail cap, then the height itself | paling width and gap |
+
+  The vertical chain is taken at mid-span of whichever run faces the camera, not
+  at an end post, so it measures the fence rather than the corner timber. A
+  panel is preferred over a gate; when the run is a gate the chain describes the
+  **leaf** that was built — its ground clearance and its own two rails — rather
+  than the panel rails a gate does not carry. `gateLeafBuild()` is the single
+  definition of that, used to push the leaf and to dimension it.
+
+  Bays come from the same `postsAlong()` the 3D scene builds with, and the rail
+  chain from the same `railYs()`, so a dimension can never disagree with the
+  timber under it. A gate opening is measured whole, not divided.
+
+  Chains stagger into up to three columns when their steps are tighter than
+  their own labels — a 150 mm rail gap against a 45 mm value — so the small
+  values stay legible instead of overlapping. Anything still under about 12 px
+  waits until you move closer: from across the garden the rail chain is a
+  smear, one step in it reads. On by default; the **Fence sizes** chip sits
+  beside **Fence labels** on the canvas, phone included, and the choice is
+  remembered. These are read-outs, not the driving dimensions of the plan.
 - **3D looks, it doesn't edit.** Selecting a label there inspects it; nothing
   deletes from 3D, including the `Delete` key. Go back to plan to change the
   drawing.
@@ -435,6 +461,11 @@ the 3D geometry — self-checks on every page load. It's silent unless something
 breaks; open the console and you'll see
 `fence-fable: self-checks passed`.
 
+Those same checks run in `npm test` (`test/self-checks.test.mjs`), which stubs
+the handful of browser globals the script touches and reports any
+`SELFTEST FAIL` by name. Before that they ran only in a browser, so a stale
+expectation could — and did — sit broken without CI noticing.
+
 To run the complete Node test suite:
 
 ```sh
@@ -447,15 +478,16 @@ npm run share:dry-run    # Worker bundle validation without publishing
 public-view build. `npm run share:dry-run` additionally validates the Worker
 deployment bundle without publishing it.
 
-To run only the original inline checks headlessly:
+To run only the inline checks:
 
 ```sh
-awk '/<script>/{f=1;next}/<\/script>/{f=0}f' fence-fable.html > /tmp/ff.js
-node /tmp/ff.js        # prints the self-check line, then stops at the first DOM call
+node --test test/self-checks.test.mjs
 ```
 
-The `ReferenceError: document is not defined` after that line is expected —
-Node has no DOM, and everything testable runs before the first DOM access.
+Extracting the script and running it bare needs `location`, `localStorage` and
+`matchMedia` stubbed before the first line — that test does it. It swallows the
+`ReferenceError: document is not defined` that follows, because everything
+testable runs before the first DOM access.
 
 ---
 
