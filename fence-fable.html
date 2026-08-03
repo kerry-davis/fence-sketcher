@@ -4118,36 +4118,103 @@ const screen3 = (B, x, y, z) => {
 const selectedFence3 = () =>
   sel && (sel.t === 'seg' || sel.t === 'pt') ? state.polys[sel.p] : null;
 // Which side of the measured line the dimension sits on: away from the fence body, so the
-// value never lands on the panels it is measuring.
+// value never lands on the geometry it is measuring. Returns a sign for the offset.
 function dimSide3(A, B2, avoid){
   const len = Math.hypot(B2.x-A.x, B2.y-A.y);
-  if (!avoid || len < 1) return DIM.off;
+  if (!avoid || len < 1) return 1;
   const nx = -(B2.y-A.y)/len, ny = (B2.x-A.x)/len;
   const mid = { x:(A.x+B2.x)/2, y:(A.y+B2.y)/2 };
-  return (avoid.x-mid.x)*nx + (avoid.y-mid.y)*ny > 0 ? -DIM.off : DIM.off;
+  return (avoid.x-mid.x)*nx + (avoid.y-mid.y)*ny > 0 ? -1 : 1;
+}
+const CHAIN_OFF = DIM.off, COL_STEP = 1.05, MIN_DIM_PX = 26, MIN_CHAIN_PX = 12;
+const DIM_FONT = '12px system-ui';                      // the font renderDimension writes in
+// One dimension between two world points, placed clear of `avoid`. It must have room for its
+// own value or it waits for a closer look, rather than printing a label over its neighbour.
+function dim3(B, p, q, txt, off, avoid){
+  const A = screen3(B, p[0], p[1], p[2]), Bs = screen3(B, q[0], q[1], q[2]);
+  if (!A || !Bs) return;
+  ctx.font = DIM_FONT;
+  if (Math.hypot(Bs.x-A.x, Bs.y-A.y) < Math.max(MIN_DIM_PX, ctx.measureText(txt).width + 10)) return;
+  const away = avoid ? screen3(B, avoid[0], avoid[1], avoid[2]) : null;
+  renderDimension(A, Bs, txt, off * dimSide3(A, Bs, away));
+}
+/* A chain of adjacent parts — bays along the run, rail gaps up the post. Rail gaps are
+   150 mm against a 45 mm label, so a single row of them would either overlap or drop out.
+   Instead the chain works out how many columns its tightest step needs and staggers into
+   them, keeping every value — the gaps included — on screen and legible. Returns how far out
+   it reached, so the overall dimension can stand clear of it. */
+function dimChain(B, items, avoid){
+  const drawn = [];
+  for (const it of items){
+    const A = screen3(B, it.p[0], it.p[1], it.p[2]), Bs = screen3(B, it.q[0], it.q[1], it.q[2]);
+    if (!A || !Bs) continue;
+    const span = Math.hypot(Bs.x-A.x, Bs.y-A.y);
+    if (span >= MIN_CHAIN_PX) drawn.push({ A, Bs, span, txt: it.txt });
+  }
+  if (!drawn.length) return CHAIN_OFF;
+  ctx.font = DIM_FONT;
+  const widest = Math.max(...drawn.map(d => ctx.measureText(d.txt).width)) + 8;
+  const tightest = Math.min(...drawn.map(d => d.span));
+  const cols = Math.max(1, Math.min(3, Math.ceil(widest / tightest)));
+  const away = avoid ? screen3(B, avoid[0], avoid[1], avoid[2]) : null;
+  drawn.forEach((d, k) => renderDimension(d.A, d.Bs, d.txt,
+    CHAIN_OFF * (1 + (k % cols)*COL_STEP) * dimSide3(d.A, d.Bs, away)));
+  return CHAIN_OFF * (1 + (cols-1)*COL_STEP);
 }
 function drawFenceDims3(B){
   const pl = showFenceDims3 ? selectedFence3() : null;
   if (!pl || pl.hidden3d || !pl.pts.length) return;
   const mat = pl.mat || state.mat, H = fenceHeightOf(mat), u = state.unit;
+  const spacing = Math.max(0.1, mat.spacing);
+  const centre = pl.pts.reduce((s,q) => ({x:s.x+q.x/pl.pts.length, y:s.y+q.y/pl.pts.length}),
+                               {x:0, y:0});
   for (const [, a, b] of segsOf(pl)){
-    const A = screen3(B, a.x, 0, a.y), Bs = screen3(B, b.x, 0, b.y);
-    if (!A || !Bs) continue;
-    renderDimension(A, Bs, fmtLen(segLen(a,b), u),
-                    dimSide3(A, Bs, screen3(B, (a.x+b.x)/2, H, (a.y+b.y)/2)));
+    const L = segLen(a, b);
+    if (L < 1e-6) continue;
+    const ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
+    const along = (t, y=0) => [a.x+ux*t, y, a.y+uy*t];
+    const overTop = [(a.x+b.x)/2, H, (a.y+b.y)/2];      // the body to stay clear of
+    // post spacing: the bays the posts actually divide this run into. A single bay is the
+    // run itself, so it would only repeat the dimension below.
+    const posts = postsAlong(a, b, spacing, !!a.gateAfter);
+    const bays = posts.length > 2 ? posts.slice(0,-1).map((q,k) => ({
+      p:[q.x,0,q.y], q:[posts[k+1].x,0,posts[k+1].y],
+      txt: fmtLen(segLen(q, posts[k+1]), u) })) : [];
+    const reach = dimChain(B, bays, overTop);
+    dim3(B, [a.x,0,a.y], [b.x,0,b.y], fmtLen(L, u), reach + CHAIN_OFF*1.6, overTop);
+    // paling width and gap, measured on the top edge where nothing else is dimensioned.
+    // build3 starts the boards half a gap in, so these mark the first real board.
+    if (!a.gateAfter && mat.style !== 'rail' && mat.paling > 0.001){
+      const s = mat.gap/2;
+      dimChain(B, [
+        { p:along(s, H),            q:along(s+mat.paling, H),            txt:fmtSmall(mat.paling, u) },
+        { p:along(s+mat.paling, H), q:along(s+mat.paling+mat.gap, H),    txt:fmtSmall(mat.gap, u) },
+      ], along(s + mat.paling/2));
+    }
   }
   if (H <= 0) return;
-  // the height once, on whichever post stands nearest the camera
+  // the heights once, on whichever post stands nearest the camera
   let near = null;
   for (const q of pl.pts){
     const c = toCam(B, [q.x, 0, q.y]);
     if (c[2] >= NEAR && (!near || c[2] < near.z)) near = { q, z:c[2] };
   }
   if (!near) return;
-  const foot = screen3(B, near.q.x, 0, near.q.y), head = screen3(B, near.q.x, H, near.q.y);
-  if (!foot || !head) return;
-  const mid = pl.pts.reduce((s,q) => ({x:s.x+q.x/pl.pts.length, y:s.y+q.y/pl.pts.length}), {x:0,y:0});
-  renderDimension(foot, head, fmtLen(H, u), dimSide3(foot, head, screen3(B, mid.x, 0, mid.y)));
+  const at = y => [near.q.x, y, near.q.y], keepOff = [centre.x, 0, centre.y];
+  // rail spacing as a chain up the post: ground to the first rail, each rail, each gap,
+  // then the last rail to the top of the fence.
+  const bounds = [0];
+  for (const ry of railYs(mat)){
+    if (ry + mat.railW/2 > H + 1e-6) break;
+    bounds.push(ry - mat.railW/2, ry + mat.railW/2);
+  }
+  bounds.push(H);
+  const hr = hrOf(mat);
+  if (hr.on) bounds.push(H + hr.t);        // the cap continues the same chain
+  const rungs = bounds.length > 2 ? bounds.slice(0,-1).map((y,k) => ({
+    p: at(y), q: at(bounds[k+1]), txt: fmtSmall(bounds[k+1]-y, u) })) : [];
+  const reach = dimChain(B, rungs, keepOff);
+  dim3(B, at(0), at(H), fmtLen(H, u), reach + CHAIN_OFF*1.6, keepOff);
 }
 function drawFenceLabels3(B){
   fenceLabels3 = [];

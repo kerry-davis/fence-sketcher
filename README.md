@@ -254,12 +254,25 @@ against the near plane, then sort far-to-near.
 - **Fence labels** can be selected directly in 3D to inspect a run. Toggle the
   label overlay when the scene is busy; hidden fences are omitted from the 3D
   scene but remain dotted and selectable in plan.
-- **Fence sizes.** Select a fence in 3D and it measures itself: every segment
-  length along the ground and the fence height on the nearest post, drawn with
-  the plan's own dimension renderer, so there is one dimension style rather than
-  two that drift. On by default; the **Fence sizes** chip sits beside **Fence
-  labels** on the canvas, phone included, and the choice is remembered. These
-  are read-outs, not the driving dimensions of the plan.
+- **Fence sizes.** Select a fence in 3D and it measures itself, drawn with the
+  plan's own dimension renderer so there is one dimension style rather than two
+  that drift:
+
+  | Along the ground | Up the nearest post | On the top edge |
+  | --- | --- | --- |
+  | every post bay, then the run itself | ground to the first rail, each rail, each gap between them, the last rail to the top, the handrail cap, then the height itself | paling width and gap |
+
+  Bays come from the same `postsAlong()` the 3D scene builds with, and the rail
+  chain from the same `railYs()`, so a dimension can never disagree with the
+  timber under it. A gate opening is measured whole, not divided.
+
+  Chains stagger into up to three columns when their steps are tighter than
+  their own labels — a 150 mm rail gap against a 45 mm value — so the small
+  values stay legible instead of overlapping. Anything still under about 12 px
+  waits until you move closer: from across the garden the rail chain is a
+  smear, one step in it reads. On by default; the **Fence sizes** chip sits
+  beside **Fence labels** on the canvas, phone included, and the choice is
+  remembered. These are read-outs, not the driving dimensions of the plan.
 - **3D looks, it doesn't edit.** Selecting a label there inspects it; nothing
   deletes from 3D, including the `Delete` key. Go back to plan to change the
   drawing.
