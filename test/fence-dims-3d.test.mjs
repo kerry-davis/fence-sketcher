@@ -24,6 +24,9 @@ test('3D measures every part of the fence, not just its outline', () => {
   // gap between them all read off — the cap continues the same chain
   assert.match(html, /for \(const ry of railYs\(mat\)\)\{\s*\n\s*if \(ry \+ mat\.railW\/2 > H \+ 1e-6\) break;\s*\n\s*bounds\.push\(ry - mat\.railW\/2, ry \+ mat\.railW\/2\);/);
   assert.match(html, /if \(hr\.on\) bounds\.push\(H \+ hr\.t\);/);
+  // taken at mid-span of the run facing the camera, not at an end post
+  assert.match(html, /const m = \{ x:\(a\.x\+b\.x\)\/2, y:\(a\.y\+b\.y\)\/2 \};[\s\S]{0,160}?if \(c\[2\] >= NEAR && \(!station \|\| c\[2\] < station\.z\)\) station = \{ m, z:c\[2\] \};/);
+  assert.match(html, /const at = y => \[station\.m\.x, y, station\.m\.y\];/);
   assert.match(html, /txt: fmtSmall\(bounds\[k\+1\]-y, u\) \}\)\) : \[\];/);
   // paling width and gap, matching build3's half-gap start
   assert.match(html, /const s = mat\.gap\/2;/);

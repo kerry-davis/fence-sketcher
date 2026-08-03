@@ -258,9 +258,12 @@ against the near plane, then sort far-to-near.
   plan's own dimension renderer so there is one dimension style rather than two
   that drift:
 
-  | Along the ground | Up the nearest post | On the top edge |
+  | Along the ground | Up the fence | On the top edge |
   | --- | --- | --- |
   | every post bay, then the run itself | ground to the first rail, each rail, each gap between them, the last rail to the top, the handrail cap, then the height itself | paling width and gap |
+
+  The vertical chain is taken at mid-span of whichever run faces the camera, not
+  at an end post, so it measures the fence rather than the corner timber.
 
   Bays come from the same `postsAlong()` the 3D scene builds with, and the rail
   chain from the same `railYs()`, so a dimension can never disagree with the

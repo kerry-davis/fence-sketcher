@@ -4193,15 +4193,22 @@ function drawFenceDims3(B){
     }
   }
   if (H <= 0) return;
-  // the heights once, on whichever post stands nearest the camera
-  let near = null;
-  for (const q of pl.pts){
-    const c = toCam(B, [q.x, 0, q.y]);
-    if (c[2] >= NEAR && (!near || c[2] < near.z)) near = { q, z:c[2] };
+  // The heights are taken once, at mid-span of whichever run faces the camera — not at an
+  // end post, where the chain reads as measuring the post and the corner timber crowds it.
+  let station = null, far = null;
+  for (const [, a, b] of segsOf(pl)){
+    const m = { x:(a.x+b.x)/2, y:(a.y+b.y)/2 };
+    const c = toCam(B, [m.x, 0, m.y]);
+    if (c[2] >= NEAR && (!station || c[2] < station.z)) station = { m, z:c[2] };
   }
-  if (!near) return;
-  const at = y => [near.q.x, y, near.q.y], keepOff = [centre.x, 0, centre.y];
-  // rail spacing as a chain up the post: ground to the first rail, each rail, each gap,
+  if (!station) return;
+  for (const q of pl.pts){                  // the far end: the chain stands on the near side
+    const c = toCam(B, [q.x, 0, q.y]);
+    if (c[2] >= NEAR && (!far || c[2] > far.z)) far = { q, z:c[2] };
+  }
+  const at = y => [station.m.x, y, station.m.y];
+  const keepOff = far ? [far.q.x, 0, far.q.y] : [centre.x, 0, centre.y];
+  // rail spacing as a chain up the fence: ground to the first rail, each rail, each gap,
   // then the last rail to the top of the fence.
   const bounds = [0];
   for (const ry of railYs(mat)){
