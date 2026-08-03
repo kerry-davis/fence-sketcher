@@ -104,7 +104,10 @@
   #bar .toolbarEnd{margin-left:auto;gap:8px;flex-wrap:nowrap}
   /* snap toggles live on the canvas as compact chips */
   #snapover{position:absolute;top:10px;right:12px;display:flex;gap:6px}
-  #label3ctl{position:absolute;top:58px;right:12px;display:inline-flex;min-height:44px}
+  #view3ctl{position:absolute;top:58px;right:12px;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+  #label3ctl{display:inline-flex;min-height:44px}
+  #dim3ctl{display:none;min-height:44px}
+  body.d3 #dim3ctl{display:inline-flex}   /* only 3D measures itself; plan has its own dimensions */
   label.chk{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;background:var(--chip);
             backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
             border:1px solid var(--line);border-radius:999px;cursor:pointer;min-height:36px;
@@ -410,10 +413,13 @@
     .chkShort{display:inline}
     label.chk{gap:6px;min-height:32px;padding:5px 10px;font-size:11.5px}
     #snapover{top:8px;left:8px;right:auto;gap:6px}
-    #label3ctl{top:8px;right:8px;min-height:32px}
+    #view3ctl{top:8px;right:8px;max-width:60%}
+    #label3ctl,#dim3ctl{min-height:32px}
     #hint{top:auto;bottom:34px;left:8px;max-width:calc(100% - 74px);font-size:11px;
           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    body.d3 #hint{top:8px;bottom:auto}   /* the foot belongs to the orientation cube in 3D */
+    /* in 3D the foot belongs to the orientation cube, and the top row is shared with the
+       Labels and Sizes chips */
+    body.d3 #hint{top:8px;bottom:auto;max-width:calc(100% - 200px)}
     #gridcap{left:8px;bottom:8px}
     #zoomctl{right:8px;bottom:8px}
     #bZoomIn,#bZoomOut{display:none}   /* pinch does this, and the edge is worth more */
@@ -559,10 +565,16 @@
       <label class="chk"><input type="checkbox" id="cSnapBld" checked>
         <span class="chkFull">Snap objects</span><span class="chkShort">Objects</span></label>
     </div>
-    <label class="chk" id="label3ctl">
-      <input type="checkbox" id="c3dLabels" checked>
-      <span class="chkFull">Fence labels</span><span class="chkShort">Labels</span>
-    </label>
+    <div id="view3ctl">
+      <label class="chk" id="label3ctl">
+        <input type="checkbox" id="c3dLabels" checked>
+        <span class="chkFull">Fence labels</span><span class="chkShort">Labels</span>
+      </label>
+      <label class="chk" id="dim3ctl" title="Measure the selected fence in 3D">
+        <input type="checkbox" id="c3dDims" checked>
+        <span class="chkFull">Fence sizes</span><span class="chkShort">Sizes</span>
+      </label>
+    </div>
     <div id="zoomctl">
       <button id="bFull" title="Full screen" aria-label="Full screen">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -2094,9 +2106,13 @@ function freezeTree(value){
   chk(calcMaterials([sq()], mat15).handrail === 0, 'no handrail unless asked');
   const hrGate = sq(); hrGate.pts[0].gateAfter = true;
   chk(near(calcMaterials([hrGate], hrMat).handrail, 30), 'handrail skips gates');
-  // per-fence: only the fence that opted in contributes handrail
-  chk(calcMaterials([sq(), {pts:[{x:0,y:20},{x:10,y:20}], closed:false, mat:hrMat}],
-                    mat15).handrail === 10, 'handrail follows per-fence settings');
+  // per-fence: only the fence that opted in contributes handrail. An open run's handrail
+  // mirrors its rail cut, so it runs half a post past each end to finish flush with the
+  // outside face — 10 m of centres is 10.1 m of timber.
+  const hrMixed = calcMaterials([sq(), {pts:[{x:0,y:20},{x:10,y:20}], closed:false, mat:hrMat}],
+                                mat15);
+  chk(hrMixed.per[0].handrail === 0 && near(hrMixed.handrail, 10 + postSizeOf(hrMat)),
+      'handrail follows per-fence settings');
   chk(hrOf({}).w === DEF.m.hrW && !hrOf({}).on, 'handrail defaults for old saves');
   // rail style: 1.2 m fence, 150 mm rails + 150 mm gaps suggests 4 rails/panel,
   // but the typed rails count is what gets used, and palings drop to zero
@@ -3747,6 +3763,9 @@ let fenceLabels3 = [];                        // screen-space badges for direct 
 const LABELS3_KEY = 'fenceFable.3dLabels';
 let showFenceLabels3 = true;
 try { showFenceLabels3 = localStorage.getItem(LABELS3_KEY) !== 'off'; } catch(e) {}
+const DIMS3_KEY = 'fenceFable.3dDims';
+let showFenceDims3 = true;                    // a selected fence measures itself unless told not to
+try { showFenceDims3 = localStorage.getItem(DIMS3_KEY) !== 'off'; } catch(e) {}
 let autoOrbit = false, orbitDir = 1, orbitSpeed = 15, orbitFrame = 0, orbitTime = 0;
 
 /* ---- geometry (pure, self-tested) ---- */
@@ -4086,6 +4105,50 @@ function line3(B, a, b){
   const A = proj(B,ca), Bp = proj(B,cb);
   ctx.moveTo(A[0],A[1]); ctx.lineTo(Bp[0],Bp[1]);
 }
+/* ---- the selected fence, measured in 3D ----
+   Same dimension vocabulary as the plan: witness lines, arrowheads and a haloed value.
+   renderDimension() works in screen space, so projecting the ground points is the whole job —
+   there is no second dimension style to keep in step with the first. */
+const screen3 = (B, x, y, z) => {
+  const c = toCam(B, [x, y, z]);
+  if (c[2] < NEAR) return null;
+  const p = proj(B, c);
+  return { x: p[0], y: p[1] };
+};
+const selectedFence3 = () =>
+  sel && (sel.t === 'seg' || sel.t === 'pt') ? state.polys[sel.p] : null;
+// Which side of the measured line the dimension sits on: away from the fence body, so the
+// value never lands on the panels it is measuring.
+function dimSide3(A, B2, avoid){
+  const len = Math.hypot(B2.x-A.x, B2.y-A.y);
+  if (!avoid || len < 1) return DIM.off;
+  const nx = -(B2.y-A.y)/len, ny = (B2.x-A.x)/len;
+  const mid = { x:(A.x+B2.x)/2, y:(A.y+B2.y)/2 };
+  return (avoid.x-mid.x)*nx + (avoid.y-mid.y)*ny > 0 ? -DIM.off : DIM.off;
+}
+function drawFenceDims3(B){
+  const pl = showFenceDims3 ? selectedFence3() : null;
+  if (!pl || pl.hidden3d || !pl.pts.length) return;
+  const mat = pl.mat || state.mat, H = fenceHeightOf(mat), u = state.unit;
+  for (const [, a, b] of segsOf(pl)){
+    const A = screen3(B, a.x, 0, a.y), Bs = screen3(B, b.x, 0, b.y);
+    if (!A || !Bs) continue;
+    renderDimension(A, Bs, fmtLen(segLen(a,b), u),
+                    dimSide3(A, Bs, screen3(B, (a.x+b.x)/2, H, (a.y+b.y)/2)));
+  }
+  if (H <= 0) return;
+  // the height once, on whichever post stands nearest the camera
+  let near = null;
+  for (const q of pl.pts){
+    const c = toCam(B, [q.x, 0, q.y]);
+    if (c[2] >= NEAR && (!near || c[2] < near.z)) near = { q, z:c[2] };
+  }
+  if (!near) return;
+  const foot = screen3(B, near.q.x, 0, near.q.y), head = screen3(B, near.q.x, H, near.q.y);
+  if (!foot || !head) return;
+  const mid = pl.pts.reduce((s,q) => ({x:s.x+q.x/pl.pts.length, y:s.y+q.y/pl.pts.length}), {x:0,y:0});
+  renderDimension(foot, head, fmtLen(H, u), dimSide3(foot, head, screen3(B, mid.x, 0, mid.y)));
+}
 function drawFenceLabels3(B){
   fenceLabels3 = [];
   if (!showFenceLabels3) return;
@@ -4163,6 +4226,7 @@ function paint3d(){
     ctx.fillStyle = ctx.strokeStyle = v.col; ctx.lineWidth = 1;
     ctx.fill(); ctx.stroke();                               // stroke closes hairline seams between quads
   }
+  drawFenceDims3(B);                                         // under the labels, over the fence
   drawFenceLabels3(B);
   drawCube(B);
 }
@@ -5095,7 +5159,7 @@ function hintText(drawing){
   const phone = onPhone();
   if (mode3d)
     return phone
-      ? 'Drag to orbit · two fingers to pan · pinch to zoom'
+      ? 'Drag to orbit · pinch to zoom'
       : (showFenceLabels3 ? 'Tap a fence label to select it · ' : '') +
         'drag to orbit · ' +
         'tap a face of the corner cube to jump to that view · ' +
@@ -5184,6 +5248,12 @@ $('c3dLabels').addEventListener('change', e => {
   showFenceLabels3 = e.target.checked;
   try { localStorage.setItem(LABELS3_KEY, showFenceLabels3 ? 'on' : 'off'); } catch(err) {}
   fenceLabels3 = []; updateHint(); paint();
+});
+$('c3dDims').checked = showFenceDims3;
+$('c3dDims').addEventListener('change', e => {
+  showFenceDims3 = e.target.checked;
+  try { localStorage.setItem(DIMS3_KEY, showFenceDims3 ? 'on' : 'off'); } catch(err) {}
+  paint();
 });
 $('showAllTotals').addEventListener('change', e => {
   showAllTotals = e.target.checked;
