@@ -51,6 +51,7 @@
   }
   *{box-sizing:border-box}
   html,body{height:100%}
+  :root{--peek:52px}           /* how much of the phone bottom sheet stays in view */
   body{margin:0;font:14px/1.5 var(--font);letter-spacing:-0.006em;color:var(--ink);
        background:var(--bg);display:flex;flex-direction:column;
        -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
@@ -109,10 +110,13 @@
             border:1px solid var(--line);border-radius:999px;cursor:pointer;min-height:36px;
             font-size:12px;font-weight:600;box-shadow:var(--shadow-1);user-select:none;-webkit-user-select:none}
   input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
+  .chkShort{display:none}      /* the phone gets the one-word label */
   /* hint + zoom controls float over the canvas instead of taking toolbar/page space */
   #hint{position:absolute;top:10px;left:12px;max-width:55%;font-size:12px;
         color:var(--muted);background:var(--chip);padding:5px 11px;border-radius:9px;pointer-events:none;
-        box-shadow:var(--shadow-1)}
+        box-shadow:var(--shadow-1);transition:opacity .4s}
+  #hint.fade{opacity:0}
+  #sheetGrip{display:none}     /* the panels are a bottom sheet on phones only */
   #zoomctl{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:6px}
   #zoomctl button{width:46px;height:46px;padding:0;font-size:19px;box-shadow:var(--shadow-2);
                   background:var(--chip);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
@@ -378,8 +382,39 @@
     .seg2 button{min-width:60px}
     #hint{font-size:11px}
   }
-  @media (max-width: 600px){
-    #orbitctl{left:auto;right:10px;bottom:218px;transform:none;flex-direction:column;
+  /* Phones upright, and phones on their side — a 400px-tall window needs this more, not less */
+  @media (max-width:600px),(max-height:560px) and (max-width:1000px){
+    /* On a phone the drawing IS the app: it takes the screen, and the panels drop to a
+       bottom sheet that peeks one summary line until you ask for it. */
+    main{padding:0 0 var(--peek);gap:0}
+    #wrap{height:auto;flex:1;border-left:0;border-right:0;border-radius:0}
+    aside{position:fixed;left:0;right:0;bottom:0;z-index:35;
+          display:grid;grid-template-columns:1fr;align-content:start;gap:10px;
+          max-height:72dvh;overflow-y:auto;overscroll-behavior:contain;
+          padding:0 10px calc(12px + env(safe-area-inset-bottom));
+          background:var(--bg);border-top:1px solid var(--line);border-radius:18px 18px 0 0;
+          box-shadow:0 -10px 30px rgb(2 6 23/.35);
+          transform:translateY(calc(100% - var(--peek)));
+          transition:transform .28s cubic-bezier(.16,1,.3,1)}
+    body.sheet aside{transform:translateY(0)}
+    #sheetGrip{display:grid;position:sticky;top:0;z-index:1;justify-items:center;gap:7px;
+               width:100%;min-height:var(--peek);padding:8px 14px;border:0;border-radius:0;
+               background:var(--bg);color:var(--muted);font-size:12.5px}
+    .gripBar{width:38px;height:4px;border-radius:999px;background:var(--line)}
+    #sheetSummary{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    body.sheet .gripBar{background:var(--accent-soft)}
+    /* canvas furniture: one compact row of chips on top, guidance and zoom at the foot */
+    .chkFull{display:none}
+    .chkShort{display:inline}
+    label.chk{gap:6px;min-height:32px;padding:5px 10px;font-size:11.5px}
+    #snapover{top:8px;left:8px;right:auto;gap:6px}
+    #label3ctl{top:8px;right:8px;min-height:32px}
+    #hint{top:auto;bottom:34px;left:8px;max-width:calc(100% - 74px);font-size:11px;
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #gridcap{left:8px;bottom:8px}
+    #zoomctl{right:8px;bottom:8px}
+    #bZoomIn,#bZoomOut{display:none}   /* pinch does this, and the edge is worth more */
+    #orbitctl{left:auto;right:10px;bottom:64px;transform:none;flex-direction:column;
               padding:0;background:transparent;border:0;box-shadow:none}
     #orbitctl button{width:46px;height:46px;min-height:46px;padding:0;font-size:20px;
                      background:var(--chip)}
@@ -519,11 +554,14 @@
     <canvas id="cv"></canvas>
     <div id="hint"></div>
     <div id="snapover" class="editorOnly">
-      <label class="chk"><input type="checkbox" id="cSnapGrid" checked> Snap grid</label>
-      <label class="chk"><input type="checkbox" id="cSnapBld" checked> Snap objects</label>
+      <label class="chk"><input type="checkbox" id="cSnapGrid" checked>
+        <span class="chkFull">Snap grid</span><span class="chkShort">Grid</span></label>
+      <label class="chk"><input type="checkbox" id="cSnapBld" checked>
+        <span class="chkFull">Snap objects</span><span class="chkShort">Objects</span></label>
     </div>
     <label class="chk" id="label3ctl">
-      <input type="checkbox" id="c3dLabels" checked> Fence labels
+      <input type="checkbox" id="c3dLabels" checked>
+      <span class="chkFull">Fence labels</span><span class="chkShort">Labels</span>
     </label>
     <div id="zoomctl">
       <button id="bFull" title="Full screen" aria-label="Full screen">
@@ -567,7 +605,11 @@
     </div>
   </div>
 
-  <aside>
+  <aside id="panels">
+    <button id="sheetGrip" aria-expanded="false" aria-controls="panels">
+      <span class="gripBar" aria-hidden="true"></span>
+      <span id="sheetSummary">Totals and settings</span>
+    </button>
     <section id="selbox" class="editorOnly" style="display:none"></section>
 
     <section>
@@ -818,6 +860,10 @@ const DEF = {                                 // per-unit material defaults
         botOff: 6*IN,  topOff: 0,
         hrW: 4*IN,     hrT: 2*IN, hrLength: 8*FT },
 };
+const HINT_FADE_MS = 5000;                    // how long canvas guidance stays up on a phone
+const PHONE_MQ = '(max-width:600px),(max-height:560px) and (max-width:1000px)';  // in step with the mobile @media block
+let hintTimer = null;
+const onPhone = () => matchMedia(PHONE_MQ).matches;
 const DEF_RAILS   = 2;                        // rails per panel
 const DEF_ENDS    = 'auto';                   // end posts per open run: 'auto' | 2 both | 1 one | 0 none
 // Timber cross-section fallbacks — used when a drawing (or its per-fence mat) predates
@@ -4272,6 +4318,19 @@ function updateTotals(){
   $('rowHR').style.display = t.handrail > 0 ? '' : 'none';
   // keep the palings total visible when ANY fence uses palings, whatever the panel is showing
   $('rowPalings').style.display = (t.palings > 0 || sc.mat.style !== 'rail') ? '' : 'none';
+  updateSheetSummary(t, sc);
+}
+// The phone sheet is closed most of the time, so its one visible line has to say what is
+// behind it: the selected fence if there is one, otherwise the headline quantities.
+function updateSheetSummary(t, sc){
+  const parts = [];
+  if (t.posts) parts.push(t.posts + ' posts');
+  if (t.rails) parts.push(t.rails + ' rails');
+  else if (t.palings) parts.push(t.palings + ' palings');
+  if (t.fenceLen) parts.push(fmtLen(t.fenceLen, state.unit));
+  $('sheetSummary').textContent = sc.pl
+    ? fenceName(sc.pl, sc.idx) + ' · tap for its settings'
+    : parts.join(' · ') || 'Totals and settings';
 }
 function syncReadOnlyDetails(){
   if (!readOnly) return;
@@ -5014,6 +5073,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSelected(); }
   else if (e.key === 'Escape'){
     if ($('bkSec').open){ $('bkSec').open = false; return; }
+    if (sheetOpen()){ setSheet(false); return; }
     endLine(); sel = null; updateAll();
   }
   else if ((e.ctrlKey || e.metaKey) &&
@@ -5027,35 +5087,51 @@ window.addEventListener('keydown', e => {
    Toolbar & panel wiring
    ===================================================================== */
 // No draw/select toggle: the hint just explains what a tap does right now.
+// A phone shows the same advice in a phone's worth of words — a sentence that has to be
+// truncated has told the reader nothing.
+function hintText(drawing){
+  const phone = onPhone();
+  if (mode3d)
+    return phone
+      ? 'Drag to orbit · two fingers to pan · pinch to zoom'
+      : (showFenceLabels3 ? 'Tap a fence label to select it · ' : '') +
+        'drag to orbit · ' +
+        'tap a face of the corner cube to jump to that view · ' +
+        'right-drag or two fingers to pan · scroll or pinch to zoom.';
+  if (readOnly)
+    return phone
+      ? 'Tap a label to inspect · drag to pan · pinch to zoom'
+      : 'Tap a fence label to inspect it · drag to pan · scroll or pinch to zoom.';
+  if (dimTool)
+    return dimTool.pend
+      ? (phone ? 'Tap to place the dimension' :
+         'Move to position the dimension, then click to place it · Esc to back out.')
+      : dimTool.a
+      ? (phone ? 'Now tap what to measure from' :
+         'Now click the post, building corner or wall to measure from · Esc to back out.')
+      : dimTool.a && dimTool.a.k === 'seg'
+      ? (phone ? 'Place it, or tap the fence it meets for the angle' :
+         'Place it for this fence’s length, or click the fence it meets for the corner angle.')
+      : (phone ? 'Tap a fence, or a post then another point' :
+         'Click a fence for its length, two fences for their angle, or a post then a corner, ' +
+         'wall or another post · Esc or D to leave the tool, then click a dimension to edit it.');
+  return drawing
+    ? (phone ? 'Tap to add posts · double-tap to finish' :
+       'Tap to add fence posts · tap the first post to close the loop · double-tap or Esc to finish this fence.')
+    : (phone ? 'Tap empty space to start · tap anything to select' :
+       'Tap empty space to start a fence · tap any fence, post or building to select it · drag to move · ' +
+       'shift-click or hold buildings to multi-select, then choose Group.');
+}
 function updateHint(){
   const drawing = !!drawTarget();
   cv.classList.toggle('selmode', !drawing || mode3d);
-  if (mode3d){
-    $('hint').textContent = (showFenceLabels3 ? 'Tap a fence label to select it · ' : '') +
-                            'drag to orbit · ' +
-                            'tap a face of the corner cube to jump to that view · ' +
-                            'right-drag or two fingers to pan · scroll or pinch to zoom.';
-    return;
-  }
-  if (readOnly){
-    $('hint').textContent = 'Tap a fence label to inspect it · drag to pan · scroll or pinch to zoom.';
-    return;
-  }
-  if (dimTool){
-    $('hint').textContent = dimTool.pend
-      ? 'Move to position the dimension, then click to place it · Esc to back out.'
-      : dimTool.a
-      ? 'Now click the post, building corner or wall to measure from · Esc to back out.'
-      : dimTool.a && dimTool.a.k === 'seg'
-      ? 'Place it for this fence’s length, or click the fence it meets for the corner angle.'
-      : 'Click a fence for its length, two fences for their angle, or a post then a corner, ' +
-        'wall or another post · Esc or D to leave the tool, then click a dimension to edit it.';
-    return;
-  }
-  $('hint').textContent = drawing
-    ? 'Tap to add fence posts · tap the first post to close the loop · double-tap or Esc to finish this fence.'
-    : 'Tap empty space to start a fence · tap any fence, post or building to select it · drag to move · ' +
-      'shift-click or hold buildings to multi-select, then choose Group.';
+  const el = $('hint'), text = hintText(drawing);
+  if (el.textContent === text) return;   // a redraw is not new advice — don't restart the timer
+  el.textContent = text;
+  el.classList.remove('fade');
+  clearTimeout(hintTimer);
+  // a phone has no room to keep instructions on screen once they have been read
+  if (onPhone()) hintTimer = setTimeout(() => el.classList.add('fade'), HINT_FADE_MS);
 }
 
 document.querySelectorAll('#unitTog button').forEach(b =>
@@ -6341,6 +6417,19 @@ $('shareStopConfirm').addEventListener('click', stopSharing);
 $('shareClose').addEventListener('click', () => {
   if (!shareBusy) $('shareDialog').close();
 });
+function setSheet(open){
+  document.body.classList.toggle('sheet', open);
+  $('sheetGrip').setAttribute('aria-expanded', String(open));
+}
+const sheetOpen = () => document.body.classList.contains('sheet');
+// crossing the phone breakpoint (a rotation, a resized window) changes what the hint should say
+matchMedia(PHONE_MQ).addEventListener('change', () => { setSheet(false); updateHint(); });
+$('sheetGrip').addEventListener('click', () => setSheet(!sheetOpen()));
+// tapping the drawing dismisses the sheet instead of also editing underneath it
+$('wrap').addEventListener('pointerdown', e => {
+  if (!sheetOpen() || e.target.closest('#panels')) return;
+  setSheet(false); e.preventDefault(); e.stopPropagation();
+}, true);
 $('bTheme').addEventListener('click', () => {
   const t = document.body.classList.contains('dark') ? 'light' : 'dark';
   try { localStorage.setItem(THEME_KEY, t); } catch(e) {}
