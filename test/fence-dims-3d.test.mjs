@@ -30,10 +30,14 @@ test('3D measures every part of the fence, not just its outline', () => {
   assert.match(html, /const at = y => \[station\.m\.x, y, station\.m\.y\];/);
   assert.match(html, /txt: fmtSmall\(bounds\[k\+1\]-y, u\) \}\] : \[\]\) : \[\];/);
   assert.match(html, /bounds\[k\+1\] - y > 1e-6/);   // never a zero-length rung
-  // paling width and gap, matching build3's half-gap start
-  assert.match(html, /const s = mat\.gap\/2;/);
+  // paling width and gap, matching build3's half-gap start — and only for boards it drew:
+  // a run shorter than the first board's centre gets no board, so it gets no dimension
+  assert.match(html, /const pitch = mat\.paling \+ mat\.gap, s = mat\.gap\/2, boards = \[\];/);
+  assert.match(html, /if \(pitch\/2 <= L \+ 1e-9\)/);
+  assert.match(html, /if \(3\*pitch\/2 <= L \+ 1e-9\)/);
   assert.match(html, /txt:fmtSmall\(mat\.paling, u\)/);
   assert.match(html, /txt:fmtSmall\(mat\.gap, u\)/);
+  assert.match(html, /if \(boards\.length\) dimChain\(B, boards, along\(s \+ mat\.paling\/2\)\);/);
   // the whole run and height stand clear of however far the chain reached
   assert.match(html, /dim3\(B, \[a\.x,0,a\.y\], \[b\.x,0,b\.y\], fmtLen\(L, u\), reach \+ CHAIN_OFF\*1\.6, overTop\);/);
   assert.match(html, /dim3\(B, at\(0\), at\(H\), fmtLen\(H, u\), reach \+ CHAIN_OFF\*1\.6, keepOff\);/);

@@ -418,8 +418,9 @@
     #hint{top:auto;bottom:34px;left:8px;max-width:calc(100% - 74px);font-size:11px;
           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     /* in 3D the foot belongs to the orientation cube, and the top row is shared with the
-       Labels and Sizes chips */
-    body.d3 #hint{top:8px;bottom:auto;max-width:calc(100% - 200px)}
+       Labels and Sizes chips. Sky is free above the scene, so three gestures wrap onto two
+       lines rather than one of them going unmentioned to fit. */
+    body.d3 #hint{top:8px;bottom:auto;max-width:calc(100% - 200px);white-space:normal}
     #gridcap{left:8px;bottom:8px}
     #zoomctl{right:8px;bottom:8px}
     #bZoomIn,#bZoomOut{display:none}   /* pinch does this, and the edge is worth more */
@@ -4193,13 +4194,17 @@ function drawFenceDims3(B){
     const reach = dimChain(B, bays, overTop);
     dim3(B, [a.x,0,a.y], [b.x,0,b.y], fmtLen(L, u), reach + CHAIN_OFF*1.6, overTop);
     // paling width and gap, measured on the top edge where nothing else is dimensioned.
-    // build3 starts the boards half a gap in, so these mark the first real board.
+    // build3 centres boards at pitch/2, 3*pitch/2 … and draws one only while that centre
+    // lands on the run, so a short segment gets fewer boards — or none. Measure only the
+    // boards it actually built: the width needs the first, the gap needs the second too.
     if (!a.gateAfter && mat.style !== 'rail' && mat.paling > 0.001){
-      const s = mat.gap/2;
-      dimChain(B, [
-        { p:along(s, H),            q:along(s+mat.paling, H),            txt:fmtSmall(mat.paling, u) },
-        { p:along(s+mat.paling, H), q:along(s+mat.paling+mat.gap, H),    txt:fmtSmall(mat.gap, u) },
-      ], along(s + mat.paling/2));
+      const pitch = mat.paling + mat.gap, s = mat.gap/2, boards = [];
+      if (pitch/2 <= L + 1e-9)
+        boards.push({ p:along(s, H), q:along(s+mat.paling, H), txt:fmtSmall(mat.paling, u) });
+      if (3*pitch/2 <= L + 1e-9)
+        boards.push({ p:along(s+mat.paling, H), q:along(s+mat.paling+mat.gap, H),
+                      txt:fmtSmall(mat.gap, u) });
+      if (boards.length) dimChain(B, boards, along(s + mat.paling/2));
     }
   }
   if (H <= 0) return;
@@ -5260,7 +5265,7 @@ function hintText(drawing){
   const phone = onPhone();
   if (mode3d)
     return phone
-      ? 'Drag to orbit · two fingers to move'
+      ? 'Drag to orbit · two fingers to move · pinch to zoom'
       : (showFenceLabels3 ? 'Tap a fence label to select it · ' : '') +
         'drag to orbit · ' +
         'tap a face of the corner cube to jump to that view · ' +

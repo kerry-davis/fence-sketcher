@@ -60,7 +60,9 @@ test('two fingers move the 3D view, since a phone has no right-drag', () => {
   assert.match(html, /cam\.dist \*= \(pinch\.d \|\| 1\) \/ \(d \|\| 1\);/);
   assert.match(html, /if \(pinch\.mx != null\) camPan\(mx - pinch\.mx, my - pinch\.my\);/);
   assert.match(html, /const mx = \(a\.x\+b\.x\)\/2, my = \(a\.y\+b\.y\)\/2;/);
-  assert.match(html, /\? 'Drag to orbit · two fingers to move'/);
+  // all three gestures named; 3D lets the hint wrap rather than drop one to fit the row
+  assert.match(html, /\? 'Drag to orbit · two fingers to move · pinch to zoom'/);
+  assert.match(html, /body\.d3 #hint\{top:8px;bottom:auto;max-width:calc\(100% - 200px\);white-space:normal\}/);
 });
 
 test('the peek line says what is behind it', () => {
