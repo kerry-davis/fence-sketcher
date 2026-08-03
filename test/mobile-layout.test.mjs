@@ -53,6 +53,16 @@ test('3D is inspection-only — no path deletes from it', () => {
   assert.match(html, /function deleteSelected\(\)\{\s*\n\s*if \(readOnly\) return;[\s\S]{0,220}?\n\s*if \(mode3d\) return;/);
 });
 
+test('two fingers move the 3D view, since a phone has no right-drag', () => {
+  // the pinch must remember its midpoint, or there is nothing to pan by
+  assert.match(html, /pinch = \{ d: Math\.hypot\(a\.x-b\.x, a\.y-b\.y\), mx:\(a\.x\+b\.x\)\/2, my:\(a\.y\+b\.y\)\/2 \};/);
+  // ...and the 3D branch must act on it: zoom by separation, pan by midpoint travel
+  assert.match(html, /cam\.dist \*= \(pinch\.d \|\| 1\) \/ \(d \|\| 1\);/);
+  assert.match(html, /if \(pinch\.mx != null\) camPan\(mx - pinch\.mx, my - pinch\.my\);/);
+  assert.match(html, /const mx = \(a\.x\+b\.x\)\/2, my = \(a\.y\+b\.y\)\/2;/);
+  assert.match(html, /\? 'Drag to orbit · two fingers to move'/);
+});
+
 test('the peek line says what is behind it', () => {
   assert.match(html, /updateSheetSummary\(t, sc\);/);
   assert.match(html, /sc\.pl\s*\n?\s*\? fenceName\(sc\.pl, sc\.idx\) \+ ' · tap for its settings'/);

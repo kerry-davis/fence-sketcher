@@ -4902,7 +4902,7 @@ cv.addEventListener('pointerdown', e => {
     if (face){ drag = { t:'cube', face, x:e.offsetX, y:e.offsetY }; return; }
     if (pointers.size === 2){
       const [a,b] = [...pointers.values()];
-      pinch = { d: Math.hypot(a.x-b.x, a.y-b.y) };
+      pinch = { d: Math.hypot(a.x-b.x, a.y-b.y), mx:(a.x+b.x)/2, my:(a.y+b.y)/2 };
     }
     drag = { t: (e.button === 2 || pointers.size === 2) ? 'campan' : 'orbit',
              x:e.offsetX, y:e.offsetY, moved:false };
@@ -4954,8 +4954,12 @@ cv.addEventListener('pointermove', e => {
     }
     if (pinch && pointers.size === 2){
       const [a,b] = [...pointers.values()], d = Math.hypot(a.x-b.x, a.y-b.y);
+      const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
       cam.dist *= (pinch.d || 1) / (d || 1);
-      pinch = { d }; clampCam();
+      clampCam();
+      // a phone has no right-drag, so moving both fingers together is how the view moves
+      if (pinch.mx != null) camPan(mx - pinch.mx, my - pinch.my);
+      pinch = { d, mx, my };
     } else if (drag && drag.t === 'campan') camPan(dx, dy);
     else orbit(dx, dy);
     paint(); return;
@@ -5233,7 +5237,7 @@ function hintText(drawing){
   const phone = onPhone();
   if (mode3d)
     return phone
-      ? 'Drag to orbit · pinch to zoom'
+      ? 'Drag to orbit · two fingers to move'
       : (showFenceLabels3 ? 'Tap a fence label to select it · ' : '') +
         'drag to orbit · ' +
         'tap a face of the corner cube to jump to that view · ' +
