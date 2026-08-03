@@ -104,6 +104,14 @@ screens.
   palings, from the bill of materials without hiding it from the plan, and copy a
   detailed plain-text takeoff with the current names, lengths, post shapes and
   settings.
+- **Phone layout.** On a phone — upright or on its side — the plan takes the
+  screen and the side panels become a bottom sheet that peeks a single summary
+  line (`13 posts · 24 rails · 24.5 m`, or the name of whatever is selected).
+  Tap the sheet to open it, tap the drawing or press `Esc` to dismiss it. The
+  canvas chips shorten to one word, guidance is written to fit one line and
+  fades once read, and the zoom buttons give way to pinch. Undo, redo, 3D and
+  Files stay out of the `⋯ More` menu; deleting is the **✕** beside whatever is
+  selected, or the `Delete` key.
 - **Light / dark theme**, remembered.
 - **Autosave** to `localStorage`, plus named server backups managed from the
   top-right **Files** menu.
@@ -246,6 +254,11 @@ against the near plane, then sort far-to-near.
 - **Fence labels** can be selected directly in 3D to inspect a run. Toggle the
   label overlay when the scene is busy; hidden fences are omitted from the 3D
   scene but remain dotted and selectable in plan.
+- **3D looks, it doesn't edit.** Selecting a label there inspects it; nothing
+  deletes from 3D, including the `Delete` key. Go back to plan to change the
+  drawing.
+- On a phone the orbit controls sit under the labels chip and the zoom controls
+  at the foot, so a short landscape canvas never squeezes them together.
 - Rails are built per bay on the chosen left/right face, so interior bays meet
   at post centres and only the first/last outer bays extend to the outside face
   of their end posts. Gate leaves use the same fence face.
@@ -310,11 +323,17 @@ possible.
 
 ### Full external backup and restore
 
-Open the top-right **Files** menu. It manages the normal CRUD lifecycle
-(`Save changes`, `Save as new`, `Open selected`, `Rename`, and `Delete`) and also
-lists active shared drawings. The **External backup** section is separate from
-those individual operations. The file server must be reachable because the
-library is read from and restored to the server's named drawings:
+Open the top-right **Files** menu. The menu itself holds only fixed actions —
+`Save changes`, `Save as new`, `Open drawing`, `Share view`, `Shared links` and
+the external backup pair — so it stays the same height whether you have three
+drawings or three hundred. `Open drawing` and `Shared links` each open a
+searchable, scrolling picker that carries the per-item actions (`Open`,
+`Rename`, `Delete` for drawings; `Open`, `Copy`, `Manage` for links); the search
+box appears once a list passes eight entries. Every successful save confirms
+itself in a dialog rather than only in the status line. The **External backup**
+section is separate from those individual operations. The file server must be
+reachable because the library is read from and restored to the server's named
+drawings:
 
 - **Download all files** fetches every named server drawing plus the current
   canvas state and downloads one portable JSON file.
@@ -342,9 +361,9 @@ Sharing deliberately uses two security boundaries:
 
 The public link is a 256-bit random bearer token. Snapshots are separate from
 saved drawings, use `no-store`/`noindex` response headers, and expire after 7
-or 30 days unless the owner explicitly chooses no expiry. The Files menu lists
-all active shared drawings with Open, Copy and Manage actions; Manage can update
-or explicitly remove a link. Deleting a saved drawing also revokes its active
+or 30 days unless the owner explicitly chooses no expiry. **Shared links** in the
+Files menu lists every active shared drawing with Open, Copy and Manage actions;
+Manage can update or explicitly remove a link. Deleting a saved drawing also revokes its active
 share before removing the file.
 
 The shared page is genuinely read-only: it freezes the loaded drawing state and

@@ -27,10 +27,10 @@ test('share management exposes explicit link removal confirmation', () => {
 });
 
 test('files menu lists and manages every active shared drawing', () => {
-  assert.match(html, /id="bkShares" class="bkShares" hidden/);
-  assert.match(html, /id="bkSharesTitle">Shared drawings<\/span>/);
+  assert.match(html, /id="bkShareRow" hidden/);
+  assert.match(html, /id="bkShares">Shared links/);
   for (const action of ['open', 'copy', 'manage'])
-    assert.match(html, new RegExp(`data-share-action="${action}"`));
+    assert.match(html, new RegExp(`data-pick="${action}"`));
   assert.match(html, /bkRequest\('shares', \{cache:'no-store'\}/);
   assert.match(html, /async function openShareDialog\(source=bkCurrent\)/);
   assert.match(html, /shareSource !== bkCurrent/);

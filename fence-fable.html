@@ -51,6 +51,7 @@
   }
   *{box-sizing:border-box}
   html,body{height:100%}
+  :root{--peek:52px}           /* how much of the phone bottom sheet stays in view */
   body{margin:0;font:14px/1.5 var(--font);letter-spacing:-0.006em;color:var(--ink);
        background:var(--bg);display:flex;flex-direction:column;
        -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
@@ -109,10 +110,13 @@
             border:1px solid var(--line);border-radius:999px;cursor:pointer;min-height:36px;
             font-size:12px;font-weight:600;box-shadow:var(--shadow-1);user-select:none;-webkit-user-select:none}
   input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
+  .chkShort{display:none}      /* the phone gets the one-word label */
   /* hint + zoom controls float over the canvas instead of taking toolbar/page space */
   #hint{position:absolute;top:10px;left:12px;max-width:55%;font-size:12px;
         color:var(--muted);background:var(--chip);padding:5px 11px;border-radius:9px;pointer-events:none;
-        box-shadow:var(--shadow-1)}
+        box-shadow:var(--shadow-1);transition:opacity .4s}
+  #hint.fade{opacity:0}
+  #sheetGrip{display:none}     /* the panels are a bottom sheet on phones only */
   #zoomctl{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:6px}
   #zoomctl button{width:46px;height:46px;padding:0;font-size:19px;box-shadow:var(--shadow-2);
                   background:var(--chip);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
@@ -249,8 +253,8 @@
   .bkHead p{font-size:12px;color:var(--muted);margin:2px 0 0}
   .bkCurrent{margin:0 16px 12px;padding:11px 13px;background:var(--bg);
              border:1px solid var(--line);border-radius:12px}
-  .bkCurrent span,.bkLibrary>label{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;
-                                  text-transform:uppercase;color:var(--muted)}
+  .bkCurrent span{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;
+                  text-transform:uppercase;color:var(--muted)}
   #bkCur{margin:3px 0 0;font-size:14px;font-weight:600;color:var(--ink);
          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bkPrimaryActions{display:grid;grid-template-columns:1.15fr 1fr;gap:8px;padding:0 16px 16px}
@@ -263,31 +267,14 @@
   .bkLocalHead small{display:block;margin-top:3px;color:var(--muted);font-size:12px}
   .bkLocalActions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .bkLocalActions button{width:100%}
-  #bkShare{display:none;width:calc(100% - 32px);margin:0 16px 16px}
-  .bkLibrary{padding:15px 16px 16px;border-top:1px solid var(--line)}
-  .bkLibrary>label{margin-bottom:7px}
-  #bkList{width:100%}
-  .bkFileActions{display:grid;grid-template-columns:1fr 44px 44px;gap:8px;margin-top:8px}
-  .bkFileActions .iconBtn{display:grid;place-items:center;width:44px;padding:0}
-  .bkFileActions svg{width:17px;height:17px;stroke:currentColor}
-  #bkDel{background:transparent}
-  .bkShares{padding:15px 16px 16px;border-top:1px solid var(--line)}
-  .bkSharesHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
-  .bkSharesHead span{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
-                     color:var(--muted)}
-  #bkSharesCount{font-size:11px;color:var(--muted)}
-  #bkSharesList{display:grid;gap:9px}
-  .bkShareCard{padding:11px;background:var(--bg);border:1px solid var(--line);border-radius:12px}
-  .bkShareSummary{display:flex;align-items:flex-start;gap:8px;min-width:0}
-  .bkShareDot{width:8px;height:8px;flex:none;margin-top:5px;background:var(--accent);
-              border-radius:50%;box-shadow:0 0 0 3px var(--accent-soft)}
-  .bkShareText{min-width:0}
-  .bkShareText strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-                      font-size:13px}
-  .bkShareText small{display:block;margin-top:2px;color:var(--muted);font-size:11px}
-  .bkShareActions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:9px}
-  .bkShareActions button{min-height:36px;padding:6px 8px;border-radius:9px;font-size:12px}
-  #bkSharesEmpty{margin:0;color:var(--muted);font-size:12px}
+  .bkOpenRow{padding:0 16px 16px}
+  .bkShareRow{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 16px 16px}
+  .bkShareRow[hidden]{display:none}
+  .bkOpenRow button,.bkShareRow button{width:100%}
+  .bkCount{display:inline-grid;place-items:center;min-width:20px;height:19px;margin-left:7px;
+           padding:0 6px;font-size:11px;font-weight:700;color:var(--muted);background:var(--field);
+           border-radius:999px}
+  button:disabled .bkCount{opacity:.5}
   #bkStatus{margin:0;padding:10px 16px;border-top:1px solid var(--line)}
   #bkStatus:empty{display:none}
   #bkStatus[data-kind="success"]{background:var(--accent-faint);color:var(--accent)}
@@ -349,8 +336,28 @@
   .dialogBody input:focus{outline:0;background:var(--card);border-color:var(--accent);
                           box-shadow:0 0 0 3px var(--accent-soft)}
   .dialogBody .fieldHint{font-size:12px;color:var(--muted);margin:5px 0 0}
+  .dialogBody .fieldHint:empty{display:none}
   #bkDialogError{min-height:18px;font-size:12px;margin:5px 0 0}
   .dialogActions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+  #pickDialog{width:min(520px,calc(100vw - 28px))}
+  .pickList{display:grid;gap:8px;max-height:min(52vh,340px);overflow-y:auto;margin-top:12px}
+  .pickList:empty{display:none}
+  .pickRow{display:flex;align-items:center;gap:10px;padding:10px 11px;background:var(--bg);
+           border:1px solid var(--line);border-radius:12px}
+  .pickRow.current{background:var(--accent-faint);border-color:var(--accent-soft)}
+  .pickText{flex:1;min-width:0}
+  .pickText strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+  .pickText small{display:block;margin-top:2px;color:var(--muted);font-size:11px}
+  .pickActions{display:flex;flex:none;gap:6px}
+  .pickActions button{min-height:34px;padding:6px 10px;border-radius:9px;font-size:12px}
+  .pickActions .iconBtn{display:grid;place-items:center;width:34px;padding:0}
+  .pickActions svg{width:16px;height:16px;stroke:currentColor}
+  #pickEmpty:empty{display:none}
+  @media (max-width:430px){
+    .pickRow{flex-wrap:wrap}
+    .pickActions{width:100%}
+    .pickActions button:not(.iconBtn){flex:1}
+  }
 
   /* 3D view: the plan-only overlays have nothing to say */
   body.d3 #snapover, body.d3 #fdel, body.d3 #fswap, body.d3 #gridcap{display:none}
@@ -369,14 +376,50 @@
     body.readonly #bar .viewTools{display:flex}
     #bar .toolbarEnd{display:contents}
     #bMore{display:inline-flex}
-    #bkSec{margin-left:auto}
-    .lbl{display:none}         /* icon-only Undo / Redo / Delete */
+    /* 3D is a view, not an edit — it stays out on the phone, beside Files */
+    #b3d{margin-left:auto}
+    #bkSec{margin-left:0}
+    .lbl{display:none}         /* icon-only Undo / Redo */
     button{padding:8px 12px}
     .seg2 button{min-width:60px}
     #hint{font-size:11px}
   }
-  @media (max-width: 600px){
-    #orbitctl{left:auto;right:10px;bottom:218px;transform:none;flex-direction:column;
+  /* Phones upright, and phones on their side — a 400px-tall window needs this more, not less */
+  @media (max-width:600px),(max-height:560px) and (max-width:1000px){
+    /* On a phone the drawing IS the app: it takes the screen, and the panels drop to a
+       bottom sheet that peeks one summary line until you ask for it. */
+    main{padding:0 0 var(--peek);gap:0}
+    #wrap{height:auto;flex:1;border-left:0;border-right:0;border-radius:0}
+    aside{position:fixed;left:0;right:0;bottom:0;z-index:35;
+          display:grid;grid-template-columns:1fr;align-content:start;gap:10px;
+          max-height:72dvh;overflow-y:auto;overscroll-behavior:contain;
+          padding:0 10px calc(12px + env(safe-area-inset-bottom));
+          background:var(--bg);border-top:1px solid var(--line);border-radius:18px 18px 0 0;
+          box-shadow:0 -10px 30px rgb(2 6 23/.35);
+          transform:translateY(calc(100% - var(--peek)));
+          transition:transform .28s cubic-bezier(.16,1,.3,1)}
+    body.sheet aside{transform:translateY(0)}
+    #sheetGrip{display:grid;position:sticky;top:0;z-index:1;justify-items:center;gap:7px;
+               width:100%;min-height:var(--peek);padding:8px 14px;border:0;border-radius:0;
+               background:var(--bg);color:var(--muted);font-size:12.5px}
+    .gripBar{width:38px;height:4px;border-radius:999px;background:var(--line)}
+    #sheetSummary{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    body.sheet .gripBar{background:var(--accent-soft)}
+    /* canvas furniture: one compact row of chips on top, guidance and zoom at the foot */
+    .chkFull{display:none}
+    .chkShort{display:inline}
+    label.chk{gap:6px;min-height:32px;padding:5px 10px;font-size:11.5px}
+    #snapover{top:8px;left:8px;right:auto;gap:6px}
+    #label3ctl{top:8px;right:8px;min-height:32px}
+    #hint{top:auto;bottom:34px;left:8px;max-width:calc(100% - 74px);font-size:11px;
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    body.d3 #hint{top:8px;bottom:auto}   /* the foot belongs to the orientation cube in 3D */
+    #gridcap{left:8px;bottom:8px}
+    #zoomctl{right:8px;bottom:8px}
+    #bZoomIn,#bZoomOut{display:none}   /* pinch does this, and the edge is worth more */
+    /* orbit is a row under the labels chip, zoom a column off the bottom: one is 46px tall
+       whatever it holds, so a short landscape canvas can't make them collide */
+    #orbitctl{left:auto;right:8px;top:48px;bottom:auto;transform:none;flex-direction:row;
               padding:0;background:transparent;border:0;box-shadow:none}
     #orbitctl button{width:46px;height:46px;min-height:46px;padding:0;font-size:20px;
                      background:var(--chip)}
@@ -407,11 +450,6 @@
         <path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13"
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
       </svg><span class="lbl">Redo</span></button>
-    <button id="bDelSel" class="danger" title="Delete selected">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M4.5 7h15M9 7V4.5h6V7m-8.5 0 .8 13h9.4l.8-13M10 11v5M14 11v5"
-              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg><span class="lbl">Delete</span></button>
   </div>
   <button id="bMore" class="editorOnly" aria-expanded="false">⋯ More</button>
   <div class="grp sec editorOnly">
@@ -432,8 +470,8 @@
     <button id="bClear" class="danger">Clear all</button>
   </div>
   <div class="grp toolbarEnd">
-    <div class="grp sec units viewTools">
     <button id="b3d" title="Plan / 3D view">3D</button>
+    <div class="grp sec units viewTools">
     <div class="seg2" id="unitTog">
       <button data-u="m"  class="on">Metres</button>
       <button data-u="ft">Feet</button>
@@ -473,6 +511,23 @@
         <button id="bkSave" class="primary">Save changes</button>
         <button id="bkSaveAs" title="Save as a new drawing">Save as new</button>
       </div>
+      <div class="bkOpenRow">
+        <button id="bkOpen">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"
+                  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>Open drawing<span class="bkCount" id="bkOpenCount"></span></button>
+      </div>
+      <section class="bkShareRow" id="bkShareRow" hidden aria-label="Sharing">
+        <button id="bkShare">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="18" cy="5" r="3" stroke-width="1.8"/>
+            <circle cx="6" cy="12" r="3" stroke-width="1.8"/>
+            <circle cx="18" cy="19" r="3" stroke-width="1.8"/>
+            <path d="m8.7 13.5 6.6 3.9M15.3 6.6 8.7 10.5" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>Share view</button>
+        <button id="bkShares">Shared links<span class="bkCount" id="bkSharesCount"></span></button>
+      </section>
       <section class="bkLocal" aria-labelledby="bkLocalTitle">
         <div class="bkLocalHead">
           <span id="bkLocalTitle">External backup</span>
@@ -483,42 +538,6 @@
           <button id="bkRestore">Restore all files</button>
         </div>
         <input id="bkRestoreInput" type="file" accept=".json,application/json" hidden>
-      </section>
-      <button id="bkShare">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="18" cy="5" r="3" stroke-width="1.8"/>
-          <circle cx="6" cy="12" r="3" stroke-width="1.8"/>
-          <circle cx="18" cy="19" r="3" stroke-width="1.8"/>
-          <path d="m8.7 13.5 6.6 3.9M15.3 6.6 8.7 10.5" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>Share view</button>
-      <div class="bkLibrary">
-        <label for="bkList">Saved drawings</label>
-        <select id="bkList" aria-label="Saved drawing"></select>
-        <div class="bkFileActions">
-          <button id="bkLoad">Open selected</button>
-          <button id="bkRen" class="iconBtn" title="Rename saved drawing"
-                  aria-label="Rename saved drawing">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="m4 20 4.2-1 10.7-10.7a2.1 2.1 0 0 0-3-3L5.2 16zM14.5 6.7l3 3"
-                    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-          <button id="bkDel" class="danger iconBtn" title="Delete saved drawing"
-                  aria-label="Delete saved drawing">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4.5 7h15M9 7V4.5h6V7m-8.5 0 .8 13h9.4l.8-13M10 11v5M14 11v5"
-                    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-      <section id="bkShares" class="bkShares" hidden aria-labelledby="bkSharesTitle">
-        <div class="bkSharesHead">
-          <span id="bkSharesTitle">Shared drawings</span>
-          <small id="bkSharesCount"></small>
-        </div>
-        <div id="bkSharesList"></div>
-        <p id="bkSharesEmpty">No active shared drawings.</p>
       </section>
       <p class="note" id="bkStatus" role="status" aria-live="polite"></p>
       <div class="bkSync">
@@ -535,11 +554,14 @@
     <canvas id="cv"></canvas>
     <div id="hint"></div>
     <div id="snapover" class="editorOnly">
-      <label class="chk"><input type="checkbox" id="cSnapGrid" checked> Snap grid</label>
-      <label class="chk"><input type="checkbox" id="cSnapBld" checked> Snap objects</label>
+      <label class="chk"><input type="checkbox" id="cSnapGrid" checked>
+        <span class="chkFull">Snap grid</span><span class="chkShort">Grid</span></label>
+      <label class="chk"><input type="checkbox" id="cSnapBld" checked>
+        <span class="chkFull">Snap objects</span><span class="chkShort">Objects</span></label>
     </div>
     <label class="chk" id="label3ctl">
-      <input type="checkbox" id="c3dLabels" checked> Fence labels
+      <input type="checkbox" id="c3dLabels" checked>
+      <span class="chkFull">Fence labels</span><span class="chkShort">Labels</span>
     </label>
     <div id="zoomctl">
       <button id="bFull" title="Full screen" aria-label="Full screen">
@@ -583,7 +605,11 @@
     </div>
   </div>
 
-  <aside>
+  <aside id="panels">
+    <button id="sheetGrip" aria-expanded="false" aria-controls="panels">
+      <span class="gripBar" aria-hidden="true"></span>
+      <span id="sheetSummary">Totals and settings</span>
+    </button>
     <section id="selbox" class="editorOnly" style="display:none"></section>
 
     <section>
@@ -737,6 +763,26 @@
   </form>
 </dialog>
 
+<dialog id="pickDialog" aria-labelledby="pickTitle">
+  <div class="dialogBody">
+    <div class="dlgHead">
+      <span class="dlgIcon" id="pickIcon" aria-hidden="true"></span>
+      <div>
+        <h2 id="pickTitle"></h2>
+        <p id="pickSub"></p>
+      </div>
+    </div>
+    <label class="srOnly" for="pickSearch">Search by name</label>
+    <input id="pickSearch" type="search" autocomplete="off" spellcheck="false"
+           placeholder="Search by name">
+    <div id="pickList" class="pickList"></div>
+    <p id="pickEmpty" class="fieldHint"></p>
+    <div class="dialogActions">
+      <button id="pickClose">Close</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="shareDialog" aria-labelledby="shareDialogTitle">
   <div class="dialogBody">
     <div class="dlgHead">
@@ -814,6 +860,10 @@ const DEF = {                                 // per-unit material defaults
         botOff: 6*IN,  topOff: 0,
         hrW: 4*IN,     hrT: 2*IN, hrLength: 8*FT },
 };
+const HINT_FADE_MS = 5000;                    // how long canvas guidance stays up on a phone
+const PHONE_MQ = '(max-width:600px),(max-height:560px) and (max-width:1000px)';  // in step with the mobile @media block
+let hintTimer = null;
+const onPhone = () => matchMedia(PHONE_MQ).matches;
 const DEF_RAILS   = 2;                        // rails per panel
 const DEF_ENDS    = 'auto';                   // end posts per open run: 'auto' | 2 both | 1 one | 0 none
 // Timber cross-section fallbacks — used when a drawing (or its per-fence mat) predates
@@ -1953,6 +2003,9 @@ function freezeTree(value){
   chk(fmtLen(12*FT+6*IN,'ft') === "12' 6\"", 'fmt ft');
   chk(fmtLen(2.4,'m') === '2.4 m', 'fmt m');
   chk(fmtLen(11.999*IN + 11*FT,'ft') === "12' 0\"", 'fmt inch carry');
+  const pickable = [{name:'Back-fence'},{name:'front-FENCE'},{name:'shed'}];
+  chk(pickMatches(pickable,'  FENCE ').length === 2 && pickMatches(pickable,'  ') === pickable,
+      'file picker filters by name, ignoring case and padding');
   const frozen = freezeTree({items:[{x:1}]});
   let frozenSplice = false;
   try { frozen.items.splice(0,1); } catch { frozenSplice = true; }
@@ -2936,6 +2989,9 @@ function addBuilding(){
 }
 function deleteSelected(){
   if (readOnly) return;
+  // 3D is for looking: a label tap there selects a fence to inspect, and the canvas ✕ is
+  // hidden, so the keyboard must not be the one path that quietly deletes it.
+  if (mode3d) return;
   if (!sel) return;
   pushUndo();
   if (sel.t==='pt')  deletePoint(state.polys, sel.p, sel.i);
@@ -4265,6 +4321,19 @@ function updateTotals(){
   $('rowHR').style.display = t.handrail > 0 ? '' : 'none';
   // keep the palings total visible when ANY fence uses palings, whatever the panel is showing
   $('rowPalings').style.display = (t.palings > 0 || sc.mat.style !== 'rail') ? '' : 'none';
+  updateSheetSummary(t, sc);
+}
+// The phone sheet is closed most of the time, so its one visible line has to say what is
+// behind it: the selected fence if there is one, otherwise the headline quantities.
+function updateSheetSummary(t, sc){
+  const parts = [];
+  if (t.posts) parts.push(t.posts + ' posts');
+  if (t.rails) parts.push(t.rails + ' rails');
+  else if (t.palings) parts.push(t.palings + ' palings');
+  if (t.fenceLen) parts.push(fmtLen(t.fenceLen, state.unit));
+  $('sheetSummary').textContent = sc.pl
+    ? fenceName(sc.pl, sc.idx) + ' · tap for its settings'
+    : parts.join(' · ') || 'Totals and settings';
 }
 function syncReadOnlyDetails(){
   if (!readOnly) return;
@@ -4641,7 +4710,6 @@ function updateAll(){
   syncMatInputs();                            // panel follows the selected fence's settings
   $('bUndo').disabled = !undoStack.length;
   $('bRedo').disabled = !redoStack.length;
-  $('bDelSel').disabled = !sel;
   $('bClose').disabled = !(drawTarget() && drawTarget().pts.length >= 3);
   updateTotals(); updateSelbox(); syncReadOnlyDetails(); paint(); saveSoon();
 }
@@ -4831,7 +4899,7 @@ cv.addEventListener('pointermove', e => {
                items:ids.map(i => ({i, x:state.builds[i].x, y:state.builds[i].y})) };
     }
     else drag = { t:'pan' };                  // empty space (or a segment): drag pans
-    updateSelbox(); $('bDelSel').disabled = !sel;
+    updateSelbox();
   }
   if (!drag) return;
   if (drag.t === 'pan'){ view.x -= dx/view.s; view.y -= dy/view.s; paint(); return; }
@@ -4990,6 +5058,7 @@ cv.addEventListener('wheel', e => {
 // keyboard: Delete/Backspace, Esc, Undo/Redo
 window.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (document.querySelector('dialog[open]')) return;   // a modal owns the keyboard, Escape included
   if (readOnly){
     if (e.key === 'Escape'){ sel = null; updateAll(); }
     return;
@@ -5005,7 +5074,8 @@ window.addEventListener('keydown', e => {
   }
   if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSelected(); }
   else if (e.key === 'Escape'){
-    if ($('bkSec').open && !$('bkDialog').open){ $('bkSec').open = false; return; }
+    if ($('bkSec').open){ $('bkSec').open = false; return; }
+    if (sheetOpen()){ setSheet(false); return; }
     endLine(); sel = null; updateAll();
   }
   else if ((e.ctrlKey || e.metaKey) &&
@@ -5019,35 +5089,51 @@ window.addEventListener('keydown', e => {
    Toolbar & panel wiring
    ===================================================================== */
 // No draw/select toggle: the hint just explains what a tap does right now.
+// A phone shows the same advice in a phone's worth of words — a sentence that has to be
+// truncated has told the reader nothing.
+function hintText(drawing){
+  const phone = onPhone();
+  if (mode3d)
+    return phone
+      ? 'Drag to orbit · two fingers to pan · pinch to zoom'
+      : (showFenceLabels3 ? 'Tap a fence label to select it · ' : '') +
+        'drag to orbit · ' +
+        'tap a face of the corner cube to jump to that view · ' +
+        'right-drag or two fingers to pan · scroll or pinch to zoom.';
+  if (readOnly)
+    return phone
+      ? 'Tap a label to inspect · drag to pan · pinch to zoom'
+      : 'Tap a fence label to inspect it · drag to pan · scroll or pinch to zoom.';
+  if (dimTool)
+    return dimTool.pend
+      ? (phone ? 'Tap to place the dimension' :
+         'Move to position the dimension, then click to place it · Esc to back out.')
+      : dimTool.a
+      ? (phone ? 'Now tap what to measure from' :
+         'Now click the post, building corner or wall to measure from · Esc to back out.')
+      : dimTool.a && dimTool.a.k === 'seg'
+      ? (phone ? 'Place it, or tap the fence it meets for the angle' :
+         'Place it for this fence’s length, or click the fence it meets for the corner angle.')
+      : (phone ? 'Tap a fence, or a post then another point' :
+         'Click a fence for its length, two fences for their angle, or a post then a corner, ' +
+         'wall or another post · Esc or D to leave the tool, then click a dimension to edit it.');
+  return drawing
+    ? (phone ? 'Tap to add posts · double-tap to finish' :
+       'Tap to add fence posts · tap the first post to close the loop · double-tap or Esc to finish this fence.')
+    : (phone ? 'Tap empty space to start · tap anything to select' :
+       'Tap empty space to start a fence · tap any fence, post or building to select it · drag to move · ' +
+       'shift-click or hold buildings to multi-select, then choose Group.');
+}
 function updateHint(){
   const drawing = !!drawTarget();
   cv.classList.toggle('selmode', !drawing || mode3d);
-  if (mode3d){
-    $('hint').textContent = (showFenceLabels3 ? 'Tap a fence label to select it · ' : '') +
-                            'drag to orbit · ' +
-                            'tap a face of the corner cube to jump to that view · ' +
-                            'right-drag or two fingers to pan · scroll or pinch to zoom.';
-    return;
-  }
-  if (readOnly){
-    $('hint').textContent = 'Tap a fence label to inspect it · drag to pan · scroll or pinch to zoom.';
-    return;
-  }
-  if (dimTool){
-    $('hint').textContent = dimTool.pend
-      ? 'Move to position the dimension, then click to place it · Esc to back out.'
-      : dimTool.a
-      ? 'Now click the post, building corner or wall to measure from · Esc to back out.'
-      : dimTool.a && dimTool.a.k === 'seg'
-      ? 'Place it for this fence’s length, or click the fence it meets for the corner angle.'
-      : 'Click a fence for its length, two fences for their angle, or a post then a corner, ' +
-        'wall or another post · Esc or D to leave the tool, then click a dimension to edit it.';
-    return;
-  }
-  $('hint').textContent = drawing
-    ? 'Tap to add fence posts · tap the first post to close the loop · double-tap or Esc to finish this fence.'
-    : 'Tap empty space to start a fence · tap any fence, post or building to select it · drag to move · ' +
-      'shift-click or hold buildings to multi-select, then choose Group.';
+  const el = $('hint'), text = hintText(drawing);
+  if (el.textContent === text) return;   // a redraw is not new advice — don't restart the timer
+  el.textContent = text;
+  el.classList.remove('fade');
+  clearTimeout(hintTimer);
+  // a phone has no room to keep instructions on screen once they have been read
+  if (onPhone()) hintTimer = setTimeout(() => el.classList.add('fade'), HINT_FADE_MS);
 }
 
 document.querySelectorAll('#unitTog button').forEach(b =>
@@ -5079,7 +5165,6 @@ $('bBuild').addEventListener('click', addBuilding);
 $('bClose').addEventListener('click', closeLoop);
 $('bUndo').addEventListener('click', undo);
 $('bRedo').addEventListener('click', redo);
-$('bDelSel').addEventListener('click', deleteSelected);
 fdel.addEventListener('click', deleteSelected);
 fswap.addEventListener('click', () => {
   requestAngleSwap();
@@ -5706,7 +5791,6 @@ function bkAutoName(){
   const d = new Date(), p = n => String(n).padStart(2,'0');
   return `fence-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
-const bkSelected = () => $('bkList').value;
 const bkPath = name => 'backups/' + encodeURIComponent(name);
 function externalLibraryFileName(){
   const d = new Date(), p = n => String(n).padStart(2,'0');
@@ -5758,11 +5842,10 @@ function setBkStatus(message, kind=''){
   $('bkStatus').dataset.kind = kind;
 }
 function syncBkActions(){
-  const hasSelection = !!bkSelected();
-  $('bkList').disabled = bkBusy || !bkItems.length;
   $('bkSave').disabled = bkBusy || !bkServerAvailable;
   $('bkSaveAs').disabled = bkBusy || !bkServerAvailable;
-  for (const id of ['bkLoad','bkRen','bkDel']) $(id).disabled = bkBusy || !bkServerAvailable || !hasSelection;
+  $('bkOpen').disabled = bkBusy || !bkServerAvailable || !bkItems.length;
+  $('bkOpenCount').textContent = bkItems.length || '';
   $('bkDownload').disabled = bkBusy || !bkServerAvailable;
   $('bkRestore').disabled = bkBusy || !bkServerAvailable;
   $('bkSec').setAttribute('aria-busy', String(bkBusy));
@@ -5787,11 +5870,15 @@ async function bkRequest(path, options, fallback){
   return body;
 }
 function syncShareAction(){
-  $('bkShare').style.display = shareAvailable ? 'block' : 'none';
+  $('bkShareRow').hidden = !shareAvailable;
   $('bkShare').disabled = bkBusy || !bkServerAvailable || !bkCurrent;
   $('bkShare').title = bkCurrent
     ? `Share a view-only snapshot of “${bkCurrent}”`
     : 'Save this drawing before sharing it';
+  $('bkShares').disabled = bkBusy || !bkServerAvailable || !sharedItems.length;
+  $('bkShares').title = sharedItems.length
+    ? 'Review every active view-only link' : 'Nothing is shared right now';
+  $('bkSharesCount').textContent = sharedItems.length || '';
 }
 async function refreshShareConfig(){
   try {
@@ -5801,32 +5888,13 @@ async function refreshShareConfig(){
   } catch { shareAvailable = false; }
   syncShareAction();
   if (shareAvailable) await refreshSharedDrawings();
-  else $('bkShares').hidden = true;
 }
 function shareListExpiry(value){
   return value ? 'Expires ' + new Date(value).toLocaleString() : 'Does not expire';
 }
 function renderSharedDrawings(){
-  $('bkShares').hidden = false;
-  $('bkSharesEmpty').textContent = 'No active shared drawings.';
-  $('bkSharesCount').textContent = sharedItems.length
-    ? sharedItems.length + ' active' : '';
-  $('bkSharesEmpty').hidden = !!sharedItems.length;
-  $('bkSharesList').innerHTML = sharedItems.map((item, i) =>
-    `<article class="bkShareCard">
-      <div class="bkShareSummary">
-        <span class="bkShareDot" aria-hidden="true"></span>
-        <div class="bkShareText">
-          <strong title="${escHTML(item.name)}">${escHTML(item.name)}</strong>
-          <small>${escHTML(shareListExpiry(item.expiresAt))}</small>
-        </div>
-      </div>
-      <div class="bkShareActions">
-        <button data-share-action="open" data-share-index="${i}">Open</button>
-        <button data-share-action="copy" data-share-index="${i}">Copy</button>
-        <button data-share-action="manage" data-share-index="${i}">Manage</button>
-      </div>
-    </article>`).join('');
+  syncShareAction();
+  if (pickMode === 'shares') renderPicker();
 }
 async function refreshSharedDrawings(){
   if (!shareAvailable) return;
@@ -5838,9 +5906,84 @@ async function refreshSharedDrawings(){
   } catch(error) {
     sharedItems = [];
     renderSharedDrawings();
-    $('bkSharesEmpty').hidden = false;
-    $('bkSharesEmpty').textContent = error.message;
+    setPickMessage(error.message, 'shares');
+    setBkStatus(error.message, 'error');
   }
+}
+
+/* ---- One searchable, scrolling list — the menu never grows with the library ---- */
+const PICK_SEARCH_MIN = 8;   // ponytail: a search box only earns its space once the list scrolls
+let pickMode = '';
+const ICON_RENAME =
+  `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 20 4.2-1 10.7-10.7a2.1 2.1 0 0 0-3-3L5.2 16zM14.5 6.7l3 3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_DELETE =
+  `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 7h15M9 7V4.5h6V7m-8.5 0 .8 13h9.4l.8-13M10 11v5M14 11v5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_FOLDER =
+  `<svg viewBox="0 0 24 24" fill="none"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_SHARE =
+  `<svg viewBox="0 0 24 24" fill="none"><circle cx="18" cy="5" r="3" stroke-width="1.8"/><circle cx="6" cy="12" r="3" stroke-width="1.8"/><circle cx="18" cy="19" r="3" stroke-width="1.8"/><path d="m8.7 13.5 6.6 3.9M15.3 6.6 8.7 10.5" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const savedWhen = mtime => mtime ? 'Saved ' + new Date(mtime).toLocaleString() : 'Saved drawing';
+// one dialog serves both modes, so a message only lands if its own list is showing
+const setPickMessage = (text, mode='') => {
+  if (!mode || mode === pickMode) $('pickEmpty').textContent = text;
+};
+function pickAll(){ return pickMode === 'shares' ? sharedItems : bkItems; }
+function pickMatches(items, query){
+  const needle = query.trim().toLowerCase();
+  return needle ? items.filter(item => item.name.toLowerCase().includes(needle)) : items;
+}
+function pickRows(){ return pickMatches(pickAll(), $('pickSearch').value); }
+function pickRowHTML(item){
+  const name = escHTML(item.name);
+  if (pickMode === 'shares')
+    return `<article class="pickRow">
+      <div class="pickText"><strong title="${name}">${name}</strong>
+        <small>${escHTML(shareListExpiry(item.expiresAt))}</small></div>
+      <div class="pickActions">
+        <button data-pick="open" data-name="${name}">Open</button>
+        <button data-pick="copy" data-name="${name}">Copy</button>
+        <button data-pick="manage" data-name="${name}">Manage</button>
+      </div></article>`;
+  const current = item.name === bkCurrent;
+  return `<article class="pickRow${current ? ' current' : ''}">
+      <div class="pickText"><strong title="${name}">${name}</strong>
+        <small>${current ? 'Open now · ' : ''}${escHTML(savedWhen(item.mtime))}</small></div>
+      <div class="pickActions">
+        <button data-pick="open" data-name="${name}" class="primary">Open</button>
+        <button data-pick="rename" data-name="${name}" class="iconBtn"
+                title="Rename “${name}”" aria-label="Rename ${name}">${ICON_RENAME}</button>
+        <button data-pick="delete" data-name="${name}" class="danger iconBtn"
+                title="Delete “${name}”" aria-label="Delete ${name}">${ICON_DELETE}</button>
+      </div></article>`;
+}
+function renderPicker(){
+  if (!$('pickDialog').open) return;
+  const shares = pickMode === 'shares', all = pickAll(), rows = pickRows();
+  $('pickSub').textContent = shares
+    ? `${all.length} active link${all.length === 1 ? '' : 's'}`
+    : `${all.length} drawing${all.length === 1 ? '' : 's'} saved on gbot`;
+  $('pickSearch').hidden = all.length < PICK_SEARCH_MIN;
+  $('pickList').innerHTML = rows.map(pickRowHTML).join('');
+  setPickMessage(rows.length ? ''
+    : all.length ? 'No name matches that search.'
+    : shares ? 'No active shared drawings.' : 'Nothing saved yet — use Save as new.');
+}
+function openPicker(mode){
+  pickMode = mode;
+  $('pickSearch').value = '';
+  $('pickTitle').textContent = mode === 'shares' ? 'Shared links' : 'Open a drawing';
+  $('pickIcon').innerHTML = mode === 'shares' ? ICON_SHARE : ICON_FOLDER;
+  $('pickDialog').showModal();
+  renderPicker();
+  if (mode === 'shares') refreshSharedDrawings(); else refreshBackups();
+  requestAnimationFrame(() => {
+    const first = $('pickSearch').hidden ? $('pickList').querySelector('button') : $('pickSearch');
+    (first || $('pickClose')).focus();
+  });
+}
+function closePicker(){
+  if ($('pickDialog').open) $('pickDialog').close();
+  pickMode = '';
 }
 function setShareStatus(message, kind=''){
   $('shareDialogStatus').textContent = message;
@@ -5962,27 +6105,24 @@ async function stopSharing(){
   } catch(error) { setShareStatus(error.message, 'error'); }
   finally { setShareBusy(false); }
 }
-async function refreshBackups(preferred=''){
+async function refreshBackups(){
   try {
     const list = await bkRequest('backups', {}, 'Could not load saved drawings.');
     bkServerAvailable = true;
     bkItems = list;
     $('bkSec').style.display = '';
-    $('bkList').innerHTML = list.length
-      ? list.map(b => `<option value="${b.name}">${b.name}</option>`).join('')
-      : '<option value="">No saved drawings</option>';
     if (bkCurrent && !list.some(b => b.name === bkCurrent)) setBkCurrent('');
-    const selected = preferred || bkCurrent;
-    if (selected && list.some(b => b.name === selected)) $('bkList').value = selected;
     setBkCurrent(bkCurrent);
     syncBkActions();
+    renderPicker();
     if (shareAvailable) refreshSharedDrawings();
   } catch(e) {
     bkServerAvailable = false;
     bkItems = [];
     $('bkSec').style.display = '';
-    $('bkList').innerHTML = '<option value="">Server backups unavailable</option>';
     syncBkActions();
+    renderPicker();
+    setPickMessage(e.message, 'drawings');
     setBkStatus(e.message + ' Full external backup requires the file server.', 'error');
   }
 }
@@ -6010,6 +6150,8 @@ function openBkDialog(type, name=''){
   const restoreAll = type === 'restoreAll' ? pendingExternalRestore : null;
   const restoreCount = restoreAll ? restoreAll.library.drawings.length : 0;
   const config = {
+    saved:  ['Drawing saved',`“${name}” is saved on gbot, ${new Date().toLocaleTimeString()}.`,'Done'],
+    created:['Drawing saved',`“${name}” is saved on gbot and is now your current drawing.`,'Done'],
     create: ['Save as new drawing','Choose a name before creating this saved copy.','Save drawing'],
     rename: ['Rename saved drawing',`Choose a new name for “${name}”.`,'Rename'],
     open:   ['Open saved drawing?',`Open “${name}” and replace the drawing currently on the canvas? You can Undo this change.`,'Open'],
@@ -6021,6 +6163,10 @@ function openBkDialog(type, name=''){
   $('bkDialogText').textContent = config[1];
   $('bkDialogConfirm').textContent = config[2];
   $('bkDialogConfirm').className = type === 'delete' ? 'danger' : 'primary';
+  const acknowledge = type === 'saved' || type === 'created';
+  $('bkDialogCancel').style.display = acknowledge ? 'none' : '';
+  // the error line reserves space so validation never shifts the buttons — nothing to reserve here
+  $('bkDialogError').style.minHeight = acknowledge ? '0' : '';
   const needsName = type === 'create' || type === 'rename';
   $('bkNameWrap').style.display = $('bkNameHint').style.display = needsName ? '' : 'none';
   $('bkRestoreModeWrap').style.display = type === 'restoreAll' ? '' : 'none';
@@ -6116,7 +6262,7 @@ async function restoreExternalLibrary(){
       pending.library.drawings.some(item => item.name === pending.library.currentDrawing) &&
       (replace || !conflicts.has(pending.library.currentDrawing));
     setBkCurrent(currentRestored ? pending.library.currentDrawing : '');
-    await refreshBackups(currentRestored ? pending.library.currentDrawing : '');
+    await refreshBackups();
     closeBkDialog();
     $('bkSec').open = false;
     const skippedText = skipped ? ` ${skipped} existing drawing${skipped === 1 ? '' : 's'} skipped.` : '';
@@ -6137,9 +6283,10 @@ async function saveBackup(name, create=false){
       body:JSON.stringify(statePayload())
     }, 'Could not save the drawing.');
     setBkCurrent(name);
-    await refreshBackups(name);
+    await refreshBackups();
     closeBkDialog();
     setBkStatus(create ? `Created “${name}”.` : `Saved “${name}”.`, 'success');
+    openBkDialog(create ? 'created' : 'saved', name);
   } catch(e) {
     if ($('bkDialog').open) $('bkDialogError').textContent = e.message;
     else setBkStatus(e.message, 'error');
@@ -6158,6 +6305,7 @@ async function openBackup(name){
     closeBkDialog();
     $('bkSec').open = false;
     setBkStatus(`Opened “${name}”.`, 'success');
+    closePicker();
   } catch(e) {
     $('bkDialogError').textContent = e.message;
   } finally {
@@ -6171,7 +6319,7 @@ async function renameBackup(name, to){
       method:'PATCH', headers:{'content-type':'application/json'}, body:JSON.stringify({name:to})
     }, 'Could not rename the drawing.');
     if (name === bkCurrent) setBkCurrent(to);
-    await refreshBackups(to);
+    await refreshBackups();
     closeBkDialog();
     setBkStatus(`Renamed to “${to}”.`, 'success');
   } catch(e) {
@@ -6205,12 +6353,21 @@ $('bkRestoreInput').addEventListener('change', e => {
   chooseExternalLibrary(file);
 });
 $('bkShare').addEventListener('click', () => openShareDialog());
-$('bkSharesList').addEventListener('click', async e => {
-  const button = e.target.closest('button[data-share-action]');
-  if (!button) return;
-  const item = sharedItems[+button.dataset.shareIndex];
+$('bkShares').addEventListener('click', () => openPicker('shares'));
+$('bkOpen').addEventListener('click', () => openPicker('drawings'));
+$('pickSearch').addEventListener('input', renderPicker);
+$('pickClose').addEventListener('click', closePicker);
+$('pickDialog').addEventListener('close', () => { pickMode = ''; });
+$('pickList').addEventListener('click', async e => {
+  const button = e.target.closest('button[data-pick]');
+  if (!button || bkBusy) return;
+  const {pick:action, name} = button.dataset;
+  if (pickMode !== 'shares'){
+    if (action === 'open' || action === 'rename' || action === 'delete') openBkDialog(action, name);
+    return;
+  }
+  const item = sharedItems.find(share => share.name === name);
   if (!item) return;
-  const action = button.dataset.shareAction;
   if (action === 'open') {
     const link = document.createElement('a');
     link.href = item.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
@@ -6222,14 +6379,10 @@ $('bkSharesList').addEventListener('click', async e => {
       await copyPublicLink(item.url);
       button.textContent = 'Copied';
       setTimeout(() => button.textContent = label, 1500);
-    } catch(error) { setBkStatus(error.message, 'error'); }
+    } catch(error) { setPickMessage(error.message, 'shares'); }
   }
   if (action === 'manage') openShareDialog(item.name);
 });
-$('bkLoad').addEventListener('click', () => { if (bkSelected()) openBkDialog('open', bkSelected()); });
-$('bkRen').addEventListener('click', () => { if (bkSelected()) openBkDialog('rename', bkSelected()); });
-$('bkDel').addEventListener('click', () => { if (bkSelected()) openBkDialog('delete', bkSelected()); });
-$('bkList').addEventListener('change', syncBkActions);
 $('bkName').addEventListener('input', syncBkDialog);
 $('bkDialogCancel').addEventListener('click', closeBkDialog);
 $('bkSec').addEventListener('toggle', () => {
@@ -6239,13 +6392,14 @@ $('bkSec').addEventListener('toggle', () => {
   }
 });
 document.addEventListener('click', e => {
-  if ($('bkSec').open && !e.target.closest('#bkSec') && !e.target.closest('#bkDialog'))
+  if ($('bkSec').open && !e.target.closest('#bkSec') && !e.target.closest('dialog'))
     $('bkSec').open = false;
 });
 $('bkDialogForm').addEventListener('submit', e => {
   e.preventDefault();
   if (!bkDialogAction || $('bkDialogConfirm').disabled) return;
   const {type,name} = bkDialogAction, to = $('bkName').value.trim();
+  if (type === 'saved' || type === 'created') closeBkDialog();
   if (type === 'create') saveBackup(to, true);
   if (type === 'rename') renameBackup(name, to);
   if (type === 'open') openBackup(name);
@@ -6264,6 +6418,19 @@ $('shareStopConfirm').addEventListener('click', stopSharing);
 $('shareClose').addEventListener('click', () => {
   if (!shareBusy) $('shareDialog').close();
 });
+function setSheet(open){
+  document.body.classList.toggle('sheet', open);
+  $('sheetGrip').setAttribute('aria-expanded', String(open));
+}
+const sheetOpen = () => document.body.classList.contains('sheet');
+// crossing the phone breakpoint (a rotation, a resized window) changes what the hint should say
+matchMedia(PHONE_MQ).addEventListener('change', () => { setSheet(false); updateHint(); });
+$('sheetGrip').addEventListener('click', () => setSheet(!sheetOpen()));
+// tapping the drawing dismisses the sheet instead of also editing underneath it
+$('wrap').addEventListener('pointerdown', e => {
+  if (!sheetOpen() || e.target.closest('#panels')) return;
+  setSheet(false); e.preventDefault(); e.stopPropagation();
+}, true);
 $('bTheme').addEventListener('click', () => {
   const t = document.body.classList.contains('dark') ? 'light' : 'dark';
   try { localStorage.setItem(THEME_KEY, t); } catch(e) {}
