@@ -364,6 +364,8 @@
 
   /* 3D view: the plan-only overlays have nothing to say */
   body.d3 #snapover, body.d3 #fdel, body.d3 #fswap, body.d3 #gridcap{display:none}
+  body.sheetview #snapover, body.sheetview #fdel, body.sheetview #fswap,
+  body.sheetview #gridcap, body.sheetview #view3ctl{display:none}
   #bMore{display:none}         /* only shown on small screens */
   @media (max-width: 860px){
     main{flex-direction:column}
@@ -478,6 +480,7 @@
   </div>
   <div class="grp toolbarEnd">
     <button id="b3d" title="Plan / 3D view">3D</button>
+    <button id="bSheet" class="editorOnly" title="Drawing sheet — elevations on paper">Sheet</button>
     <div class="grp sec units viewTools">
     <div class="seg2" id="unitTog">
       <button data-u="m"  class="on">Metres</button>
@@ -2115,6 +2118,25 @@ function freezeTree(value){
   chk(hrMixed.per[0].handrail === 0 && near(hrMixed.handrail, 10 + postSizeOf(hrMat)),
       'handrail follows per-fence settings');
   chk(hrOf({}).w === DEF.m.hrW && !hrOf({}).on, 'handrail defaults for old saves');
+  // developed elevation: the run unrolled, with the same posts, bays and rails as the model
+  const elevMat = {...mat15, style:'rail', rails:2, ends:'auto'};
+  const elevRun = elevationParts([{pts:[{x:0,y:0},{x:5,y:0}], closed:false, mat:elevMat}], 0);
+  // 5 m at 1.5 m spacing: posts at 0, 1.5, 3, 4.5 and the run's end, so four bays
+  chk(near(elevRun.len, 5) && elevRun.stations.length === 5 &&
+      near(elevRun.stations[1], 1.5) && near(elevRun.stations[4], 5),
+      'elevation stations follow the post spacing');
+  chk(elevRun.parts.filter(p => p.k === 'post').length === 5 &&
+      elevRun.parts.filter(p => p.k === 'rail').length === 8,
+      'elevation carries a post per station and rails per bay');
+  const elevL = elevationParts([{pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}], closed:false, mat:elevMat}], 0);
+  chk(near(elevL.len, 7) && elevL.parts.filter(p => p.k === 'corner').length === 1,
+      'a corner is a fold: the developed length is both runs end to end');
+  const elevGate = elevationParts([{pts:[{x:0,y:0,gateAfter:true},{x:1.5,y:0}], closed:false,
+                                    mat:{...elevMat, style:'paling'}}], 0);
+  const leaf = elevGate.parts.find(p => p.k === 'gate');
+  chk(leaf && leaf.y > 0 && near(leaf.w, gateLeafLength(1.5, elevGate.mat)) &&
+      !elevGate.parts.some(p => p.k === 'board'),
+      'a gate elevates as a leaf, clear of the ground');
   // rail style: 1.2 m fence, 150 mm rails + 150 mm gaps suggests 4 rails/panel,
   // but the typed rails count is what gets used, and palings drop to zero
   const railMat = {style:'rail', spacing:2.4, rails:3, paling:0.1, gap:0.005,
@@ -3496,6 +3518,7 @@ function doPaint(){
   raf = 0;
   ctx.clearRect(0,0,cw,ch);
   dimHits = [];                                 // rebuilt as the dimensions draw
+  if (modeSheet){ fdel.style.display = fswap.style.display = 'none'; paintSheet(); return; }
   if (mode3d){ fdel.style.display = fswap.style.display = 'none'; paint3d(); return; }
 
   // --- grid: spacing follows zoom, keeping squares readable without manual controls ---
@@ -3758,6 +3781,8 @@ const LIGHT     = [0.40, 0.82, 0.25];        // normalised below
 const WOOD = { post:[122,94,62], rail:[168,134,95], paling:[196,158,112], bld:[150,146,140],
                roof:[88,96,108] };
 let mode3d = false;
+let modeSheet = false;                        // the drawing sheet, over the plan's own pan/zoom
+let planView = null;                          // the plan's view, parked while the sheet is up
 let cam = { az: -2.2, el: 0.42, dist: 30, tx: 0, tz: 0 };
 let scene3 = null;                            // cached faces; nulled by updateAll()
 let fenceLabels3 = [];                        // screen-space badges for direct 3D selection
@@ -3807,6 +3832,59 @@ function railYs(mat){
   for (let k = 0; k < count; k++)
     ys.push((mat.botOff||0) + k*d + mat.railW/2);
   return ys;
+}
+/* ---- developed elevation: the fence unrolled onto a vertical plane ----
+   A corner is a fold, not a break, so the runs lay out end to end at true length — the view a
+   builder sets out from. Metres in, metres out: x along the run from its start, y up from the
+   ground. Everything comes from the same helpers the plan, the 3D scene and the materials use,
+   so an elevation cannot show a fence nobody else agrees with. */
+function elevationParts(polys, idx){
+  const pl = polys[idx], mat = pl.mat || state.mat;
+  const H = fenceHeightOf(mat), hr = hrOf(mat), spacing = Math.max(0.1, mat.spacing);
+  const ends = materialPostEndFlags(polys, idx, mat);
+  const postW = postSizeOf(mat), parts = [], stations = [];
+  let x0 = 0, total = 0;
+  for (const [i, a, b] of segsOf(pl)){
+    const L = segLen(a, b);
+    total = x0 + L;
+    if (i > 0) parts.push({ k:'corner', x:x0 });
+    if (a.gateAfter){
+      const leaf = gateLeafBuild(H, mat), inset = gateLeafInset(mat), w = gateLeafLength(L, mat);
+      if (w > 0) parts.push({ k:'gate', x:x0+inset, w, y:leaf.bottom,
+                              h:Math.max(0, H-leaf.bottom), rails:leaf.rails, railW:leaf.railW });
+      stations.push(x0, x0+L);
+    } else {
+      const posts = postsAlong(a, b, spacing, false).map(q => x0 + segLen(a, q));
+      stations.push(...posts);
+      if (mat.style === 'rail')
+        for (let k = 0; k < posts.length-1; k++)
+          for (const ry of railYs(mat)){
+            if (ry + mat.railW/2 > H + 1e-6) break;
+            parts.push({ k:'rail', x:posts[k], w:posts[k+1]-posts[k],
+                         y:ry - mat.railW/2, h:mat.railW });
+          }
+      else if (mat.paling > 0.001){
+        const pitch = mat.paling + mat.gap;
+        for (let t = pitch/2; t <= L + 1e-9; t += pitch)
+          parts.push({ k:'board', x:x0 + t - mat.paling/2, w:mat.paling, y:0, h:H });
+      }
+      if (hr.on) parts.push({ k:'cap', x:x0, w:L, y:H, h:hr.t });
+    }
+    x0 += L;
+  }
+  // one post per station: a junction is shared, and the run's own ends follow the end rule
+  const seen = new Set();
+  for (const x of stations){
+    const key = Math.round(x*1e4);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const first = Math.abs(x) < 1e-6, last = Math.abs(x-total) < 1e-6;
+    if (!pl.closed && ((first && !ends.start) || (last && !ends.end))) continue;
+    parts.push({ k:'post', x: x - postW/2, w:postW, y:0, h:H });
+  }
+  return { len: total, height: H + (hr.on ? hr.t : 0), fenceHeight: H,
+           stations: [...new Set(stations.map(x => Math.round(x*1e4)/1e4))].sort((p,q) => p-q),
+           parts, mat };
 }
 // Midpoint offset to a chosen side of a directed segment in plan coordinates.
 function segmentSideMid(a, b, off, side='left'){
@@ -4139,25 +4217,25 @@ function dimSide3(A, B2, avoid){
 }
 const CHAIN_OFF = DIM.off, COL_STEP = 1.05, MIN_DIM_PX = 26, MIN_CHAIN_PX = 12;
 const DIM_FONT = '12px system-ui';                      // the font renderDimension writes in
-// One dimension between two world points, placed clear of `avoid`. It must have room for its
-// own value or it waits for a closer look, rather than printing a label over its neighbour.
-function dim3(B, p, q, txt, off, avoid){
-  const A = screen3(B, p[0], p[1], p[2]), Bs = screen3(B, q[0], q[1], q[2]);
+// One dimension between two points, placed clear of `avoid`. It must have room for its own
+// value or it waits for a closer look, rather than printing a label over its neighbour.
+// `to` projects a point to the screen, so the 3D scene and the drawing sheet share this.
+function dimAt(to, p, q, txt, off, avoid){
+  const A = to(p), Bs = to(q);
   if (!A || !Bs) return;
   ctx.font = DIM_FONT;
   if (Math.hypot(Bs.x-A.x, Bs.y-A.y) < Math.max(MIN_DIM_PX, ctx.measureText(txt).width + 10)) return;
-  const away = avoid ? screen3(B, avoid[0], avoid[1], avoid[2]) : null;
-  renderDimension(A, Bs, txt, off * dimSide3(A, Bs, away));
+  renderDimension(A, Bs, txt, off * dimSide3(A, Bs, avoid ? to(avoid) : null));
 }
 /* A chain of adjacent parts — bays along the run, rail gaps up the post. Rail gaps are
    150 mm against a 45 mm label, so a single row of them would either overlap or drop out.
    Instead the chain works out how many columns its tightest step needs and staggers into
    them, keeping every value — the gaps included — on screen and legible. Returns how far out
    it reached, so the overall dimension can stand clear of it. */
-function dimChain(B, items, avoid){
+function dimChain(to, items, avoid){
   const drawn = [];
   for (const it of items){
-    const A = screen3(B, it.p[0], it.p[1], it.p[2]), Bs = screen3(B, it.q[0], it.q[1], it.q[2]);
+    const A = to(it.p), Bs = to(it.q);
     if (!A || !Bs) continue;
     const span = Math.hypot(Bs.x-A.x, Bs.y-A.y);
     if (span >= MIN_CHAIN_PX) drawn.push({ A, Bs, span, txt: it.txt });
@@ -4167,7 +4245,7 @@ function dimChain(B, items, avoid){
   const widest = Math.max(...drawn.map(d => ctx.measureText(d.txt).width)) + 8;
   const tightest = Math.min(...drawn.map(d => d.span));
   const cols = Math.max(1, Math.min(3, Math.ceil(widest / tightest)));
-  const away = avoid ? screen3(B, avoid[0], avoid[1], avoid[2]) : null;
+  const away = avoid ? to(avoid) : null;
   drawn.forEach((d, k) => renderDimension(d.A, d.Bs, d.txt,
     CHAIN_OFF * (1 + (k % cols)*COL_STEP) * dimSide3(d.A, d.Bs, away)));
   return CHAIN_OFF * (1 + (cols-1)*COL_STEP);
@@ -4175,6 +4253,7 @@ function dimChain(B, items, avoid){
 function drawFenceDims3(B){
   const pl = showFenceDims3 ? selectedFence3() : null;
   if (!pl || pl.hidden3d || !pl.pts.length) return;
+  const to = p => screen3(B, p[0], p[1], p[2]);
   const mat = pl.mat || state.mat, H = fenceHeightOf(mat), u = state.unit;
   const spacing = Math.max(0.1, mat.spacing);
   const centre = pl.pts.reduce((s,q) => ({x:s.x+q.x/pl.pts.length, y:s.y+q.y/pl.pts.length}),
@@ -4191,8 +4270,8 @@ function drawFenceDims3(B){
     const bays = posts.length > 2 ? posts.slice(0,-1).map((q,k) => ({
       p:[q.x,0,q.y], q:[posts[k+1].x,0,posts[k+1].y],
       txt: fmtLen(segLen(q, posts[k+1]), u) })) : [];
-    const reach = dimChain(B, bays, overTop);
-    dim3(B, [a.x,0,a.y], [b.x,0,b.y], fmtLen(L, u), reach + CHAIN_OFF*1.6, overTop);
+    const reach = dimChain(to, bays, overTop);
+    dimAt(to, [a.x,0,a.y], [b.x,0,b.y], fmtLen(L, u), reach + CHAIN_OFF*1.6, overTop);
     // paling width and gap, measured on the top edge where nothing else is dimensioned.
     // build3 centres boards at pitch/2, 3*pitch/2 … and draws one only while that centre
     // lands on the run, so a short segment gets fewer boards — or none. Measure only the
@@ -4204,7 +4283,7 @@ function drawFenceDims3(B){
       if (3*pitch/2 <= L + 1e-9)
         boards.push({ p:along(s+mat.paling, H), q:along(s+mat.paling+mat.gap, H),
                       txt:fmtSmall(mat.gap, u) });
-      if (boards.length) dimChain(B, boards, along(s + mat.paling/2));
+      if (boards.length) dimChain(to, boards, along(s + mat.paling/2));
     }
   }
   if (H <= 0) return;
@@ -4248,8 +4327,8 @@ function drawFenceDims3(B){
   const rungs = bounds.length > 2 ? bounds.slice(0,-1).flatMap((y,k) =>
     bounds[k+1] - y > 1e-6                      // an odd mat can stack two edges at one height
       ? [{ p: at(y), q: at(bounds[k+1]), txt: fmtSmall(bounds[k+1]-y, u) }] : []) : [];
-  const reach = dimChain(B, rungs, keepOff);
-  dim3(B, at(0), at(H), fmtLen(H, u), reach + CHAIN_OFF*1.6, keepOff);
+  const reach = dimChain(to, rungs, keepOff);
+  dimAt(to, at(0), at(H), fmtLen(H, u), reach + CHAIN_OFF*1.6, keepOff);
 }
 function drawFenceLabels3(B){
   fenceLabels3 = [];
@@ -4331,6 +4410,104 @@ function paint3d(){
   drawFenceDims3(B);                                         // under the labels, over the fence
   drawFenceLabels3(B);
   drawCube(B);
+}
+
+/* =====================================================================
+   Drawing sheet — the elevations, on paper
+   A sheet is millimetres of paper, so the plan's own pan/zoom drives it: `view` holds mm
+   instead of metres while the sheet is up, and every dimension is the same renderDimension
+   the plan and the 3D view draw.
+   ===================================================================== */
+const SHEET = { w:297, h:210, margin:10, gap:6 };            // A4 landscape, in mm
+const SCALES = [5,10,20,25,50,100,200,500,1000,2000];        // 1:n, smallest that fits wins
+const SHEET_INK = '#111827', SHEET_LINE = '#9ca3af';
+const P2S = (x, y) => ({ x:(x - view.x)*view.s, y:(y - view.y)*view.s });
+function sheetFences(){
+  return state.polys.map((pl, i) => i).filter(i =>
+    !state.polys[i].hidden3d && state.polys[i].pts.length > 1);
+}
+/* One elevation per page, each at the largest standard scale that fits it — a 1.5 m gate and a
+   10.5 m run share nothing but paper, and cramming both onto one sheet shrinks the gate until
+   its own dimensions have nowhere to go. Pages stack down the paper strip; drag to the next. */
+function sheetLayout(){
+  const room = { w: SHEET.w - 2*SHEET.margin - 16, h: SHEET.h - 2*SHEET.margin - 16 };
+  return { pages: sheetFences().map((i, n) => {
+    const ev = elevationParts(state.polys, i);
+    let den = SCALES[SCALES.length-1];
+    for (const d of SCALES){
+      const k = 1000/d;
+      if (ev.len*k <= room.w && ev.height*k <= room.h*0.62){ den = d; break; }
+    }
+    const k = 1000/den, top = n*(SHEET.h + SHEET.gap*2);
+    // centred on the page, with the dimension chains hanging into the space below it
+    return { i, ev, den, k, top,
+             x: SHEET.margin + 8 + Math.max(0, (room.w - ev.len*k)/2),
+             base: top + SHEET.margin + 8 + (room.h + ev.height*k)/2 };   // ground line
+  }) };
+}
+function sheetRect(x, y, w, h, fill){                         // paper mm rectangle, ground-up y
+  const a = P2S(x, y), b = P2S(x+w, y-h);
+  ctx.fillStyle = fill; ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.rect(a.x, b.y, b.x-a.x, a.y-b.y);
+  ctx.fill(); ctx.stroke();
+}
+function paintSheet(){
+  const u = state.unit;
+  for (const pg of sheetLayout().pages){
+    const page = P2S(0, pg.top), far = P2S(SHEET.w, pg.top + SHEET.h);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(page.x, page.y, far.x-page.x, far.y-page.y);
+    ctx.strokeStyle = SHEET_LINE; ctx.lineWidth = 1;
+    ctx.strokeRect(page.x, page.y, far.x-page.x, far.y-page.y);
+    const m = SHEET.margin/2;
+    const b0 = P2S(m, pg.top + m), b1 = P2S(SHEET.w - m, pg.top + SHEET.h - m);
+    ctx.strokeRect(b0.x, b0.y, b1.x-b0.x, b1.y-b0.y);           // border frame
+    paintElevation(pg, u);
+    // the two things a drawing is worthless without: what it is, and what scale it is at
+    const foot = P2S(SHEET.w - m - 2, pg.top + SHEET.h - m - 3);
+    ctx.font = `600 ${Math.max(8, 3.2*view.s)}px system-ui`;
+    ctx.textAlign = 'right'; ctx.fillStyle = SHEET_INK;
+    ctx.fillText(`${bkCurrent || 'Fence drawing'} · ${fenceName(state.polys[pg.i], pg.i)}` +
+                 ` · elevation 1:${pg.den} at A4 · ${u === 'm' ? 'metres' : 'feet'}`,
+                 foot.x, foot.y);
+    ctx.textAlign = 'left';
+  }
+}
+function paintElevation(bl, u){
+  const { ev, k, x, base } = bl, mm = v => v*k;
+  const fill = { post:'#cbd5e1', rail:'#e2e8f0', board:'#eef2f6', cap:'#cbd5e1', gate:'#f1f5f9' };
+  const at = (px, py) => [x + mm(px), base - mm(py)];         // metres → paper mm, y up
+  const toScreen = p => P2S(p[0], p[1]);
+  ctx.font = `600 ${Math.max(7, 3*view.s)}px system-ui`;
+  ctx.fillStyle = SHEET_INK;
+  const name = P2S(x, base - mm(ev.height) - 1.5);
+  ctx.fillText(fenceName(state.polys[bl.i], bl.i), name.x, name.y);
+  for (const p of ev.parts){                                  // boards first, posts last: overlap reads right
+    if (p.k === 'corner' || p.k === 'gate') continue;
+    sheetRect(x + mm(p.x), base - mm(p.y), mm(p.w), mm(p.h), fill[p.k] || '#e2e8f0');
+  }
+  for (const p of ev.parts){
+    if (p.k === 'gate'){
+      sheetRect(x + mm(p.x), base - mm(p.y), mm(p.w), mm(p.h), fill.gate);
+      for (const ry of p.rails)
+        sheetRect(x + mm(p.x), base - mm(ry - p.railW/2), mm(p.w), mm(p.railW), fill.rail);
+    }
+    if (p.k === 'corner'){                                    // a fold in the developed view
+      const a = P2S(x + mm(p.x), base), b = P2S(x + mm(p.x), base - mm(ev.height) - 2);
+      ctx.save(); ctx.setLineDash([3,3]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
+    }
+  }
+  const ground = P2S(x - 3, base), groundEnd = P2S(x + mm(ev.len) + 3, base);
+  ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(ground.x, ground.y); ctx.lineTo(groundEnd.x, groundEnd.y); ctx.stroke();
+  // post spacing along the bottom, the run under it, the height up the right-hand side
+  const bays = ev.stations.slice(0,-1).map((s, j) => ({
+    p: at(s, 0), q: at(ev.stations[j+1], 0), txt: fmtLen(ev.stations[j+1]-s, u) }));
+  const reach = ev.stations.length > 2 ? dimChain(toScreen, bays, at(0, ev.height/2)) : CHAIN_OFF;
+  dimAt(toScreen, at(0,0), at(ev.len,0), fmtLen(ev.len, u), reach + CHAIN_OFF*1.6, at(0, ev.height/2));
+  dimAt(toScreen, at(ev.len, 0), at(ev.len, ev.fenceHeight), fmtLen(ev.fenceHeight, u),
+        CHAIN_OFF, at(0, ev.fenceHeight/2));
 }
 
 /* ---- orientation cube: which way am I looking, and click a face to go there ----
@@ -4447,7 +4624,24 @@ function syncFullscreen(){
 }
 document.addEventListener('fullscreenchange', syncFullscreen);
 document.addEventListener('webkitfullscreenchange', syncFullscreen);
+function fitSheet(){                       // frame the first page; the rest are a drag away
+  view.s = Math.min(cw/SHEET.w, ch/SHEET.h)*0.96;
+  view.x = SHEET.w/2 - cw/2/view.s; view.y = SHEET.h/2 - ch/2/view.s;
+}
+function setSheetView(on){
+  if (on === modeSheet) return;
+  if (on && mode3d) set3d(false);
+  modeSheet = on;
+  document.body.classList.toggle('sheetview', on);
+  $('bSheet').classList.toggle('primary', on);
+  $('bSheet').textContent = on ? 'Plan' : 'Sheet';
+  if (on){ planView = {...view}; fitSheet(); }
+  else if (planView){ view = planView; planView = null; }
+  hover = null; sel = on ? null : sel;
+  updateHint(); updateAll();
+}
 function set3d(on){
+  if (on && modeSheet) setSheetView(false);
   mode3d = on;
   if (!on){ setAutoOrbit(false); fenceLabels3 = []; }
   document.body.classList.toggle('d3', on);
@@ -4942,6 +5136,7 @@ cv.addEventListener('pointerdown', e => {
     pend = null; drag = null;
     return;
   }
+  if (modeSheet){ drag = { t:'pan' }; return; }   // the sheet is paper: move it, don't edit it
   if (readOnly){
     pend = { hit:pick(e.offsetX,e.offsetY), x:e.offsetX, y:e.offsetY, moved:false };
     if (e.button === 2) drag = {t:'pan'};
@@ -5263,6 +5458,9 @@ window.addEventListener('keydown', e => {
 // truncated has told the reader nothing.
 function hintText(drawing){
   const phone = onPhone();
+  if (modeSheet)
+    return phone ? 'Elevations · drag to move · pinch to zoom'
+                 : 'Elevations of every fence at true length · drag to move the sheet · scroll or pinch to zoom.';
   if (mode3d)
     return phone
       ? 'Drag to orbit · two fingers to move · pinch to zoom'
@@ -5296,7 +5494,7 @@ function hintText(drawing){
 }
 function updateHint(){
   const drawing = !!drawTarget();
-  cv.classList.toggle('selmode', !drawing || mode3d);
+  cv.classList.toggle('selmode', !drawing || mode3d || modeSheet);
   const el = $('hint'), text = hintText(drawing);
   if (el.textContent === text) return;   // a redraw is not new advice — don't restart the timer
   el.textContent = text;
@@ -5368,7 +5566,7 @@ $('showAllTotals').addEventListener('change', e => {
 const camZoom = f => { cam.dist *= f; clampCam(); paint(); };
 $('bZoomIn').addEventListener('click', () => mode3d ? camZoom(1/1.3) : zoomAt(cw/2, ch/2, 1.3));
 $('bZoomOut').addEventListener('click', () => mode3d ? camZoom(1.3) : zoomAt(cw/2, ch/2, 1/1.3));
-$('bFit').addEventListener('click', () => mode3d ? fit3() : fitView());
+$('bFit').addEventListener('click', () => mode3d ? fit3() : modeSheet ? (fitSheet(), paint()) : fitView());
 $('bFull').addEventListener('click', toggleFullscreen);
 $('bOrbit').addEventListener('click', () => setAutoOrbit(!autoOrbit));
 $('bOrbitDir').addEventListener('click', e => {
@@ -5386,6 +5584,7 @@ $('bOrbitSpeed').addEventListener('click', () => {
   setOrbitSpeed(next || speeds[0]);
 });
 $('b3d').addEventListener('click', () => set3d(!mode3d));
+$('bSheet').addEventListener('click', () => setSheetView(!modeSheet));
 
 // materials inputs
 $('iFenceName').addEventListener('keydown', e => {

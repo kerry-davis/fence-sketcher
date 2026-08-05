@@ -234,6 +234,36 @@ follows, but a value you typed always wins.
 
 ---
 
+## The drawing sheet
+
+**Sheet** in the toolbar swaps the plan for a set of A4 pages — the drawing you take to
+site. One page per fence, each carrying a **developed elevation**: the run unrolled onto a
+vertical plane, so a corner is a fold rather than a break and every length on the page is a
+true length.
+
+Each page carries the fence at the largest standard scale that fits it — `1:5` through
+`1:2000` — so a 1.5 m gate is drawn at `1:20` while a 10.5 m run beside it is `1:50`, each
+legible in its own right. The scale, the fence name and the drawing name are printed at the
+foot of every page, because a drawing without them cannot be read.
+
+On the page: posts at their true stations, rails per bay, palings at their pitch, gate
+leaves clear of the ground, the handrail cap, and a dashed fold line at each corner. Below
+it, the post spacing chain and the overall run; up the side, the fence height. The
+dimensions are the plan's own `renderDimension()`, so the sheet, the plan and the 3D view
+share one dimension style.
+
+The geometry comes from `elevationParts()`, which reads `postsAlong()`, `railYs()`,
+`gateLeafBuild()` and `materialPostEndFlags()` — the same helpers the plan, the 3D scene and
+the materials take-off use. An elevation therefore cannot show a fence that the model,
+the scene and the quantities do not agree on.
+
+The sheet is paper: dragging moves it, scroll or pinch zooms it, and nothing on it can be
+edited. Fences hidden from 3D are off the sheet too. Pages stack down the strip — drag past
+the bottom of one to reach the next.
+
+Not there yet: a title block, a plan view on the sheet, a BOM table with balloons, and
+printing to PDF.
+
 ## The 3D view
 
 Deliberately **not** WebGL or three.js. A fence is boxes — posts, rails,
