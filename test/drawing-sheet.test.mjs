@@ -23,19 +23,23 @@ test('the drawing sheet is its own view, and does not collide with the phone she
 test('one page per fence, each at the largest standard scale that fits it', () => {
   assert.match(html, /const SCALES = \[5,10,20,25,50,100,200,500,1000,2000\];/);
   assert.match(html, /if \(ev\.len\*k <= room\.w && ev\.height\*k <= room\.h\*0\.62\)\{ den = d; break; \}/);
-  assert.match(html, /pages: sheetFences\(\)\.map\(\(i, n\) => \{/);
+  // a page is laid out page-relative, then dropped onto its own sheet
+  assert.match(html, /page\.top = pages\.length\*\(SHEET\.h \+ SHEET\.gap\*2\);\s*\n\s*page\.base \+= page\.top;/);
   // a hidden fence is off the sheet, as it is out of the 3D scene
   assert.match(html, /!state\.polys\[i\]\.hidden3d && state\.polys\[i\]\.pts\.length > 1/);
   // every page states what it is and what scale it is at
-  assert.match(html, /elevation 1:\$\{pg\.den\} at A4/);
+  assert.match(html, /\$\{pg\.kind\} 1:\$\{pg\.den\} at A4/);
+  // and a fence gets a section page beside its elevation
+  assert.match(html, /place\(\{ kind:'section', i, ev, bounds, den:sden, k:1000\/sden,/);
+  assert.match(html, /SCALES\.find\(d => fits\(d\) && tightest\*\(1000\/d\) >= SECTION_MIN_MM\)\s*\n?\s*\?\? SCALES\.find\(fits\)/);
 });
 
 test('the sheet draws dimensions with the same renderer as the plan and 3D', () => {
   // dimAt/dimChain take a projector, so one implementation serves the scene and the paper
-  assert.match(html, /function dimAt\(to, p, q, txt, off, avoid\)\{/);
-  assert.match(html, /function dimChain\(to, items, avoid\)\{/);
+  assert.match(html, /function dimAt\(to, p, q, txt, off, avoid, k = 1\)\{/);
+  assert.match(html, /function dimChain\(to, items, avoid, k = 1\)\{/);
   assert.match(html, /const toScreen = p => P2S\(p\[0\], p\[1\]\);/);
-  assert.match(html, /const reach = ev\.stations\.length > 2 \? dimChain\(toScreen, bays/);
+  assert.match(html, /const reach = ev\.stations\.length > 2 \? dimChain\(toScreen, bays, at\(0, ev\.height\/2\), k\)/);
   assert.doesNotMatch(html, /function renderSheetDimension|sheetArrow/);   // no third style
 });
 
@@ -116,5 +120,5 @@ test('the sheet carries the whole section, from the same definition 3D uses', ()
   // board width and gap come off the boards the elevation actually drew
   assert.match(html, /const boards = ev\.parts\.filter\(p => p\.k === 'board'\)\.sort\(\(a2,b2\) => a2\.x-b2\.x\)\.slice\(0,2\);/);
   // the run's own height stands outside whatever the section chain reached
-  assert.match(html, /dimAt\(toScreen, at\(ev\.len, 0\), at\(ev\.len, ev\.fenceHeight\)[\s\S]{0,60}?up \+ CHAIN_OFF\*1\.6, inside\);/);
+  assert.match(html, /dimAt\(toScreen, at\(reach\/2, 0\), at\(reach\/2, ev\.fenceHeight\)[\s\S]{0,80}?up \+ CHAIN_OFF\*k\*1\.6, inside, k\);/);
 });

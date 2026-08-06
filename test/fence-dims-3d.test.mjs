@@ -7,7 +7,7 @@ const html = fs.readFileSync(new URL('../fence-fable.html', import.meta.url), 'u
 test('3D measures the selected fence with the plan\'s own dimension renderer', () => {
   // reusing renderDimension is the point: one dimension style, not two that drift
   assert.match(html, /function drawFenceDims3\(B\)\{/);
-  assert.match(html, /renderDimension\(A, Bs, txt, off \* dimSide3\(A, Bs, avoid \? to\(avoid\) : null\)\);/);
+  assert.match(html, /renderDimension\(A, Bs, txt, off \* dimSide3\(A, Bs, avoid \? to\(avoid\) : null\), \{scale:k\}\);/);
   assert.doesNotMatch(html, /function drawDimension3|dimArrow3/);   // no second implementation
   // only a selected fence measures itself, and never a hidden one
   assert.match(html, /const selectedFence3 = \(\) =>\s*\n?\s*sel && \(sel\.t === 'seg' \|\| sel\.t === 'pt'\) \? state\.polys\[sel\.p\] : null;/);
@@ -60,12 +60,12 @@ test('a gate is measured as the leaf that was built, not as a fence panel', () =
 test('a tight chain staggers into columns instead of dropping its small values', () => {
   // 150 mm rail gaps against a 45 mm label: one row would overlap, so the chain widens
   assert.match(html, /const cols = Math\.max\(1, Math\.min\(3, Math\.ceil\(widest \/ tightest\)\)\);/);
-  assert.match(html, /CHAIN_OFF \* \(1 \+ \(k % cols\)\*COL_STEP\) \* dimSide3\(d\.A, d\.Bs, away\)\)\);/);
+  assert.match(html, /CHAIN_OFF\*k \* \(1 \+ \(n % cols\)\*COL_STEP\) \* dimSide3\(d\.A, d\.Bs, away\), \{scale:k\}\)\);/);
   // a chain step only needs room for its arrows; a lone dimension must fit its own value
-  assert.match(html, /if \(span >= MIN_CHAIN_PX\) drawn\.push/);
-  assert.match(html, /Math\.hypot\(Bs\.x-A\.x, Bs\.y-A\.y\) < Math\.max\(MIN_DIM_PX, ctx\.measureText\(txt\)\.width \+ 10\)\) return;/);
+  assert.match(html, /if \(span >= MIN_CHAIN_PX\*k\) drawn\.push/);
+  assert.match(html, /Math\.hypot\(Bs\.x-A\.x, Bs\.y-A\.y\) < Math\.max\(MIN_DIM_PX\*k, ctx\.measureText\(txt\)\.width \+ 10\*k\)\) return;/);
   // and the chain reports its reach so nothing lands on top of it
-  assert.match(html, /return CHAIN_OFF \* \(1 \+ \(cols-1\)\*COL_STEP\);/);
+  assert.match(html, /return CHAIN_OFF\*k \* \(1 \+ \(cols-1\)\*COL_STEP\);/);
 });
 
 test('the 3D sizes toggle is on by default, persisted, and on the canvas', () => {

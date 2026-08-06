@@ -259,9 +259,19 @@ it. Board width and gap are taken off the two boards the elevation actually drew
 dimensions are the plan's own `renderDimension()`, so the sheet, the plan and the 3D view
 share one dimension style.
 
-A value needs about 12 px of screen to be worth drawing, so at the fitted view the finest
-steps — a 75 mm rail at 1:50 is 1.5 mm of paper — wait until you zoom in. Everything else
-is on the page at all times.
+**The annotations belong to the paper, not the screen.** Text is 2.6 mm whatever the zoom,
+and every threshold in `dimAt()`/`dimChain()` scales with it, so the sheet carries exactly
+the same dimensions at every zoom — zooming magnifies the drawing rather than revealing
+more of it, and what you see is what a PDF will hold. The plan and the 3D view keep the
+opposite behaviour, where a value is a constant size on screen; `renderDimension()` takes
+an `opts.scale` and serves both.
+
+Because of that, a dimension has to *fit the paper*, and a run's fine build-up cannot fit
+its own elevation: a 75 mm rail against a 10.5 m fence is 1.5 mm of paper at 1:50. So each
+fence gets a **section page** after its elevation, drawn at the largest scale where its
+tightest step still has room — typically 1:10 or 1:20 — carrying the ground gap, every rail,
+every gap between them and the handrail. The elevation keeps the lengths and the height;
+the section says how it goes together.
 
 The geometry comes from `elevationParts()`, which reads `postsAlong()`, `railYs()`,
 `gateLeafBuild()` and `materialPostEndFlags()` — the same helpers the plan, the 3D scene and
