@@ -108,6 +108,8 @@
   #label3ctl{display:inline-flex;min-height:44px}
   #dim3ctl{display:none;min-height:44px}
   body.d3 #dim3ctl{display:inline-flex}   /* only 3D measures itself; plan has its own dimensions */
+  #bPdf{display:none}                     /* there is nothing to export but the sheet */
+  body.sheetview #bPdf{display:inline-flex}
   label.chk{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;background:var(--chip);
             backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
             border:1px solid var(--line);border-radius:999px;cursor:pointer;min-height:36px;
@@ -481,6 +483,7 @@
   <div class="grp toolbarEnd">
     <button id="b3d" title="Plan / 3D view">3D</button>
     <button id="bSheet" class="editorOnly" title="Drawing sheet — elevations on paper">Sheet</button>
+    <button id="bPdf" class="editorOnly" title="Save the drawing as a PDF">PDF</button>
     <div class="grp sec units viewTools">
     <div class="seg2" id="unitTog">
       <button data-u="m"  class="on">Metres</button>
@@ -2554,7 +2557,8 @@ function freezeTree(value){
    DOM + canvas
    ===================================================================== */
 const $ = id => document.getElementById(id);
-const cv = $('cv'), ctx = cv.getContext('2d'), wrap = $('wrap'), fdel = $('fdel');
+const cv = $('cv'), wrap = $('wrap'), fdel = $('fdel');
+let ctx = cv.getContext('2d');   // repointed while a PDF page is rendered offscreen
 const fswap = $('fswap');
 let cw = 0, ch = 0;                           // canvas size in CSS px
 
@@ -4539,25 +4543,115 @@ function sheetRect(x, y, w, h, fill, off){                    // paper mm rectan
 }
 function paintSheet(){
   const u = state.unit, k = annotScale();
-  for (const pg of sheetLayout().pages){
-    const page = P2S(0, pg.top), far = P2S(SHEET.w, pg.top + SHEET.h);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(page.x, page.y, far.x-page.x, far.y-page.y);
-    ctx.strokeStyle = SHEET_LINE; ctx.lineWidth = 1;
-    ctx.strokeRect(page.x, page.y, far.x-page.x, far.y-page.y);
-    const m = SHEET.margin/2;
-    const b0 = P2S(m, pg.top + m), b1 = P2S(SHEET.w - m, pg.top + SHEET.h - m);
-    ctx.strokeRect(b0.x, b0.y, b1.x-b0.x, b1.y-b0.y);           // border frame
-    if (pg.kind === 'section') paintSection(pg, u, k); else paintElevation(pg, u, k);
-    // the two things a drawing is worthless without: what it is, and what scale it is at
-    const foot = P2S(SHEET.w - m - 2, pg.top + SHEET.h - m - 3);
-    ctx.font = `600 ${ANNOT_MM*view.s}px system-ui`;
-    ctx.textAlign = 'right'; ctx.fillStyle = SHEET_INK;
-    ctx.fillText(`${bkCurrent || 'Fence drawing'} · ${fenceName(state.polys[pg.i], pg.i)}` +
-                 ` · ${pg.kind} 1:${pg.den} at A4 · ${u === 'm' ? 'metres' : 'feet'}`,
-                 foot.x, foot.y);
-    ctx.textAlign = 'left';
+  for (const pg of sheetLayout().pages) paintSheetPage(pg, u, k);
+}
+function paintSheetPage(pg, u, k){
+  const page = P2S(0, pg.top), far = P2S(SHEET.w, pg.top + SHEET.h);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(page.x, page.y, far.x-page.x, far.y-page.y);
+  ctx.strokeStyle = SHEET_LINE; ctx.lineWidth = 1;
+  ctx.strokeRect(page.x, page.y, far.x-page.x, far.y-page.y);
+  const m = SHEET.margin/2;
+  const b0 = P2S(m, pg.top + m), b1 = P2S(SHEET.w - m, pg.top + SHEET.h - m);
+  ctx.strokeRect(b0.x, b0.y, b1.x-b0.x, b1.y-b0.y);           // border frame
+  if (pg.kind === 'section') paintSection(pg, u, k); else paintElevation(pg, u, k);
+  // the two things a drawing is worthless without: what it is, and what scale it is at
+  const foot = P2S(SHEET.w - m - 2, pg.top + SHEET.h - m - 3);
+  ctx.font = `600 ${ANNOT_MM*view.s}px system-ui`;
+  ctx.textAlign = 'right'; ctx.fillStyle = SHEET_INK;
+  ctx.fillText(`${bkCurrent || 'Fence drawing'} · ${fenceName(state.polys[pg.i], pg.i)}` +
+               ` · ${pg.kind} 1:${pg.den} at A4 · ${u === 'm' ? 'metres' : 'feet'}`,
+               foot.x, foot.y);
+  ctx.textAlign = 'left';
+}
+/* ---- PDF export ----
+   The sheet is already true A4 with paper-sized annotations, so a PDF is the same drawing at
+   print resolution: paint each page into an offscreen canvas the size of the paper, then wrap
+   those as JPEGs in a hand-written PDF. DCTDecode takes a JPEG's own bytes verbatim, so there
+   is nothing to compress and no font to embed — and no second renderer to keep in step.
+   ponytail: raster pages. Vector would need the whole sheet redrawn through a PDF device;
+   worth it only if someone needs to select text or zoom past 200 dpi in the file. */
+const PDF_DPI = 200;
+const PT_PER_MM = 72/25.4;
+function pdfBytes(chunks){                    // latin1 strings and raw arrays into one buffer
+  let n = 0;
+  for (const c of chunks) n += typeof c === 'string' ? c.length : c.length;
+  const out = new Uint8Array(n);
+  let at = 0;
+  for (const c of chunks){
+    if (typeof c === 'string') for (let i = 0; i < c.length; i++) out[at++] = c.charCodeAt(i) & 0xff;
+    else { out.set(c, at); at += c.length; }
   }
+  return out;
+}
+function jpegBytes(canvas){
+  const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+  const bin = atob(b64), out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function buildPdf(pages, wMM, hMM){           // pages: [{jpeg, w, h}]
+  const W = (wMM*PT_PER_MM).toFixed(2), H = (hMM*PT_PER_MM).toFixed(2);
+  const objs = [];                            // 1-based; body written in order
+  const kids = pages.map((_, i) => `${3 + i*3} 0 R`).join(' ');
+  objs.push('<< /Type /Catalog /Pages 2 0 R >>');
+  objs.push(`<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`);
+  pages.forEach((pg, i) => {
+    const img = 5 + i*3, content = 4 + i*3;
+    objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] ` +
+              `/Resources << /XObject << /Im0 ${img} 0 R >> >> /Contents ${content} 0 R >>`);
+    const stream = `q ${W} 0 0 ${H} 0 0 cm /Im0 Do Q`;
+    objs.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+    objs.push({ dict: `<< /Type /XObject /Subtype /Image /Width ${pg.w} /Height ${pg.h} ` +
+                      `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode ` +
+                      `/Length ${pg.jpeg.length} >>`, data: pg.jpeg });
+  });
+  const chunks = ['%PDF-1.4\n'], offsets = [];
+  let at = chunks[0].length;
+  objs.forEach((o, i) => {
+    offsets.push(at);
+    const head = `${i+1} 0 obj\n`;
+    if (typeof o === 'string'){
+      const body = head + o + '\nendobj\n';
+      chunks.push(body); at += body.length;
+    } else {
+      const pre = head + o.dict + '\nstream\n', post = '\nendstream\nendobj\n';
+      chunks.push(pre, o.data, post); at += pre.length + o.data.length + post.length;
+    }
+  });
+  const xref = at;
+  let table = `xref\n0 ${objs.length+1}\n0000000000 65535 f \n`;
+  for (const off of offsets) table += String(off).padStart(10, '0') + ' 00000 n \n';
+  table += `trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  chunks.push(table);
+  return pdfBytes(chunks);
+}
+function renderPdfPage(pg, u, wPx, hPx){
+  const off = document.createElement('canvas');
+  off.width = wPx; off.height = hPx;
+  const screen = { ctx, cw, ch, view };       // the live canvas, parked
+  ctx = off.getContext('2d');
+  cw = wPx; ch = hPx;
+  view = { x:0, y:pg.top, s:wPx/SHEET.w };    // this page fills the paper, in mm
+  try { paintSheetPage(pg, u, annotScale()); }
+  finally { ctx = screen.ctx; cw = screen.cw; ch = screen.ch; view = screen.view; }
+  return off;
+}
+function exportSheetPdf(){
+  const pages = sheetLayout().pages;
+  if (!pages.length){ setBkStatus('Nothing to draw yet.', 'error'); return; }
+  const px = Math.round(SHEET.w*PDF_DPI/25.4), py = Math.round(SHEET.h*PDF_DPI/25.4);
+  const rendered = pages.map(pg => {
+    const canvas = renderPdfPage(pg, state.unit, px, py);
+    return { jpeg: jpegBytes(canvas), w: px, h: py };
+  });
+  const blob = new Blob([buildPdf(rendered, SHEET.w, SHEET.h)], {type:'application/pdf'});
+  const name = `${bkCurrent || 'fence-drawing'}-elevations.pdf`;
+  const url = URL.createObjectURL(blob), link = document.createElement('a');
+  link.href = url; link.download = name; link.rel = 'noopener';
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setBkStatus(`Saved ${pages.length} page${pages.length === 1 ? '' : 's'} as “${name}”.`, 'success');
 }
 function paintElevation(bl, u, k){
   const { ev, x, base } = bl, mm = v => v*bl.k;
@@ -5735,6 +5829,7 @@ $('bOrbitSpeed').addEventListener('click', () => {
 });
 $('b3d').addEventListener('click', () => set3d(!mode3d));
 $('bSheet').addEventListener('click', () => setSheetView(!modeSheet));
+$('bPdf').addEventListener('click', exportSheetPdf);
 
 // materials inputs
 $('iFenceName').addEventListener('keydown', e => {

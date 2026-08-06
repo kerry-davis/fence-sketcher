@@ -293,8 +293,23 @@ The sheet is paper: dragging moves it, scroll or pinch zooms it, and nothing on 
 edited. Fences hidden from 3D are off the sheet too. Pages stack down the strip — drag past
 the bottom of one to reach the next.
 
-Not there yet: a title block, a plan view on the sheet, a BOM table with balloons, and
-printing to PDF.
+**PDF** writes the whole set out as a real file. Each page is painted into an offscreen
+canvas at 200 dpi by the same `paintSheetPage()` the screen uses — only the target canvas
+and the scale change — and the pages are wrapped in a hand-written PDF at A4 landscape
+(841.89 × 595.28 pt). The JPEGs go in under `/Filter /DCTDecode`, which takes their own
+bytes verbatim, so there is nothing to compress and no font to embed. No dependency, no
+second renderer, and because the sheet is already paper-locked the file is exactly what was
+on screen.
+
+`test/pdf-export.test.mjs` checks the structure the way a reader would, including that every
+xref offset lands on its own `N 0 obj` — the one part of a hand-written PDF that rots
+silently when an object is added or a stream length changes.
+
+ponytail: the pages are raster. Vector would mean redrawing the whole sheet through a PDF
+device, and is only worth it if someone needs selectable text or to zoom past 200 dpi in the
+file itself.
+
+Not there yet: a title block, a plan view on the sheet, and a BOM table with balloons.
 
 ## The 3D view
 
