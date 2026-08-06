@@ -259,6 +259,14 @@ it. Board width and gap are taken off the two boards the elevation actually drew
 dimensions are the plan's own `renderDimension()`, so the sheet, the plan and the 3D view
 share one dimension style.
 
+**Print style.** On paper the dimensions are near-black on white in a plain sans
+(`Helvetica / Arial / Liberation Sans`) at 3.1 mm, and the break where a value crosses its
+own dimension line is a *cleared box*, not a stroked halo — stroking swells every glyph, and
+at that size the decimal point in `1.5 m` thickened into a dash. The screen keeps its own
+style, ink and halo from the canvas palette; `dimStyle` swaps between the two. The theme is
+not consulted for paper, which is what put a near-black outline round every value when a
+dark-theme drawing was exported.
+
 **The annotations belong to the paper, not the screen.** Text is 2.6 mm whatever the zoom,
 and every threshold in `dimAt()`/`dimChain()` scales with it, so the sheet carries exactly
 the same dimensions at every zoom — zooming magnifies the drawing rather than revealing

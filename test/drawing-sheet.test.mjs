@@ -199,3 +199,24 @@ test('a section is taken through a whole bay, post to post', () => {
   // and the span itself is dimensioned under it
   assert.match(html, /dimAt\(toScreen, at\(bay\.a, 0\), at\(bay\.b, 0\), fmtLen\(bay\.b - bay\.a, u\)/);
 });
+
+test('paper gets paper\'s ink, not the screen theme\'s', () => {
+  // the halo used to come from the canvas palette, which is near-black in dark mode — so a
+  // dark-theme export drew a black outline round every value on a white page
+  assert.match(html, /const PAPER_DIM  = \{ ink:'#111827', halo:'#ffffff', haloW:2\.1, mask:true,/);
+  assert.match(html, /const SCREEN_DIM = \{ ink:null, halo:null, haloW:5, font:'system-ui' \};/);
+  assert.match(html, /const dimInk  = \(\) => dimStyle\.ink  \|\| ACCENT;/);
+  assert.match(html, /const dimHalo = \(\) => dimStyle\.halo \|\| C\.halo;/);
+  // the sheet paints inside that style, and puts it back afterwards
+  assert.match(html, /function paintSheetPage\(pg, u, k\)\{ withPaperDims\(\(\) => paintSheetPageInk\(pg, u, k\)\); \}/);
+  assert.match(html, /try \{ return fn\(\); \} finally \{ dimStyle = was; \}/);
+  // a cleared box behind the value, not a stroked halo: stroking swells the glyphs
+  assert.match(html, /if \(dimStyle\.mask\)\{/);
+  assert.match(html, /ctx\.fillRect\(-wide\/2 - 1\.6\*k, lift - 6\.2\*k, wide \+ 3\.2\*k, 12\.4\*k\);/);
+  // one drawing face, used to measure as well as to draw, or the fit tests lie
+  assert.match(html, /const dimFont = k => `\$\{\(12\*k\)\.toFixed\(2\)\}px \$\{dimStyle\.font\}`;/);
+  assert.equal((html.match(/ctx\.font = dimFont\(k\);/g) || []).length, 3);
+  assert.doesNotMatch(html, /px system-ui`; ctx\.textAlign/);
+  // sized for A4 rather than for a screen
+  assert.match(html, /const ANNOT_MM = 3\.1;/);
+});

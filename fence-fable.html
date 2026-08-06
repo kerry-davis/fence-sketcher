@@ -3112,6 +3112,22 @@ function setTheme(t){
    line with arrowheads between them, and the driving value sitting in a break in the middle.
    ponytail: the offset always falls to one side — flip it manually if it ever lands awkwardly. */
 const DIM = { gap: 6, off: 22, tail: 6, arrow: 9, half: 3.2 };
+/* Dimensions are drawn for wherever they land. On screen that is the canvas palette on a
+   canvas background. On paper it is ink on white — the theme's halo is near-black in dark
+   mode, which put a black outline round every value on a white page. Drawing text is a plain
+   sans at ISO-ish size, in one weight, with only enough halo to break the line it crosses. */
+const SCREEN_DIM = { ink:null, halo:null, haloW:5, font:'system-ui' };
+const PAPER_DIM  = { ink:'#111827', halo:'#ffffff', haloW:2.1, mask:true,
+                     font:"'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" };
+let dimStyle = SCREEN_DIM;
+const dimInk  = () => dimStyle.ink  || ACCENT;
+const dimHalo = () => dimStyle.halo || C.halo;
+const dimFont = k => `${(12*k).toFixed(2)}px ${dimStyle.font}`;
+function withPaperDims(fn){            // scoped like the canvas context the sheet also swaps
+  const was = dimStyle;
+  dimStyle = PAPER_DIM;
+  try { return fn(); } finally { dimStyle = was; }
+}
 function dimArrow(x, y, ux, uy, k = 1){          // filled triangle, tip at (x,y), pointing along u
   ctx.beginPath();
   ctx.moveTo(x, y);
@@ -3134,7 +3150,7 @@ function renderDimension(A, B, txt, offPx, opts = {}){
   const nx = -uy, ny = ux;                       // sideways, towards the placement
   const off = offPx, side = off < 0 ? -1 : 1, gap = DIM.gap*k*side, tail = off + DIM.tail*k*side;
   ctx.save();
-  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.setLineDash([]);
+  ctx.strokeStyle = dimInk(); ctx.fillStyle = dimInk(); ctx.setLineDash([]);
   if (opts.ghost) ctx.globalAlpha = .65;
   ctx.lineWidth = (opts.picked ? 2 : 1)*k;
   const a = { x: A.x + nx*off, y: A.y + ny*off }, b = { x: B.x + nx*off, y: B.y + ny*off };
@@ -3168,11 +3184,20 @@ function renderDimension(A, B, txt, offPx, opts = {}){
   if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI;
   const mid = { x:(a.x+b.x)/2, y:(a.y+b.y)/2 }, lift = inward < 0 ? -11*k : 0;
   ctx.translate(mid.x, mid.y); ctx.rotate(ang);
-  ctx.font = `${12*k}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.lineWidth = 5*k; ctx.strokeStyle = C.halo; // the halo IS the break in the dimension line
-  ctx.strokeText(txt, 0, lift);
-  ctx.fillStyle = ACCENT; ctx.fillText(txt, 0, lift);
-  const half = Math.max(24*k, ctx.measureText(txt).width/2 + 9*k);
+  ctx.font = dimFont(k); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const wide = ctx.measureText(txt).width;
+  if (dimStyle.mask){
+    // On paper the break is a cleared box, not a stroked halo: stroking swells every glyph,
+    // and at 3 mm the decimal point in "1.5 m" thickens into a dash.
+    ctx.fillStyle = dimHalo();
+    ctx.fillRect(-wide/2 - 1.6*k, lift - 6.2*k, wide + 3.2*k, 12.4*k);
+  } else {
+    ctx.lineWidth = dimStyle.haloW*k;            // the halo IS the break in the dimension line
+    ctx.strokeStyle = dimHalo();
+    ctx.strokeText(txt, 0, lift);
+  }
+  ctx.fillStyle = dimInk(); ctx.fillText(txt, 0, lift);
+  const half = Math.max(24*k, wide/2 + 9*k);
   ctx.restore();
   // the whole dimension is pickable — the value box (in ITS OWN rotated frame, or a slanted
   // label is only clickable dead centre) and the dimension line between the arrowheads
@@ -3320,7 +3345,7 @@ function renderAngle(pl, k, radPx, opts = {}){
   while (sweep <= -Math.PI) sweep += 2*Math.PI;
   while (sweep > Math.PI) sweep -= 2*Math.PI;
   ctx.save();
-  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.setLineDash([]);
+  ctx.strokeStyle = dimInk(); ctx.fillStyle = dimInk(); ctx.setLineDash([]);
   if (opts.ghost) ctx.globalAlpha = .65;
   if (opts.picked){
     ctx.save();
@@ -4280,7 +4305,7 @@ function verticalChainBounds(mat, H, isGate){
 function dimAt(to, p, q, txt, off, avoid, k = 1){
   const A = to(p), Bs = to(q);
   if (!A || !Bs) return;
-  ctx.font = `${12*k}px system-ui`;
+  ctx.font = dimFont(k);
   if (Math.hypot(Bs.x-A.x, Bs.y-A.y) < Math.max(MIN_DIM_PX*k, ctx.measureText(txt).width + 10*k)) return;
   renderDimension(A, Bs, txt, off * dimSide3(A, Bs, avoid ? to(avoid) : null), {scale:k});
 }
@@ -4298,7 +4323,7 @@ function dimChain(to, items, avoid, k = 1){
     if (span >= MIN_CHAIN_PX*k) drawn.push({ A, Bs, span, txt: it.txt });
   }
   if (!drawn.length) return CHAIN_OFF*k;
-  ctx.font = `${12*k}px system-ui`;
+  ctx.font = dimFont(k);
   const widest = Math.max(...drawn.map(d => ctx.measureText(d.txt).width)) + 8*k;
   const tightest = Math.min(...drawn.map(d => d.span));
   const cols = Math.max(1, Math.min(3, Math.ceil(widest / tightest)));
@@ -4474,7 +4499,7 @@ function sheetFences(){
 /* Annotations belong to the paper, not the screen: 2.6 mm of text whatever the zoom. Every
    threshold in dimAt/dimChain scales with it, so the sheet carries the same dimensions at
    every zoom — and the same ones will be in the PDF. */
-const ANNOT_MM = 2.6;
+const ANNOT_MM = 3.1;          // font size on paper; ~2.2 mm cap height, ISO-ish for A4
 const annotScale = () => ANNOT_MM*view.s/12;
 /* One elevation per page, at the largest standard scale that fits it. A run's fine build-up
    cannot share that page: a 75 mm rail against a 10.5 m fence is 1.5 mm of paper at 1:50,
@@ -4545,7 +4570,8 @@ function paintSheet(){
   const u = state.unit, k = annotScale();
   for (const pg of sheetLayout().pages) paintSheetPage(pg, u, k);
 }
-function paintSheetPage(pg, u, k){
+function paintSheetPage(pg, u, k){ withPaperDims(() => paintSheetPageInk(pg, u, k)); }
+function paintSheetPageInk(pg, u, k){
   const page = P2S(0, pg.top), far = P2S(SHEET.w, pg.top + SHEET.h);
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(page.x, page.y, far.x-page.x, far.y-page.y);
@@ -4557,7 +4583,7 @@ function paintSheetPage(pg, u, k){
   if (pg.kind === 'section') paintSection(pg, u, k); else paintElevation(pg, u, k);
   // the two things a drawing is worthless without: what it is, and what scale it is at
   const foot = P2S(SHEET.w - m - 2, pg.top + SHEET.h - m - 3);
-  ctx.font = `600 ${ANNOT_MM*view.s}px system-ui`;
+  ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`;
   ctx.textAlign = 'right'; ctx.fillStyle = SHEET_INK;
   ctx.fillText(`${bkCurrent || 'Fence drawing'} · ${fenceName(state.polys[pg.i], pg.i)}` +
                ` · ${pg.kind} 1:${pg.den} at A4 · ${u === 'm' ? 'metres' : 'feet'}`,
@@ -4658,7 +4684,7 @@ function paintElevation(bl, u, k){
   const fill = { post:'#cbd5e1', rail:'#e2e8f0', board:'#eef2f6', cap:'#cbd5e1', gate:'#f1f5f9' };
   const at = (px, py) => [x + mm(px), base - mm(py)];         // metres → paper mm, y up
   const toScreen = p => P2S(p[0], p[1]);
-  ctx.font = `600 ${ANNOT_MM*view.s}px system-ui`;
+  ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`;
   ctx.fillStyle = SHEET_INK;
   const name = P2S(x, base - mm(ev.height) - 1.5);
   ctx.fillText(fenceName(state.polys[bl.i], bl.i), name.x, name.y);
@@ -4711,7 +4737,7 @@ function sheetNotIncluded(ev, x, yMM){
   if (!ev.notIncluded.length) return;
   const at = P2S(x, yMM - 3.4);
   ctx.save();
-  ctx.font = `${ANNOT_MM*view.s*0.92}px system-ui`; ctx.fillStyle = SHEET_LINE;
+  ctx.font = `${(ANNOT_MM*view.s*0.9).toFixed(2)}px ${PAPER_DIM.font}`; ctx.fillStyle = SHEET_LINE;
   ctx.fillText('Dashed: ' + ev.notIncluded.join(' · '), at.x, at.y);
   ctx.restore();
 }
@@ -4721,7 +4747,7 @@ function paintSection(pg, u, k){
   const toScreen = p => P2S(p[0], p[1]);
   const fill = { post:'#cbd5e1', rail:'#e2e8f0', board:'#eef2f6', cap:'#cbd5e1', gate:'#f1f5f9' };
   const top = bounds[bounds.length-1];
-  ctx.font = `600 ${ANNOT_MM*view.s}px system-ui`; ctx.fillStyle = SHEET_INK;
+  ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`; ctx.fillStyle = SHEET_INK;
   const title = P2S(x, base - mm(top) - 4);
   ctx.fillText(`Section — ${fenceName(state.polys[pg.i], pg.i)}  1:${pg.den}`, title.x, title.y);
   sheetNotIncluded(ev, x, base - mm(top) - 4);
