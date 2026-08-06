@@ -246,11 +246,22 @@ Each page carries the fence at the largest standard scale that fits it — `1:5`
 legible in its own right. The scale, the fence name and the drawing name are printed at the
 foot of every page, because a drawing without them cannot be read.
 
+Each elevation reads the way the plan reads, left to right: a run whose first point is its
+right-hand end is developed from the other end, so the drawing is never a mirror of the
+plan and the 3D view.
+
 On the page: posts at their true stations, rails per bay, palings at their pitch, gate
 leaves clear of the ground, the handrail cap, and a dashed fold line at each corner. Below
-it, the post spacing chain and the overall run; up the side, the fence height. The
+it, the post spacing chain and the overall run. Up the far end, the whole section — ground
+to the first rail, each rail, each gap between them, the top, the handrail — from the same
+`verticalChainBounds()` the 3D view measures with, and the fence height standing outside
+it. Board width and gap are taken off the two boards the elevation actually drew. The
 dimensions are the plan's own `renderDimension()`, so the sheet, the plan and the 3D view
 share one dimension style.
+
+A value needs about 12 px of screen to be worth drawing, so at the fitted view the finest
+steps — a 75 mm rail at 1:50 is 1.5 mm of paper — wait until you zoom in. Everything else
+is on the page at all times.
 
 The geometry comes from `elevationParts()`, which reads `postsAlong()`, `railYs()`,
 `gateLeafBuild()` and `materialPostEndFlags()` — the same helpers the plan, the 3D scene and

@@ -3882,7 +3882,18 @@ function elevationParts(polys, idx){
     if (!pl.closed && ((first && !ends.start) || (last && !ends.end))) continue;
     parts.push({ k:'post', x: x - postW/2, w:postW, y:0, h:H });
   }
-  return { len: total, height: H + (hr.on ? hr.t : 0), fenceHeight: H,
+  /* Read the elevation the way the plan reads it, left to right. Developing from the run's
+     first point mirrors the drawing whenever that point is the right-hand end — the fence
+     would be correct and still be the wrong way round against the plan and the 3D view. */
+  const head = pl.pts[0], tail = pl.pts[pl.pts.length-1];
+  const flip = !pl.closed && (Math.abs(tail.x - head.x) > 1e-9 ? tail.x < head.x
+                                                               : tail.y < head.y);
+  if (flip){
+    for (const q of parts) q.x = total - q.x - (q.k === 'corner' ? 0 : q.w);
+    for (let n = 0; n < stations.length; n++) stations[n] = total - stations[n];
+  }
+  return { len: total, height: H + (hr.on ? hr.t : 0), fenceHeight: H, flipped: flip,
+           gateOnly: segsOf(pl).every(([, a]) => !!a.gateAfter),
            stations: [...new Set(stations.map(x => Math.round(x*1e4)/1e4))].sort((p,q) => p-q),
            parts, mat };
 }
@@ -4217,6 +4228,27 @@ function dimSide3(A, B2, avoid){
 }
 const CHAIN_OFF = DIM.off, COL_STEP = 1.05, MIN_DIM_PX = 26, MIN_CHAIN_PX = 12;
 const DIM_FONT = '12px system-ui';                      // the font renderDimension writes in
+/* Every horizontal edge up a fence, ground to cap: the ground gap, each rail, each gap
+   between them, the top, and the handrail. A gate is its own thing — the leaf hangs clear of
+   the ground on its own two rails, and the cap skips gate openings. Shared so the 3D chain
+   and the elevation on paper cannot describe different fences. */
+function verticalChainBounds(mat, H, isGate){
+  const bounds = [0];
+  if (isGate){
+    const leaf = gateLeafBuild(H, mat);
+    bounds.push(leaf.bottom);
+    for (const ry of leaf.rails) bounds.push(ry - leaf.railW/2, ry + leaf.railW/2);
+  } else {
+    for (const ry of railYs(mat)){
+      if (ry + mat.railW/2 > H + 1e-6) break;
+      bounds.push(ry - mat.railW/2, ry + mat.railW/2);
+    }
+  }
+  bounds.push(H);
+  const hr = hrOf(mat);
+  if (hr.on && !isGate) bounds.push(H + hr.t);
+  return bounds;
+}
 // One dimension between two points, placed clear of `avoid`. It must have room for its own
 // value or it waits for a closer look, rather than printing a label over its neighbour.
 // `to` projects a point to the screen, so the 3D scene and the drawing sheet share this.
@@ -4310,20 +4342,7 @@ function drawFenceDims3(B){
   // rail spacing as a chain up the fence: ground to the first rail, each rail, each gap,
   // then the last rail to the top. A gate leaf is measured as the leaf that was built —
   // its ground clearance and its own two rails, not the panel rails it doesn't carry.
-  const bounds = [0];
-  if (station.gate){
-    const leaf = gateLeafBuild(H, mat);
-    bounds.push(leaf.bottom);
-    for (const ry of leaf.rails) bounds.push(ry - leaf.railW/2, ry + leaf.railW/2);
-  } else {
-    for (const ry of railYs(mat)){
-      if (ry + mat.railW/2 > H + 1e-6) break;
-      bounds.push(ry - mat.railW/2, ry + mat.railW/2);
-    }
-  }
-  bounds.push(H);
-  const hr = hrOf(mat);
-  if (hr.on && !station.gate) bounds.push(H + hr.t);   // the cap continues the chain, but skips gates
+  const bounds = verticalChainBounds(mat, H, station.gate);
   const rungs = bounds.length > 2 ? bounds.slice(0,-1).flatMap((y,k) =>
     bounds[k+1] - y > 1e-6                      // an odd mat can stack two edges at one height
       ? [{ p: at(y), q: at(bounds[k+1]), txt: fmtSmall(bounds[k+1]-y, u) }] : []) : [];
@@ -4501,13 +4520,29 @@ function paintElevation(bl, u){
   const ground = P2S(x - 3, base), groundEnd = P2S(x + mm(ev.len) + 3, base);
   ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(ground.x, ground.y); ctx.lineTo(groundEnd.x, groundEnd.y); ctx.stroke();
-  // post spacing along the bottom, the run under it, the height up the right-hand side
+  // post spacing along the bottom, with the whole run standing clear beneath it
   const bays = ev.stations.slice(0,-1).map((s, j) => ({
     p: at(s, 0), q: at(ev.stations[j+1], 0), txt: fmtLen(ev.stations[j+1]-s, u) }));
   const reach = ev.stations.length > 2 ? dimChain(toScreen, bays, at(0, ev.height/2)) : CHAIN_OFF;
   dimAt(toScreen, at(0,0), at(ev.len,0), fmtLen(ev.len, u), reach + CHAIN_OFF*1.6, at(0, ev.height/2));
+  // the section up the far end: ground gap, every rail and every gap, then the height itself
+  const inside = at(ev.len/2, ev.fenceHeight/2);
+  const bounds = verticalChainBounds(ev.mat, ev.fenceHeight, ev.gateOnly);
+  const rungs = bounds.slice(0,-1).flatMap((y, j) => bounds[j+1] - y > 1e-6
+    ? [{ p: at(ev.len, y), q: at(ev.len, bounds[j+1]), txt: fmtSmall(bounds[j+1]-y, u) }] : []);
+  const up = rungs.length > 1 ? dimChain(toScreen, rungs, inside) : CHAIN_OFF;
   dimAt(toScreen, at(ev.len, 0), at(ev.len, ev.fenceHeight), fmtLen(ev.fenceHeight, u),
-        CHAIN_OFF, at(0, ev.fenceHeight/2));
+        up + CHAIN_OFF*1.6, inside);
+  // board width and gap, measured on the two boards actually drawn
+  const boards = ev.parts.filter(p => p.k === 'board').sort((a2,b2) => a2.x-b2.x).slice(0,2);
+  if (boards.length){
+    const top = ev.fenceHeight, items = [
+      { p: at(boards[0].x, top), q: at(boards[0].x+boards[0].w, top), txt: fmtSmall(boards[0].w, u) }];
+    if (boards.length > 1)
+      items.push({ p: at(boards[0].x+boards[0].w, top), q: at(boards[1].x, top),
+                   txt: fmtSmall(boards[1].x - boards[0].x - boards[0].w, u) });
+    dimChain(toScreen, items, at(boards[0].x, 0));
+  }
 }
 
 /* ---- orientation cube: which way am I looking, and click a face to go there ----

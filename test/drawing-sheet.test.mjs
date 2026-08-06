@@ -88,4 +88,33 @@ test('the developed elevation agrees with the model it is drawn from', () => {
   const rails = bent.parts.filter(p => p.k === 'rail');
   assert.ok(rails.length > 0 && rails.every(r => r.w <= 2.4 + 1e-9));
   assert.equal(+bent.fenceHeight.toFixed(6), 1.2);
+
+  // A run whose first point is its right-hand end would draw mirrored against the plan.
+  // 5 m at 2.4 spacing has its short 0.2 m bay beside the last point, so drawing left to
+  // right in plan terms puts that bay first.
+  const rightToLeft = context.elevationParts(
+    [{ pts:[{x:5,y:0},{x:0,y:0}], closed:false, mat:{...mat, spacing:2.4} }], 0);
+  assert.equal(rightToLeft.flipped, true);
+  assert.deepEqual(Array.from(rightToLeft.stations).map(v => +v.toFixed(4)), [0, 0.2, 2.6, 5]);
+  const leftToRight = context.elevationParts(
+    [{ pts:[{x:0,y:0},{x:5,y:0}], closed:false, mat:{...mat, spacing:2.4} }], 0);
+  assert.equal(leftToRight.flipped, false);
+  assert.deepEqual(Array.from(leftToRight.stations).map(v => +v.toFixed(4)), [0, 2.4, 4.8, 5]);
+  // a run going up the plan reads from its top end
+  const northward = context.elevationParts(
+    [{ pts:[{x:0,y:5},{x:0,y:0}], closed:false, mat }], 0);
+  assert.equal(northward.flipped, true);
+});
+
+test('the sheet carries the whole section, from the same definition 3D uses', () => {
+  // one verticalChainBounds(), called by the 3D chain and by the elevation
+  assert.equal(html.match(/function verticalChainBounds\(/g).length, 1);
+  assert.match(html, /const bounds = verticalChainBounds\(ev\.mat, ev\.fenceHeight, ev\.gateOnly\);/);
+  assert.match(html, /const bounds = verticalChainBounds\(mat, H, station\.gate\);/);
+  // a gate-only run is sectioned as a leaf
+  assert.match(html, /gateOnly: segsOf\(pl\)\.every\(\(\[, a\]\) => !!a\.gateAfter\)/);
+  // board width and gap come off the boards the elevation actually drew
+  assert.match(html, /const boards = ev\.parts\.filter\(p => p\.k === 'board'\)\.sort\(\(a2,b2\) => a2\.x-b2\.x\)\.slice\(0,2\);/);
+  // the run's own height stands outside whatever the section chain reached
+  assert.match(html, /dimAt\(toScreen, at\(ev\.len, 0\), at\(ev\.len, ev\.fenceHeight\)[\s\S]{0,60}?up \+ CHAIN_OFF\*1\.6, inside\);/);
 });

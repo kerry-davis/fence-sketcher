@@ -23,7 +23,8 @@ test('3D measures every part of the fence, not just its outline', () => {
   // rail spacing: a chain of the drawn rail edges, so the ground gap, each rail and each
   // gap between them all read off — the cap continues the same chain
   assert.match(html, /for \(const ry of railYs\(mat\)\)\{\s*\n\s*if \(ry \+ mat\.railW\/2 > H \+ 1e-6\) break;\s*\n\s*bounds\.push\(ry - mat\.railW\/2, ry \+ mat\.railW\/2\);/);
-  assert.match(html, /if \(hr\.on && !station\.gate\) bounds\.push\(H \+ hr\.t\);/);
+  assert.match(html, /if \(hr\.on && !isGate\) bounds\.push\(H \+ hr\.t\);/);
+  assert.match(html, /const bounds = verticalChainBounds\(mat, H, station\.gate\);/);
   // taken at mid-span of the run facing the camera, not at an end post
   assert.match(html, /const m = \{ x:\(a\.x\+b\.x\)\/2, y:\(a\.y\+b\.y\)\/2 \};/);
   assert.match(html, /station = \{ m, z:c\[2\], gate \};/);
@@ -49,8 +50,9 @@ test('a gate is measured as the leaf that was built, not as a fence panel', () =
   assert.match(html, /const built = gateLeafBuild\(H, mat\), bottom = built\.bottom, leafH = built\.leafH;/);
   assert.match(html, /for \(const ry of built\.rails\)\s*\n\s*pushBox\(F,mid\.x,ry,mid\.y,leaf\.len\/2,mat\.railW\/2/);
   assert.doesNotMatch(html, /bottom\+leafH\*0\.28,bottom\+leafH\*0\.72/);   // no second copy
-  // the chain: ground clearance, then the leaf's own rails
-  assert.match(html, /if \(station\.gate\)\{\s*\n\s*const leaf = gateLeafBuild\(H, mat\);\s*\n\s*bounds\.push\(leaf\.bottom\);/);
+  // the chain: ground clearance, then the leaf's own rails — one definition, shared with paper
+  assert.match(html, /if \(isGate\)\{\s*\n\s*const leaf = gateLeafBuild\(H, mat\);\s*\n\s*bounds\.push\(leaf\.bottom\);/);
+  assert.equal(html.match(/bounds\.push\(leaf\.bottom\);/g).length, 1);
   // a panel is preferred as the station; a gate-only run has nothing else
   assert.match(html, /if \(!station \|\| \(station\.gate && !gate\) \|\| \(station\.gate === gate && c\[2\] < station\.z\)\)/);
 });
