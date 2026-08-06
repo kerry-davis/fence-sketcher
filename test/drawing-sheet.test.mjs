@@ -110,6 +110,70 @@ test('the developed elevation agrees with the model it is drawn from', () => {
   assert.equal(northward.flipped, true);
 });
 
+test('the drawing reads the BOM exclusions', () => {
+  const start = html.indexOf('function elevationParts(');
+  const end = html.indexOf('// Midpoint offset to a chosen side', start);
+  const context = { Math, Set, state:{ mat:{} } };
+  const helpers = `
+    const GATE_GAP=0.04, GATE_STILE=0.09, GATE_BOTTOM=0.08, POST_SIDE=0.1;
+    const segLen=(a,b)=>Math.hypot(b.x-a.x,b.y-a.y);
+    const segsOf=pl=>{const n=pl.closed?pl.pts.length:pl.pts.length-1;
+      return Array.from({length:n},(_,i)=>[i,pl.pts[i],pl.pts[(i+1)%pl.pts.length]]);};
+    const postSizeOf=m=>m.postSize??0.1, postTOf=m=>m.postT??0.1;
+    const fenceHeightOf=m=>m.height-(m.postDepth||0);
+    const hrOf=m=>({on:!!m.handrail,w:0.1,t:0.045});
+    const railYs=m=>{const d=m.railW+m.railGap,ys=[];for(let k=0;k<(m.rails|0);k++)
+      ys.push((m.botOff||0)+k*d+m.railW/2);return ys;};
+    const postsAlong=(a,b,sp,gate)=>{const L=segLen(a,b),n=gate?1:Math.max(1,Math.ceil(L/sp-1e-9)),o=[];
+      for(let k=0;k<=n;k++){const d=gate?L*k:Math.min(L,sp*k),t=L?d/L:0;
+        o.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});}return o;};
+    const materialPostEndFlags=()=>({start:true,end:true});
+    const gateLeafInset=m=>postSizeOf(m)/2+GATE_GAP+GATE_STILE/2;
+    const gateLeafLength=(L,m)=>Math.max(0,L-2*gateLeafInset(m));
+    const gateLeafBuild=(H,m)=>{const bottom=Math.min(GATE_BOTTOM,H*0.15),leafH=Math.max(0.2,H-bottom);
+      return {bottom,leafH,railW:0.15,rails:[bottom+leafH*0.28,bottom+leafH*0.72]};};
+  `;
+  vm.createContext(context);
+  vm.runInContext(helpers + html.slice(start, end), context);
+  const rail = { style:'rail', spacing:2.4, rails:2, railW:0.15, railGap:0.15, botOff:0.15,
+                 height:1.8, postDepth:0.6, paling:0.1, gap:0.005 };
+  const paling = { ...rail, style:'paling' };
+  const run = (extra, mat) => context.elevationParts(
+    [{ pts:[{x:0,y:0},{x:5,y:0}], closed:false, mat, ...extra }], 0);
+
+  // rails a take-off does not buy are still built, so they are drawn — as reference
+  const noRails = run({ excludeRails:true }, rail);
+  assert.ok(noRails.parts.filter(p => p.k === 'rail').every(p => p.off));
+  assert.ok(noRails.parts.filter(p => p.k === 'post').every(p => !p.off));
+  assert.deepEqual(Array.from(noRails.notIncluded), ['rails not included in BOM']);
+
+  const noBoards = run({ excludePalings:true }, paling);
+  assert.ok(noBoards.parts.filter(p => p.k === 'board').every(p => p.off));
+  assert.deepEqual(Array.from(noBoards.notIncluded), ['palings not included in BOM']);
+
+  // a rail fence has no palings to leave out, matching the take-off's own note
+  assert.deepEqual(Array.from(run({ excludePalings:true }, rail).notIncluded), []);
+
+  // the whole fence out: every part reference, one note
+  const none = run({ excludeMaterials:true }, rail);
+  assert.ok(none.parts.every(p => p.k === 'corner' || p.off));
+  assert.deepEqual(Array.from(none.notIncluded), ['fence not included in BOM']);
+
+  // a gate leaf's body follows whichever exclusion clads it
+  const gate = extra => context.elevationParts(
+    [{ pts:[{x:0,y:0,gateAfter:true},{x:1.5,y:0}], closed:false, mat:paling, ...extra }], 0)
+    .parts.find(p => p.k === 'gate');
+  assert.equal(gate({ excludePalings:true }).off, true);
+  assert.equal(gate({ excludeRails:true }).off, false);
+  assert.equal(gate({ excludeRails:true }).railsOff, true);
+
+  // and the sheet says it, in the take-off's words
+  assert.match(html, /function sheetNotIncluded\(ev, x, yMM\)\{/);
+  assert.match(html, /ctx\.fillText\('Dashed: ' \+ ev\.notIncluded\.join\(' · '\), at\.x, at\.y\);/);
+  assert.match(html, /ctx\.fillStyle = off \? '#ffffff' : fill;/);
+  assert.match(html, /if \(off\) ctx\.setLineDash\(\[3,2\]\);/);
+});
+
 test('the sheet carries the whole section, from the same definition 3D uses', () => {
   // one verticalChainBounds(), called by the 3D chain and by the elevation
   assert.equal(html.match(/function verticalChainBounds\(/g).length, 1);

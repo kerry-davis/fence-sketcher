@@ -3848,6 +3848,16 @@ function elevationParts(polys, idx){
   const H = fenceHeightOf(mat), hr = hrOf(mat), spacing = Math.max(0.1, mat.spacing);
   const ends = materialPostEndFlags(polys, idx, mat);
   const postW = postSizeOf(mat), parts = [], stations = [];
+  /* The BOM exclusions are part of the drawing: a rail nobody is supplying still gets built,
+     so it is drawn — but drawn as reference, and the page says so. Omitting it silently would
+     make the sheet disagree with the take-off it was priced from. */
+  const off = pl.excludeMaterials, omitted = {
+    post: off, cap: off,
+    rail: off || !!pl.excludeRails,
+    board: off || !!pl.excludePalings,
+    // a gate leaf's body is its cladding, so it follows whichever exclusion clads it
+    gate: off || (mat.style === 'rail' ? !!pl.excludeRails : !!pl.excludePalings),
+  };
   let x0 = 0, total = 0;
   for (const [i, a, b] of segsOf(pl)){
     const L = segLen(a, b);
@@ -3856,7 +3866,8 @@ function elevationParts(polys, idx){
     if (a.gateAfter){
       const leaf = gateLeafBuild(H, mat), inset = gateLeafInset(mat), w = gateLeafLength(L, mat);
       if (w > 0) parts.push({ k:'gate', x:x0+inset, w, y:leaf.bottom,
-                              h:Math.max(0, H-leaf.bottom), rails:leaf.rails, railW:leaf.railW });
+                              h:Math.max(0, H-leaf.bottom), rails:leaf.rails, railW:leaf.railW,
+                              off:omitted.gate, railsOff:omitted.rail });
       stations.push(x0, x0+L);
     } else {
       const posts = postsAlong(a, b, spacing, false).map(q => x0 + segLen(a, q));
@@ -3866,14 +3877,15 @@ function elevationParts(polys, idx){
           for (const ry of railYs(mat)){
             if (ry + mat.railW/2 > H + 1e-6) break;
             parts.push({ k:'rail', x:posts[k], w:posts[k+1]-posts[k],
-                         y:ry - mat.railW/2, h:mat.railW });
+                         y:ry - mat.railW/2, h:mat.railW, off:omitted.rail });
           }
       else if (mat.paling > 0.001){
         const pitch = mat.paling + mat.gap;
         for (let t = pitch/2; t <= L + 1e-9; t += pitch)
-          parts.push({ k:'board', x:x0 + t - mat.paling/2, w:mat.paling, y:0, h:H });
+          parts.push({ k:'board', x:x0 + t - mat.paling/2, w:mat.paling, y:0, h:H,
+                       off:omitted.board });
       }
-      if (hr.on) parts.push({ k:'cap', x:x0, w:L, y:H, h:hr.t });
+      if (hr.on) parts.push({ k:'cap', x:x0, w:L, y:H, h:hr.t, off:omitted.cap });
     }
     x0 += L;
   }
@@ -3885,7 +3897,7 @@ function elevationParts(polys, idx){
     seen.add(key);
     const first = Math.abs(x) < 1e-6, last = Math.abs(x-total) < 1e-6;
     if (!pl.closed && ((first && !ends.start) || (last && !ends.end))) continue;
-    parts.push({ k:'post', x: x - postW/2, w:postW, y:0, h:H });
+    parts.push({ k:'post', x: x - postW/2, w:postW, y:0, h:H, off:omitted.post });
   }
   /* Read the elevation the way the plan reads it, left to right. Developing from the run's
      first point mirrors the drawing whenever that point is the right-hand end — the fence
@@ -3897,8 +3909,12 @@ function elevationParts(polys, idx){
     for (const q of parts) q.x = total - q.x - (q.k === 'corner' ? 0 : q.w);
     for (let n = 0; n < stations.length; n++) stations[n] = total - stations[n];
   }
+  const notIncluded = pl.excludeMaterials ? ['fence not included in BOM']
+    : [pl.excludeRails ? 'rails not included in BOM' : '',
+       pl.excludePalings && mat.style !== 'rail' ? 'palings not included in BOM' : '']
+      .filter(Boolean);
   return { len: total, height: H + (hr.on ? hr.t : 0), fenceHeight: H, flipped: flip,
-           gateOnly: segsOf(pl).every(([, a]) => !!a.gateAfter),
+           notIncluded, gateOnly: segsOf(pl).every(([, a]) => !!a.gateAfter),
            stations: [...new Set(stations.map(x => Math.round(x*1e4)/1e4))].sort((p,q) => p-q),
            parts, mat };
 }
@@ -4511,11 +4527,15 @@ function widestBay(ev){
   }
   return best;
 }
-function sheetRect(x, y, w, h, fill){                         // paper mm rectangle, ground-up y
+function sheetRect(x, y, w, h, fill, off){                    // paper mm rectangle, ground-up y
   const a = P2S(x, y), b = P2S(x+w, y-h);
-  ctx.fillStyle = fill; ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1;
+  ctx.save();
+  ctx.fillStyle = off ? '#ffffff' : fill;                     // excluded work: reference only
+  ctx.strokeStyle = off ? SHEET_LINE : SHEET_INK; ctx.lineWidth = 1;
+  if (off) ctx.setLineDash([3,2]);
   ctx.beginPath(); ctx.rect(a.x, b.y, b.x-a.x, a.y-b.y);
   ctx.fill(); ctx.stroke();
+  ctx.restore();
 }
 function paintSheet(){
   const u = state.unit, k = annotScale();
@@ -4548,15 +4568,17 @@ function paintElevation(bl, u, k){
   ctx.fillStyle = SHEET_INK;
   const name = P2S(x, base - mm(ev.height) - 1.5);
   ctx.fillText(fenceName(state.polys[bl.i], bl.i), name.x, name.y);
+  sheetNotIncluded(ev, x, base - mm(ev.height) - 1.5);
   for (const p of ev.parts){                                  // boards first, posts last
     if (p.k === 'corner' || p.k === 'gate') continue;
-    sheetRect(x + mm(p.x), base - mm(p.y), mm(p.w), mm(p.h), fill[p.k] || '#e2e8f0');
+    sheetRect(x + mm(p.x), base - mm(p.y), mm(p.w), mm(p.h), fill[p.k] || '#e2e8f0', p.off);
   }
   for (const p of ev.parts){
     if (p.k === 'gate'){
-      sheetRect(x + mm(p.x), base - mm(p.y), mm(p.w), mm(p.h), fill.gate);
+      sheetRect(x + mm(p.x), base - mm(p.y), mm(p.w), mm(p.h), fill.gate, p.off);
       for (const ry of p.rails)
-        sheetRect(x + mm(p.x), base - mm(ry - p.railW/2), mm(p.w), mm(p.railW), fill.rail);
+        sheetRect(x + mm(p.x), base - mm(ry - p.railW/2), mm(p.w), mm(p.railW), fill.rail,
+                  p.off || p.railsOff);
     }
     if (p.k === 'corner'){                                    // a fold in the developed view
       const a = P2S(x + mm(p.x), base), b = P2S(x + mm(p.x), base - mm(ev.height) - 2);
@@ -4589,6 +4611,16 @@ function paintElevation(bl, u, k){
 /* The build-up, drawn large enough to dimension: one post with its rails and cap, and the
    whole vertical chain beside it. The elevation says how long the fence is; this says how
    it goes together. */
+/* What the take-off leaves out, said on the drawing in the take-off's own words — dashed
+   geometry alone would leave a reader guessing which trade owns it. */
+function sheetNotIncluded(ev, x, yMM){
+  if (!ev.notIncluded.length) return;
+  const at = P2S(x, yMM - 3.4);
+  ctx.save();
+  ctx.font = `${ANNOT_MM*view.s*0.92}px system-ui`; ctx.fillStyle = SHEET_LINE;
+  ctx.fillText('Dashed: ' + ev.notIncluded.join(' · '), at.x, at.y);
+  ctx.restore();
+}
 function paintSection(pg, u, k){
   const { ev, bounds, bay, win, x, base } = pg, mm = v => v*pg.k;
   const at = (px, py) => [x + mm(px - win.lo), base - mm(py)];   // window-relative paper mm
@@ -4598,19 +4630,21 @@ function paintSection(pg, u, k){
   ctx.font = `600 ${ANNOT_MM*view.s}px system-ui`; ctx.fillStyle = SHEET_INK;
   const title = P2S(x, base - mm(top) - 4);
   ctx.fillText(`Section — ${fenceName(state.polys[pg.i], pg.i)}  1:${pg.den}`, title.x, title.y);
+  sheetNotIncluded(ev, x, base - mm(top) - 4);
   const clip = p => ({ lo: Math.max(p.x, win.lo), hi: Math.min(p.x + p.w, win.hi) });
   for (const p of ev.parts){                                     // the elevation, cropped
     if (p.k === 'corner') continue;
     const c = clip(p);
     if (c.hi <= c.lo + 1e-9) continue;
     if (p.k === 'gate'){
-      sheetRect(x + mm(c.lo - win.lo), base - mm(p.y), mm(c.hi-c.lo), mm(p.h), fill.gate);
+      sheetRect(x + mm(c.lo - win.lo), base - mm(p.y), mm(c.hi-c.lo), mm(p.h), fill.gate, p.off);
       for (const ry of p.rails)
         sheetRect(x + mm(c.lo - win.lo), base - mm(ry - p.railW/2), mm(c.hi-c.lo),
-                  mm(p.railW), fill.rail);
+                  mm(p.railW), fill.rail, p.off || p.railsOff);
       continue;
     }
-    sheetRect(x + mm(c.lo - win.lo), base - mm(p.y), mm(c.hi-c.lo), mm(p.h), fill[p.k] || '#e2e8f0');
+    sheetRect(x + mm(c.lo - win.lo), base - mm(p.y), mm(c.hi-c.lo), mm(p.h),
+              fill[p.k] || '#e2e8f0', p.off);
   }
   const g0 = P2S(x - 3, base), g1 = P2S(x + mm(win.hi - win.lo) + 3, base);
   ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;

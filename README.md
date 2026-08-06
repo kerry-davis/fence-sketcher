@@ -281,6 +281,14 @@ The geometry comes from `elevationParts()`, which reads `postsAlong()`, `railYs(
 the materials take-off use. An elevation therefore cannot show a fence that the model,
 the scene and the quantities do not agree on.
 
+**The BOM exclusions are part of the drawing.** Whatever `Include rails in BOM`,
+`Include palings in BOM` or the whole-fence materials tick leaves out is drawn **dashed and
+unfilled** — it still gets built, so the drawing still shows it — and the page carries the
+take-off's own words underneath the fence name: `Dashed: rails not included in BOM`. A gate
+leaf's body follows whichever exclusion clads it, since the body *is* the cladding. Drawing
+excluded work as though it were supplied would put the sheet at odds with the take-off it
+was priced from.
+
 The sheet is paper: dragging moves it, scroll or pinch zooms it, and nothing on it can be
 edited. Fences hidden from 3D are off the sheet too. Pages stack down the strip — drag past
 the bottom of one to reach the next.
