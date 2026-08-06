@@ -108,6 +108,8 @@
   #label3ctl{display:inline-flex;min-height:44px}
   #dim3ctl{display:none;min-height:44px}
   body.d3 #dim3ctl{display:inline-flex}   /* only 3D measures itself; plan has its own dimensions */
+  #bPdf{display:none}                     /* there is nothing to export but the sheet */
+  body.sheetview #bPdf{display:inline-flex}
   label.chk{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;background:var(--chip);
             backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
             border:1px solid var(--line);border-radius:999px;cursor:pointer;min-height:36px;
@@ -364,6 +366,8 @@
 
   /* 3D view: the plan-only overlays have nothing to say */
   body.d3 #snapover, body.d3 #fdel, body.d3 #fswap, body.d3 #gridcap{display:none}
+  body.sheetview #snapover, body.sheetview #fdel, body.sheetview #fswap,
+  body.sheetview #gridcap, body.sheetview #view3ctl{display:none}
   #bMore{display:none}         /* only shown on small screens */
   @media (max-width: 860px){
     main{flex-direction:column}
@@ -478,6 +482,8 @@
   </div>
   <div class="grp toolbarEnd">
     <button id="b3d" title="Plan / 3D view">3D</button>
+    <button id="bSheet" class="editorOnly" title="Drawing sheet — elevations on paper">Sheet</button>
+    <button id="bPdf" class="editorOnly" title="Save the drawing as a PDF">PDF</button>
     <div class="grp sec units viewTools">
     <div class="seg2" id="unitTog">
       <button data-u="m"  class="on">Metres</button>
@@ -2115,6 +2121,25 @@ function freezeTree(value){
   chk(hrMixed.per[0].handrail === 0 && near(hrMixed.handrail, 10 + postSizeOf(hrMat)),
       'handrail follows per-fence settings');
   chk(hrOf({}).w === DEF.m.hrW && !hrOf({}).on, 'handrail defaults for old saves');
+  // developed elevation: the run unrolled, with the same posts, bays and rails as the model
+  const elevMat = {...mat15, style:'rail', rails:2, ends:'auto'};
+  const elevRun = elevationParts([{pts:[{x:0,y:0},{x:5,y:0}], closed:false, mat:elevMat}], 0);
+  // 5 m at 1.5 m spacing: posts at 0, 1.5, 3, 4.5 and the run's end, so four bays
+  chk(near(elevRun.len, 5) && elevRun.stations.length === 5 &&
+      near(elevRun.stations[1], 1.5) && near(elevRun.stations[4], 5),
+      'elevation stations follow the post spacing');
+  chk(elevRun.parts.filter(p => p.k === 'post').length === 5 &&
+      elevRun.parts.filter(p => p.k === 'rail').length === 8,
+      'elevation carries a post per station and rails per bay');
+  const elevL = elevationParts([{pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}], closed:false, mat:elevMat}], 0);
+  chk(near(elevL.len, 7) && elevL.parts.filter(p => p.k === 'corner').length === 1,
+      'a corner is a fold: the developed length is both runs end to end');
+  const elevGate = elevationParts([{pts:[{x:0,y:0,gateAfter:true},{x:1.5,y:0}], closed:false,
+                                    mat:{...elevMat, style:'paling'}}], 0);
+  const leaf = elevGate.parts.find(p => p.k === 'gate');
+  chk(leaf && leaf.y > 0 && near(leaf.w, gateLeafLength(1.5, elevGate.mat)) &&
+      !elevGate.parts.some(p => p.k === 'board'),
+      'a gate elevates as a leaf, clear of the ground');
   // rail style: 1.2 m fence, 150 mm rails + 150 mm gaps suggests 4 rails/panel,
   // but the typed rails count is what gets used, and palings drop to zero
   const railMat = {style:'rail', spacing:2.4, rails:3, paling:0.1, gap:0.005,
@@ -2532,7 +2557,8 @@ function freezeTree(value){
    DOM + canvas
    ===================================================================== */
 const $ = id => document.getElementById(id);
-const cv = $('cv'), ctx = cv.getContext('2d'), wrap = $('wrap'), fdel = $('fdel');
+const cv = $('cv'), wrap = $('wrap'), fdel = $('fdel');
+let ctx = cv.getContext('2d');   // repointed while a PDF page is rendered offscreen
 const fswap = $('fswap');
 let cw = 0, ch = 0;                           // canvas size in CSS px
 
@@ -3086,30 +3112,51 @@ function setTheme(t){
    line with arrowheads between them, and the driving value sitting in a break in the middle.
    ponytail: the offset always falls to one side — flip it manually if it ever lands awkwardly. */
 const DIM = { gap: 6, off: 22, tail: 6, arrow: 9, half: 3.2 };
-function dimArrow(x, y, ux, uy){                 // filled triangle, tip at (x,y), pointing along u
+/* Dimensions are drawn for wherever they land. On screen that is the canvas palette on a
+   canvas background. On paper it is ink on white — the theme's halo is near-black in dark
+   mode, which put a black outline round every value on a white page. Drawing text is a plain
+   sans at ISO-ish size, in one weight, with only enough halo to break the line it crosses. */
+const SCREEN_DIM = { ink:null, halo:null, haloW:5, font:'system-ui' };
+const PAPER_DIM  = { ink:'#111827', halo:'#ffffff', haloW:2.1, mask:true,
+                     font:"'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif" };
+let dimStyle = SCREEN_DIM;
+const dimInk  = () => dimStyle.ink  || ACCENT;
+const dimHalo = () => dimStyle.halo || C.halo;
+const dimFont = k => `${(12*k).toFixed(2)}px ${dimStyle.font}`;
+function withPaperDims(fn){            // scoped like the canvas context the sheet also swaps
+  const was = dimStyle;
+  dimStyle = PAPER_DIM;
+  try { return fn(); } finally { dimStyle = was; }
+}
+function dimArrow(x, y, ux, uy, k = 1){          // filled triangle, tip at (x,y), pointing along u
   ctx.beginPath();
   ctx.moveTo(x, y);
-  ctx.lineTo(x - ux*DIM.arrow - uy*DIM.half, y - uy*DIM.arrow + ux*DIM.half);
-  ctx.lineTo(x - ux*DIM.arrow + uy*DIM.half, y - uy*DIM.arrow - ux*DIM.half);
+  ctx.lineTo(x - ux*DIM.arrow*k - uy*DIM.half*k, y - uy*DIM.arrow*k + ux*DIM.half*k);
+  ctx.lineTo(x - ux*DIM.arrow*k + uy*DIM.half*k, y - uy*DIM.arrow*k - ux*DIM.half*k);
   ctx.closePath(); ctx.fill();
 }
 /* Draw one dimension between two screen points, offset by `offPx` to the side the user placed
    it. Returns the label's centre so it can be registered for picking or used to site the input.
    opts: { picked, extendTo (screen pt for a wall's dotted run-past), ghost } */
+/* `opts.scale` sizes the whole annotation — arrows, witness gaps, text, halo. The plan and
+   the 3D view leave it at 1, so a value is a constant size on screen however far you zoom.
+   The drawing sheet ties it to the paper instead, so the sheet reads the same at every zoom
+   and prints as drawn. */
 function renderDimension(A, B, txt, offPx, opts = {}){
+  const k = opts.scale || 1;
   const len = Math.hypot(B.x-A.x, B.y-A.y);
   if (len < 1) return null;                      // the two ends coincide: nothing to draw
   const ux = (B.x-A.x)/len, uy = (B.y-A.y)/len;  // along the measurement
   const nx = -uy, ny = ux;                       // sideways, towards the placement
-  const off = offPx, side = off < 0 ? -1 : 1, gap = DIM.gap*side, tail = off + DIM.tail*side;
+  const off = offPx, side = off < 0 ? -1 : 1, gap = DIM.gap*k*side, tail = off + DIM.tail*k*side;
   ctx.save();
-  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.setLineDash([]);
+  ctx.strokeStyle = dimInk(); ctx.fillStyle = dimInk(); ctx.setLineDash([]);
   if (opts.ghost) ctx.globalAlpha = .65;
-  ctx.lineWidth = opts.picked ? 2 : 1;
+  ctx.lineWidth = (opts.picked ? 2 : 1)*k;
   const a = { x: A.x + nx*off, y: A.y + ny*off }, b = { x: B.x + nx*off, y: B.y + ny*off };
   if (opts.picked){                              // selection halo, so it reads as picked
     ctx.save();
-    ctx.globalAlpha = .18; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.globalAlpha = .18; ctx.lineWidth = 10*k; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     ctx.restore();
   }
@@ -3125,23 +3172,32 @@ function renderDimension(A, B, txt, offPx, opts = {}){
     ctx.setLineDash([]);
   }
   // too short for arrowheads to fit between the witness lines: put them outside, pointing in
-  const inward = len > DIM.arrow*2.6 ? 1 : -1;
-  const ext = inward < 0 ? DIM.arrow*1.4 : 0;
-  ctx.lineWidth = opts.picked ? 2.25 : 1.25;
+  const inward = len > DIM.arrow*k*2.6 ? 1 : -1;
+  const ext = inward < 0 ? DIM.arrow*k*1.4 : 0;
+  ctx.lineWidth = (opts.picked ? 2.25 : 1.25)*k;
   ctx.beginPath();
   ctx.moveTo(a.x - ux*ext, a.y - uy*ext); ctx.lineTo(b.x + ux*ext, b.y + uy*ext);
   ctx.stroke();
-  dimArrow(a.x, a.y, -ux*inward, -uy*inward);
-  dimArrow(b.x, b.y,  ux*inward,  uy*inward);
+  dimArrow(a.x, a.y, -ux*inward, -uy*inward, k);
+  dimArrow(b.x, b.y,  ux*inward,  uy*inward, k);
   let ang = Math.atan2(uy, ux);
   if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI;
-  const mid = { x:(a.x+b.x)/2, y:(a.y+b.y)/2 }, lift = inward < 0 ? -11 : 0;
+  const mid = { x:(a.x+b.x)/2, y:(a.y+b.y)/2 }, lift = inward < 0 ? -11*k : 0;
   ctx.translate(mid.x, mid.y); ctx.rotate(ang);
-  ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.lineWidth = 5; ctx.strokeStyle = C.halo;   // the halo IS the break in the dimension line
-  ctx.strokeText(txt, 0, lift);
-  ctx.fillStyle = ACCENT; ctx.fillText(txt, 0, lift);
-  const half = Math.max(24, ctx.measureText(txt).width/2 + 9);
+  ctx.font = dimFont(k); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const wide = ctx.measureText(txt).width;
+  if (dimStyle.mask){
+    // On paper the break is a cleared box, not a stroked halo: stroking swells every glyph,
+    // and at 3 mm the decimal point in "1.5 m" thickens into a dash.
+    ctx.fillStyle = dimHalo();
+    ctx.fillRect(-wide/2 - 1.6*k, lift - 6.2*k, wide + 3.2*k, 12.4*k);
+  } else {
+    ctx.lineWidth = dimStyle.haloW*k;            // the halo IS the break in the dimension line
+    ctx.strokeStyle = dimHalo();
+    ctx.strokeText(txt, 0, lift);
+  }
+  ctx.fillStyle = dimInk(); ctx.fillText(txt, 0, lift);
+  const half = Math.max(24*k, wide/2 + 9*k);
   ctx.restore();
   // the whole dimension is pickable — the value box (in ITS OWN rotated frame, or a slanted
   // label is only clickable dead centre) and the dimension line between the arrowheads
@@ -3289,7 +3345,7 @@ function renderAngle(pl, k, radPx, opts = {}){
   while (sweep <= -Math.PI) sweep += 2*Math.PI;
   while (sweep > Math.PI) sweep -= 2*Math.PI;
   ctx.save();
-  ctx.strokeStyle = ACCENT; ctx.fillStyle = ACCENT; ctx.setLineDash([]);
+  ctx.strokeStyle = dimInk(); ctx.fillStyle = dimInk(); ctx.setLineDash([]);
   if (opts.ghost) ctx.globalAlpha = .65;
   if (opts.picked){
     ctx.save();
@@ -3496,6 +3552,7 @@ function doPaint(){
   raf = 0;
   ctx.clearRect(0,0,cw,ch);
   dimHits = [];                                 // rebuilt as the dimensions draw
+  if (modeSheet){ fdel.style.display = fswap.style.display = 'none'; paintSheet(); return; }
   if (mode3d){ fdel.style.display = fswap.style.display = 'none'; paint3d(); return; }
 
   // --- grid: spacing follows zoom, keeping squares readable without manual controls ---
@@ -3758,6 +3815,8 @@ const LIGHT     = [0.40, 0.82, 0.25];        // normalised below
 const WOOD = { post:[122,94,62], rail:[168,134,95], paling:[196,158,112], bld:[150,146,140],
                roof:[88,96,108] };
 let mode3d = false;
+let modeSheet = false;                        // the drawing sheet, over the plan's own pan/zoom
+let planView = null;                          // the plan's view, parked while the sheet is up
 let cam = { az: -2.2, el: 0.42, dist: 30, tx: 0, tz: 0 };
 let scene3 = null;                            // cached faces; nulled by updateAll()
 let fenceLabels3 = [];                        // screen-space badges for direct 3D selection
@@ -3807,6 +3866,90 @@ function railYs(mat){
   for (let k = 0; k < count; k++)
     ys.push((mat.botOff||0) + k*d + mat.railW/2);
   return ys;
+}
+/* ---- developed elevation: the fence unrolled onto a vertical plane ----
+   A corner is a fold, not a break, so the runs lay out end to end at true length — the view a
+   builder sets out from. Metres in, metres out: x along the run from its start, y up from the
+   ground. Everything comes from the same helpers the plan, the 3D scene and the materials use,
+   so an elevation cannot show a fence nobody else agrees with. */
+function elevationParts(polys, idx){
+  const pl = polys[idx], mat = pl.mat || state.mat;
+  const H = fenceHeightOf(mat), hr = hrOf(mat), spacing = Math.max(0.1, mat.spacing);
+  const ends = materialPostEndFlags(polys, idx, mat);
+  const postW = postSizeOf(mat), parts = [], stations = [], bays = [];
+  /* The BOM exclusions are part of the drawing: a rail nobody is supplying still gets built,
+     so it is drawn — but drawn as reference, and the page says so. Omitting it silently would
+     make the sheet disagree with the take-off it was priced from. */
+  const off = pl.excludeMaterials, omitted = {
+    post: off, cap: off,
+    rail: off || !!pl.excludeRails,
+    board: off || !!pl.excludePalings,
+    // a gate leaf's body is its cladding, so it follows whichever exclusion clads it
+    gate: off || (mat.style === 'rail' ? !!pl.excludeRails : !!pl.excludePalings),
+  };
+  let x0 = 0, total = 0;
+  for (const [i, a, b] of segsOf(pl)){
+    const L = segLen(a, b);
+    total = x0 + L;
+    if (i > 0) parts.push({ k:'corner', x:x0 });
+    if (a.gateAfter){
+      const leaf = gateLeafBuild(H, mat), inset = gateLeafInset(mat), w = gateLeafLength(L, mat);
+      if (w > 0) parts.push({ k:'gate', x:x0+inset, w, y:leaf.bottom,
+                              h:Math.max(0, H-leaf.bottom), rails:leaf.rails, railW:leaf.railW,
+                              off:omitted.gate, railsOff:omitted.rail });
+      stations.push(x0, x0+L);
+      bays.push({ a:x0, b:x0+L, gate:true });        // the opening is the bay here
+    } else {
+      const posts = postsAlong(a, b, spacing, false).map(q => x0 + segLen(a, q));
+      stations.push(...posts);
+      for (let k = 0; k < posts.length-1; k++)
+        bays.push({ a:posts[k], b:posts[k+1], gate:false });
+      if (mat.style === 'rail')
+        for (let k = 0; k < posts.length-1; k++)
+          for (const ry of railYs(mat)){
+            if (ry + mat.railW/2 > H + 1e-6) break;
+            parts.push({ k:'rail', x:posts[k], w:posts[k+1]-posts[k],
+                         y:ry - mat.railW/2, h:mat.railW, off:omitted.rail });
+          }
+      else if (mat.paling > 0.001){
+        const pitch = mat.paling + mat.gap;
+        for (let t = pitch/2; t <= L + 1e-9; t += pitch)
+          parts.push({ k:'board', x:x0 + t - mat.paling/2, w:mat.paling, y:0, h:H,
+                       off:omitted.board });
+      }
+      if (hr.on) parts.push({ k:'cap', x:x0, w:L, y:H, h:hr.t, off:omitted.cap });
+    }
+    x0 += L;
+  }
+  // one post per station: a junction is shared, and the run's own ends follow the end rule
+  const seen = new Set();
+  for (const x of stations){
+    const key = Math.round(x*1e4);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const first = Math.abs(x) < 1e-6, last = Math.abs(x-total) < 1e-6;
+    if (!pl.closed && ((first && !ends.start) || (last && !ends.end))) continue;
+    parts.push({ k:'post', x: x - postW/2, w:postW, y:0, h:H, off:omitted.post });
+  }
+  /* Read the elevation the way the plan reads it, left to right. Developing from the run's
+     first point mirrors the drawing whenever that point is the right-hand end — the fence
+     would be correct and still be the wrong way round against the plan and the 3D view. */
+  const head = pl.pts[0], tail = pl.pts[pl.pts.length-1];
+  const flip = !pl.closed && (Math.abs(tail.x - head.x) > 1e-9 ? tail.x < head.x
+                                                               : tail.y < head.y);
+  if (flip){
+    for (const q of parts) q.x = total - q.x - (q.k === 'corner' ? 0 : q.w);
+    for (let n = 0; n < stations.length; n++) stations[n] = total - stations[n];
+    for (const q of bays){ const a2 = q.a; q.a = total - q.b; q.b = total - a2; }
+  }
+  const notIncluded = pl.excludeMaterials ? ['fence not included in BOM']
+    : [pl.excludeRails ? 'rails not included in BOM' : '',
+       pl.excludePalings && mat.style !== 'rail' ? 'palings not included in BOM' : '']
+      .filter(Boolean);
+  return { len: total, height: H + (hr.on ? hr.t : 0), fenceHeight: H, flipped: flip,
+           notIncluded, bays, gateOnly: segsOf(pl).every(([, a]) => !!a.gateAfter),
+           stations: [...new Set(stations.map(x => Math.round(x*1e4)/1e4))].sort((p,q) => p-q),
+           parts, mat };
 }
 // Midpoint offset to a chosen side of a directed segment in plan coordinates.
 function segmentSideMid(a, b, off, side='left'){
@@ -4139,42 +4282,64 @@ function dimSide3(A, B2, avoid){
 }
 const CHAIN_OFF = DIM.off, COL_STEP = 1.05, MIN_DIM_PX = 26, MIN_CHAIN_PX = 12;
 const DIM_FONT = '12px system-ui';                      // the font renderDimension writes in
-// One dimension between two world points, placed clear of `avoid`. It must have room for its
-// own value or it waits for a closer look, rather than printing a label over its neighbour.
-function dim3(B, p, q, txt, off, avoid){
-  const A = screen3(B, p[0], p[1], p[2]), Bs = screen3(B, q[0], q[1], q[2]);
+/* Every horizontal edge up a fence, ground to cap: the ground gap, each rail, each gap
+   between them, the top, and the handrail. A gate is its own thing — the leaf hangs clear of
+   the ground on its own two rails, and the cap skips gate openings. Shared so the 3D chain
+   and the elevation on paper cannot describe different fences. */
+function verticalChainBounds(mat, H, isGate){
+  const bounds = [0];
+  if (isGate){
+    const leaf = gateLeafBuild(H, mat);
+    bounds.push(leaf.bottom);
+    for (const ry of leaf.rails) bounds.push(ry - leaf.railW/2, ry + leaf.railW/2);
+  } else {
+    for (const ry of railYs(mat)){
+      if (ry + mat.railW/2 > H + 1e-6) break;
+      bounds.push(ry - mat.railW/2, ry + mat.railW/2);
+    }
+  }
+  bounds.push(H);
+  const hr = hrOf(mat);
+  if (hr.on && !isGate) bounds.push(H + hr.t);
+  return bounds;
+}
+// One dimension between two points, placed clear of `avoid`. It must have room for its own
+// value or it waits for a closer look, rather than printing a label over its neighbour.
+// `to` projects a point to the screen, so the 3D scene and the drawing sheet share this.
+function dimAt(to, p, q, txt, off, avoid, k = 1){
+  const A = to(p), Bs = to(q);
   if (!A || !Bs) return;
-  ctx.font = DIM_FONT;
-  if (Math.hypot(Bs.x-A.x, Bs.y-A.y) < Math.max(MIN_DIM_PX, ctx.measureText(txt).width + 10)) return;
-  const away = avoid ? screen3(B, avoid[0], avoid[1], avoid[2]) : null;
-  renderDimension(A, Bs, txt, off * dimSide3(A, Bs, away));
+  ctx.font = dimFont(k);
+  if (Math.hypot(Bs.x-A.x, Bs.y-A.y) < Math.max(MIN_DIM_PX*k, ctx.measureText(txt).width + 10*k)) return;
+  renderDimension(A, Bs, txt, off * dimSide3(A, Bs, avoid ? to(avoid) : null), {scale:k});
 }
 /* A chain of adjacent parts — bays along the run, rail gaps up the post. Rail gaps are
    150 mm against a 45 mm label, so a single row of them would either overlap or drop out.
    Instead the chain works out how many columns its tightest step needs and staggers into
    them, keeping every value — the gaps included — on screen and legible. Returns how far out
    it reached, so the overall dimension can stand clear of it. */
-function dimChain(B, items, avoid){
+function dimChain(to, items, avoid, k = 1){
   const drawn = [];
   for (const it of items){
-    const A = screen3(B, it.p[0], it.p[1], it.p[2]), Bs = screen3(B, it.q[0], it.q[1], it.q[2]);
+    const A = to(it.p), Bs = to(it.q);
     if (!A || !Bs) continue;
     const span = Math.hypot(Bs.x-A.x, Bs.y-A.y);
-    if (span >= MIN_CHAIN_PX) drawn.push({ A, Bs, span, txt: it.txt });
+    if (span >= MIN_CHAIN_PX*k) drawn.push({ A, Bs, span, txt: it.txt });
   }
-  if (!drawn.length) return CHAIN_OFF;
-  ctx.font = DIM_FONT;
-  const widest = Math.max(...drawn.map(d => ctx.measureText(d.txt).width)) + 8;
+  if (!drawn.length) return CHAIN_OFF*k;
+  ctx.font = dimFont(k);
+  const widest = Math.max(...drawn.map(d => ctx.measureText(d.txt).width)) + 8*k;
   const tightest = Math.min(...drawn.map(d => d.span));
   const cols = Math.max(1, Math.min(3, Math.ceil(widest / tightest)));
-  const away = avoid ? screen3(B, avoid[0], avoid[1], avoid[2]) : null;
-  drawn.forEach((d, k) => renderDimension(d.A, d.Bs, d.txt,
-    CHAIN_OFF * (1 + (k % cols)*COL_STEP) * dimSide3(d.A, d.Bs, away)));
-  return CHAIN_OFF * (1 + (cols-1)*COL_STEP);
+  const away = avoid ? to(avoid) : null;
+  drawn.forEach((d, n) => renderDimension(d.A, d.Bs, d.txt,
+    CHAIN_OFF*k * (1 + (n % cols)*COL_STEP) * dimSide3(d.A, d.Bs, away), {scale:k}));
+  return CHAIN_OFF*k * (1 + (cols-1)*COL_STEP);
 }
 function drawFenceDims3(B){
   const pl = showFenceDims3 ? selectedFence3() : null;
   if (!pl || pl.hidden3d || !pl.pts.length) return;
+  const to = p => screen3(B, p[0], p[1], p[2]);
   const mat = pl.mat || state.mat, H = fenceHeightOf(mat), u = state.unit;
   const spacing = Math.max(0.1, mat.spacing);
   const centre = pl.pts.reduce((s,q) => ({x:s.x+q.x/pl.pts.length, y:s.y+q.y/pl.pts.length}),
@@ -4191,8 +4356,8 @@ function drawFenceDims3(B){
     const bays = posts.length > 2 ? posts.slice(0,-1).map((q,k) => ({
       p:[q.x,0,q.y], q:[posts[k+1].x,0,posts[k+1].y],
       txt: fmtLen(segLen(q, posts[k+1]), u) })) : [];
-    const reach = dimChain(B, bays, overTop);
-    dim3(B, [a.x,0,a.y], [b.x,0,b.y], fmtLen(L, u), reach + CHAIN_OFF*1.6, overTop);
+    const reach = dimChain(to, bays, overTop);
+    dimAt(to, [a.x,0,a.y], [b.x,0,b.y], fmtLen(L, u), reach + CHAIN_OFF*1.6, overTop);
     // paling width and gap, measured on the top edge where nothing else is dimensioned.
     // build3 centres boards at pitch/2, 3*pitch/2 … and draws one only while that centre
     // lands on the run, so a short segment gets fewer boards — or none. Measure only the
@@ -4204,7 +4369,7 @@ function drawFenceDims3(B){
       if (3*pitch/2 <= L + 1e-9)
         boards.push({ p:along(s+mat.paling, H), q:along(s+mat.paling+mat.gap, H),
                       txt:fmtSmall(mat.gap, u) });
-      if (boards.length) dimChain(B, boards, along(s + mat.paling/2));
+      if (boards.length) dimChain(to, boards, along(s + mat.paling/2));
     }
   }
   if (H <= 0) return;
@@ -4231,25 +4396,12 @@ function drawFenceDims3(B){
   // rail spacing as a chain up the fence: ground to the first rail, each rail, each gap,
   // then the last rail to the top. A gate leaf is measured as the leaf that was built —
   // its ground clearance and its own two rails, not the panel rails it doesn't carry.
-  const bounds = [0];
-  if (station.gate){
-    const leaf = gateLeafBuild(H, mat);
-    bounds.push(leaf.bottom);
-    for (const ry of leaf.rails) bounds.push(ry - leaf.railW/2, ry + leaf.railW/2);
-  } else {
-    for (const ry of railYs(mat)){
-      if (ry + mat.railW/2 > H + 1e-6) break;
-      bounds.push(ry - mat.railW/2, ry + mat.railW/2);
-    }
-  }
-  bounds.push(H);
-  const hr = hrOf(mat);
-  if (hr.on && !station.gate) bounds.push(H + hr.t);   // the cap continues the chain, but skips gates
+  const bounds = verticalChainBounds(mat, H, station.gate);
   const rungs = bounds.length > 2 ? bounds.slice(0,-1).flatMap((y,k) =>
     bounds[k+1] - y > 1e-6                      // an odd mat can stack two edges at one height
       ? [{ p: at(y), q: at(bounds[k+1]), txt: fmtSmall(bounds[k+1]-y, u) }] : []) : [];
-  const reach = dimChain(B, rungs, keepOff);
-  dim3(B, at(0), at(H), fmtLen(H, u), reach + CHAIN_OFF*1.6, keepOff);
+  const reach = dimChain(to, rungs, keepOff);
+  dimAt(to, at(0), at(H), fmtLen(H, u), reach + CHAIN_OFF*1.6, keepOff);
 }
 function drawFenceLabels3(B){
   fenceLabels3 = [];
@@ -4331,6 +4483,305 @@ function paint3d(){
   drawFenceDims3(B);                                         // under the labels, over the fence
   drawFenceLabels3(B);
   drawCube(B);
+}
+
+/* =====================================================================
+   Drawing sheet — the elevations, on paper
+   A sheet is millimetres of paper, so the plan's own pan/zoom drives it: `view` holds mm
+   instead of metres while the sheet is up, and every dimension is the same renderDimension
+   the plan and the 3D view draw.
+   ===================================================================== */
+const SHEET = { w:297, h:210, margin:10, gap:6 };            // A4 landscape, in mm
+const SCALES = [5,10,20,25,50,100,200,500,1000,2000];        // 1:n, smallest that fits wins
+const SHEET_INK = '#111827', SHEET_LINE = '#9ca3af';
+const SECTION_MIN_MM = 3.2;   // paper a chain step needs before its arrows are worth drawing
+const P2S = (x, y) => ({ x:(x - view.x)*view.s, y:(y - view.y)*view.s });
+function sheetFences(){
+  return state.polys.map((pl, i) => i).filter(i =>
+    !state.polys[i].hidden3d && state.polys[i].pts.length > 1);
+}
+/* Annotations belong to the paper, not the screen: a fixed height of text whatever the zoom.
+   Every threshold in dimAt/dimChain scales with it, so the sheet carries the same dimensions
+   at every zoom — and the same ones will be in the PDF. */
+const ANNOT_MM = 3.1;          // font size on paper; ~2.2 mm cap height, ISO-ish for A4
+const annotScale = () => ANNOT_MM*view.s/12;
+/* One elevation per page, at the largest standard scale that fits it. A run's fine build-up
+   cannot share that page: a 75 mm rail against a 10.5 m fence is 1.5 mm of paper at 1:50,
+   and no arrangement makes that legible. It gets a section page of its own, drawn at a scale
+   where its tightest step still has room — which is what a drawing office would do. */
+function sheetLayout(){
+  const room = { w: SHEET.w - 2*SHEET.margin - 16, h: SHEET.h - 2*SHEET.margin - 16 };
+  const pages = [];
+  // pages are given page-relative geometry; placing one drops it onto its own sheet
+  const place = page => {
+    page.top = pages.length*(SHEET.h + SHEET.gap*2);
+    page.base += page.top;
+    pages.push(page);
+  };
+  for (const i of sheetFences()){
+    const ev = elevationParts(state.polys, i);
+    let den = SCALES[SCALES.length-1];
+    for (const d of SCALES){
+      const k = 1000/d;
+      if (ev.len*k <= room.w && ev.height*k <= room.h*0.62){ den = d; break; }
+    }
+    const k = 1000/den;
+    place({ kind:'elevation', i, ev, den, k,
+            x: SHEET.margin + 8 + Math.max(0, (room.w - ev.len*k)/2),
+            base: SHEET.margin + 8 + (room.h + ev.height*k)/2 });
+    // the section is through one bay, so it is that bay's build-up — a gate opening in an
+    // otherwise ordinary run is still a leaf, and a leaf has none of the panel's rails
+    const bay = widestBay(ev), postW = postSizeOf(ev.mat);
+    const bounds = verticalChainBounds(ev.mat, ev.fenceHeight, bay.gate);
+    const steps = bounds.slice(0,-1).map((y,n) => bounds[n+1]-y).filter(v => v > 1e-6);
+    if (!steps.length) continue;
+    const tightest = Math.min(...steps), tall = bounds[bounds.length-1];
+    const win = { lo: bay.a - postW*0.75, hi: bay.b + postW*0.75 };
+    const wide = win.hi - win.lo;
+    // largest scale that fits the bay on the page and leaves the tightest step room for its
+    // arrows; a tall fence with a 45 mm cap satisfies no scale, so fitting wins and the
+    // finest step drops rather than the section collapsing to 1:2000
+    const fits = d => tall*(1000/d) <= room.h*0.84 && wide*(1000/d) <= room.w*0.78;
+    const sden = SCALES.find(d => fits(d) && tightest*(1000/d) >= SECTION_MIN_MM)
+              ?? SCALES.find(fits) ?? SCALES[SCALES.length-1];
+    const sk = 1000/sden;
+    place({ kind:'section', i, ev, bounds, bay, win, den:sden, k:sk,
+            x: SHEET.margin + 8 + Math.max(0, (room.w - wide*sk)/2),
+            base: SHEET.margin + 8 + (room.h + tall*sk)/2 });
+  }
+  return { pages };
+}
+/* A section is taken through a full bay — post, span, post — not through a post on its own.
+   The widest bay is the representative one: a short remainder bay at the end of a run says
+   nothing about how the fence is built. */
+function widestBay(ev){
+  let best = { a:0, b:ev.len, gate:ev.gateOnly }, span = -1;
+  for (const bay of ev.bays)
+    if (bay.b - bay.a > span){ span = bay.b - bay.a; best = bay; }
+  return best;
+}
+function sheetRect(x, y, w, h, fill, off){                    // paper mm rectangle, ground-up y
+  const a = P2S(x, y), b = P2S(x+w, y-h);
+  ctx.save();
+  ctx.fillStyle = off ? '#ffffff' : fill;                     // excluded work: reference only
+  ctx.strokeStyle = off ? SHEET_LINE : SHEET_INK; ctx.lineWidth = 1;
+  if (off) ctx.setLineDash([3,2]);
+  ctx.beginPath(); ctx.rect(a.x, b.y, b.x-a.x, a.y-b.y);
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+function paintSheet(){
+  const u = state.unit, k = annotScale();
+  for (const pg of sheetLayout().pages) paintSheetPage(pg, u, k);
+}
+function paintSheetPage(pg, u, k){ withPaperDims(() => paintSheetPageInk(pg, u, k)); }
+function paintSheetPageInk(pg, u, k){
+  const page = P2S(0, pg.top), far = P2S(SHEET.w, pg.top + SHEET.h);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(page.x, page.y, far.x-page.x, far.y-page.y);
+  ctx.strokeStyle = SHEET_LINE; ctx.lineWidth = 1;
+  ctx.strokeRect(page.x, page.y, far.x-page.x, far.y-page.y);
+  const m = SHEET.margin/2;
+  const b0 = P2S(m, pg.top + m), b1 = P2S(SHEET.w - m, pg.top + SHEET.h - m);
+  ctx.strokeRect(b0.x, b0.y, b1.x-b0.x, b1.y-b0.y);           // border frame
+  if (pg.kind === 'section') paintSection(pg, u, k); else paintElevation(pg, u, k);
+  // the two things a drawing is worthless without: what it is, and what scale it is at
+  const foot = P2S(SHEET.w - m - 2, pg.top + SHEET.h - m - 3);
+  ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`;
+  ctx.textAlign = 'right'; ctx.fillStyle = SHEET_INK;
+  ctx.fillText(`${bkCurrent || 'Fence drawing'} · ${fenceName(state.polys[pg.i], pg.i)}` +
+               ` · ${pg.kind} 1:${pg.den} at A4 · ${u === 'm' ? 'metres' : 'feet'}`,
+               foot.x, foot.y);
+  ctx.textAlign = 'left';
+}
+/* ---- PDF export ----
+   The sheet is already true A4 with paper-sized annotations, so a PDF is the same drawing at
+   print resolution: paint each page into an offscreen canvas the size of the paper, then wrap
+   those as JPEGs in a hand-written PDF. DCTDecode takes a JPEG's own bytes verbatim, so there
+   is nothing to compress and no font to embed — and no second renderer to keep in step.
+   ponytail: raster pages. Vector would need the whole sheet redrawn through a PDF device;
+   worth it only if someone needs to select text, or to zoom past PDF_DPI in the file. */
+const PDF_DPI = 200;
+const PT_PER_MM = 72/25.4;
+function pdfBytes(chunks){                    // latin1 strings and raw arrays into one buffer
+  let n = 0;
+  for (const c of chunks) n += typeof c === 'string' ? c.length : c.length;
+  const out = new Uint8Array(n);
+  let at = 0;
+  for (const c of chunks){
+    if (typeof c === 'string') for (let i = 0; i < c.length; i++) out[at++] = c.charCodeAt(i) & 0xff;
+    else { out.set(c, at); at += c.length; }
+  }
+  return out;
+}
+function jpegBytes(canvas){
+  const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+  const bin = atob(b64), out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function buildPdf(pages, wMM, hMM){           // pages: [{jpeg, w, h}]
+  const W = (wMM*PT_PER_MM).toFixed(2), H = (hMM*PT_PER_MM).toFixed(2);
+  const objs = [];                            // 1-based; body written in order
+  const kids = pages.map((_, i) => `${3 + i*3} 0 R`).join(' ');
+  objs.push('<< /Type /Catalog /Pages 2 0 R >>');
+  objs.push(`<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`);
+  pages.forEach((pg, i) => {
+    const img = 5 + i*3, content = 4 + i*3;
+    objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] ` +
+              `/Resources << /XObject << /Im0 ${img} 0 R >> >> /Contents ${content} 0 R >>`);
+    const stream = `q ${W} 0 0 ${H} 0 0 cm /Im0 Do Q`;
+    objs.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+    objs.push({ dict: `<< /Type /XObject /Subtype /Image /Width ${pg.w} /Height ${pg.h} ` +
+                      `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode ` +
+                      `/Length ${pg.jpeg.length} >>`, data: pg.jpeg });
+  });
+  const chunks = ['%PDF-1.4\n'], offsets = [];
+  let at = chunks[0].length;
+  objs.forEach((o, i) => {
+    offsets.push(at);
+    const head = `${i+1} 0 obj\n`;
+    if (typeof o === 'string'){
+      const body = head + o + '\nendobj\n';
+      chunks.push(body); at += body.length;
+    } else {
+      const pre = head + o.dict + '\nstream\n', post = '\nendstream\nendobj\n';
+      chunks.push(pre, o.data, post); at += pre.length + o.data.length + post.length;
+    }
+  });
+  const xref = at;
+  let table = `xref\n0 ${objs.length+1}\n0000000000 65535 f \n`;
+  for (const off of offsets) table += String(off).padStart(10, '0') + ' 00000 n \n';
+  table += `trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  chunks.push(table);
+  return pdfBytes(chunks);
+}
+function renderPdfPage(pg, u, wPx, hPx){
+  const off = document.createElement('canvas');
+  off.width = wPx; off.height = hPx;
+  const screen = { ctx, cw, ch, view };       // the live canvas, parked
+  ctx = off.getContext('2d');
+  cw = wPx; ch = hPx;
+  view = { x:0, y:pg.top, s:wPx/SHEET.w };    // this page fills the paper, in mm
+  try { paintSheetPage(pg, u, annotScale()); }
+  finally { ctx = screen.ctx; cw = screen.cw; ch = screen.ch; view = screen.view; }
+  return off;
+}
+function exportSheetPdf(){
+  const pages = sheetLayout().pages;
+  if (!pages.length){ setBkStatus('Nothing to draw yet.', 'error'); return; }
+  const px = Math.round(SHEET.w*PDF_DPI/25.4), py = Math.round(SHEET.h*PDF_DPI/25.4);
+  const rendered = pages.map(pg => {
+    const canvas = renderPdfPage(pg, state.unit, px, py);
+    return { jpeg: jpegBytes(canvas), w: px, h: py };
+  });
+  const blob = new Blob([buildPdf(rendered, SHEET.w, SHEET.h)], {type:'application/pdf'});
+  const name = `${bkCurrent || 'fence-drawing'}-elevations.pdf`;
+  const url = URL.createObjectURL(blob), link = document.createElement('a');
+  link.href = url; link.download = name; link.rel = 'noopener';
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setBkStatus(`Saved ${pages.length} page${pages.length === 1 ? '' : 's'} as “${name}”.`, 'success');
+}
+function paintElevation(bl, u, k){
+  const { ev, x, base } = bl, mm = v => v*bl.k;
+  const fill = { post:'#cbd5e1', rail:'#e2e8f0', board:'#eef2f6', cap:'#cbd5e1', gate:'#f1f5f9' };
+  const at = (px, py) => [x + mm(px), base - mm(py)];         // metres → paper mm, y up
+  const toScreen = p => P2S(p[0], p[1]);
+  ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`;
+  ctx.fillStyle = SHEET_INK;
+  const name = P2S(x, base - mm(ev.height) - 1.5);
+  ctx.fillText(fenceName(state.polys[bl.i], bl.i), name.x, name.y);
+  sheetNotIncluded(ev, x, base - mm(ev.height) - 1.5);
+  for (const p of ev.parts){                                  // boards first, posts last
+    if (p.k === 'corner' || p.k === 'gate') continue;
+    sheetRect(x + mm(p.x), base - mm(p.y), mm(p.w), mm(p.h), fill[p.k] || '#e2e8f0', p.off);
+  }
+  for (const p of ev.parts){
+    if (p.k === 'gate'){
+      sheetRect(x + mm(p.x), base - mm(p.y), mm(p.w), mm(p.h), fill.gate, p.off);
+      for (const ry of p.rails)
+        sheetRect(x + mm(p.x), base - mm(ry - p.railW/2), mm(p.w), mm(p.railW), fill.rail,
+                  p.off || p.railsOff);
+    }
+    if (p.k === 'corner'){                                    // a fold in the developed view
+      const a = P2S(x + mm(p.x), base), b = P2S(x + mm(p.x), base - mm(ev.height) - 2);
+      ctx.save(); ctx.setLineDash([3,3]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
+    }
+  }
+  const ground = P2S(x - 3, base), groundEnd = P2S(x + mm(ev.len) + 3, base);
+  ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(ground.x, ground.y); ctx.lineTo(groundEnd.x, groundEnd.y); ctx.stroke();
+  // post spacing along the bottom, with the whole run standing clear beneath it
+  const bays = ev.stations.slice(0,-1).map((st, j) => ({
+    p: at(st, 0), q: at(ev.stations[j+1], 0), txt: fmtLen(ev.stations[j+1]-st, u) }));
+  const reach = ev.stations.length > 2 ? dimChain(toScreen, bays, at(0, ev.height/2), k) : CHAIN_OFF*k;
+  dimAt(toScreen, at(0,0), at(ev.len,0), fmtLen(ev.len, u), reach + CHAIN_OFF*k*1.6,
+        at(0, ev.height/2), k);
+  // the height at the far end; the build-up behind it is dimensioned on the section page
+  dimAt(toScreen, at(ev.len, 0), at(ev.len, ev.fenceHeight), fmtLen(ev.fenceHeight, u),
+        CHAIN_OFF*k, at(ev.len/2, ev.fenceHeight/2), k);
+  const boards = ev.parts.filter(p => p.k === 'board').sort((a2,b2) => a2.x-b2.x).slice(0,2);
+  if (boards.length){                                          // the two boards actually drawn
+    const top = ev.fenceHeight, items = [
+      { p: at(boards[0].x, top), q: at(boards[0].x+boards[0].w, top), txt: fmtSmall(boards[0].w, u) }];
+    if (boards.length > 1)
+      items.push({ p: at(boards[0].x+boards[0].w, top), q: at(boards[1].x, top),
+                   txt: fmtSmall(boards[1].x - boards[0].x - boards[0].w, u) });
+    dimChain(toScreen, items, at(boards[0].x, 0), k);
+  }
+}
+/* The build-up, drawn large enough to dimension: one post with its rails and cap, and the
+   whole vertical chain beside it. The elevation says how long the fence is; this says how
+   it goes together. */
+/* What the take-off leaves out, said on the drawing in the take-off's own words — dashed
+   geometry alone would leave a reader guessing which trade owns it. */
+function sheetNotIncluded(ev, x, yMM){
+  if (!ev.notIncluded.length) return;
+  const at = P2S(x, yMM - 3.4);
+  ctx.save();
+  ctx.font = `${(ANNOT_MM*view.s*0.9).toFixed(2)}px ${PAPER_DIM.font}`; ctx.fillStyle = SHEET_LINE;
+  ctx.fillText('Dashed: ' + ev.notIncluded.join(' · '), at.x, at.y);
+  ctx.restore();
+}
+function paintSection(pg, u, k){
+  const { ev, bounds, bay, win, x, base } = pg, mm = v => v*pg.k;
+  const at = (px, py) => [x + mm(px - win.lo), base - mm(py)];   // window-relative paper mm
+  const toScreen = p => P2S(p[0], p[1]);
+  const fill = { post:'#cbd5e1', rail:'#e2e8f0', board:'#eef2f6', cap:'#cbd5e1', gate:'#f1f5f9' };
+  const top = bounds[bounds.length-1];
+  ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`; ctx.fillStyle = SHEET_INK;
+  const title = P2S(x, base - mm(top) - 4);
+  ctx.fillText(`Section — ${fenceName(state.polys[pg.i], pg.i)}  1:${pg.den}`, title.x, title.y);
+  sheetNotIncluded(ev, x, base - mm(top) - 4);
+  const clip = p => ({ lo: Math.max(p.x, win.lo), hi: Math.min(p.x + p.w, win.hi) });
+  for (const p of ev.parts){                                     // the elevation, cropped
+    if (p.k === 'corner') continue;
+    const c = clip(p);
+    if (c.hi <= c.lo + 1e-9) continue;
+    if (p.k === 'gate'){
+      sheetRect(x + mm(c.lo - win.lo), base - mm(p.y), mm(c.hi-c.lo), mm(p.h), fill.gate, p.off);
+      for (const ry of p.rails)
+        sheetRect(x + mm(c.lo - win.lo), base - mm(ry - p.railW/2), mm(c.hi-c.lo),
+                  mm(p.railW), fill.rail, p.off || p.railsOff);
+      continue;
+    }
+    sheetRect(x + mm(c.lo - win.lo), base - mm(p.y), mm(c.hi-c.lo), mm(p.h),
+              fill[p.k] || '#e2e8f0', p.off);
+  }
+  const g0 = P2S(x - 3, base), g1 = P2S(x + mm(win.hi - win.lo) + 3, base);
+  ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(g0.x, g0.y); ctx.lineTo(g1.x, g1.y); ctx.stroke();
+  // the build-up up the right-hand post, the height outside it, the span underneath
+  const inside = at((bay.a+bay.b)/2, top/2);
+  const rungs = bounds.slice(0,-1).flatMap((y, n) => bounds[n+1] - y > 1e-6
+    ? [{ p: at(win.hi, y), q: at(win.hi, bounds[n+1]), txt: fmtSmall(bounds[n+1]-y, u) }] : []);
+  const up = dimChain(toScreen, rungs, inside, k);
+  dimAt(toScreen, at(win.hi, 0), at(win.hi, ev.fenceHeight), fmtLen(ev.fenceHeight, u),
+        up + CHAIN_OFF*k*1.6, inside, k);
+  dimAt(toScreen, at(bay.a, 0), at(bay.b, 0), fmtLen(bay.b - bay.a, u), CHAIN_OFF*k*1.6,
+        at((bay.a+bay.b)/2, top), k);
 }
 
 /* ---- orientation cube: which way am I looking, and click a face to go there ----
@@ -4447,7 +4898,24 @@ function syncFullscreen(){
 }
 document.addEventListener('fullscreenchange', syncFullscreen);
 document.addEventListener('webkitfullscreenchange', syncFullscreen);
+function fitSheet(){                       // frame the first page; the rest are a drag away
+  view.s = Math.min(cw/SHEET.w, ch/SHEET.h)*0.96;
+  view.x = SHEET.w/2 - cw/2/view.s; view.y = SHEET.h/2 - ch/2/view.s;
+}
+function setSheetView(on){
+  if (on === modeSheet) return;
+  if (on && mode3d) set3d(false);
+  modeSheet = on;
+  document.body.classList.toggle('sheetview', on);
+  $('bSheet').classList.toggle('primary', on);
+  $('bSheet').textContent = on ? 'Plan' : 'Sheet';
+  if (on){ planView = {...view}; fitSheet(); }
+  else if (planView){ view = planView; planView = null; }
+  hover = null; sel = on ? null : sel;
+  updateHint(); updateAll();
+}
 function set3d(on){
+  if (on && modeSheet) setSheetView(false);
   mode3d = on;
   if (!on){ setAutoOrbit(false); fenceLabels3 = []; }
   document.body.classList.toggle('d3', on);
@@ -4942,6 +5410,7 @@ cv.addEventListener('pointerdown', e => {
     pend = null; drag = null;
     return;
   }
+  if (modeSheet){ drag = { t:'pan' }; return; }   // the sheet is paper: move it, don't edit it
   if (readOnly){
     pend = { hit:pick(e.offsetX,e.offsetY), x:e.offsetX, y:e.offsetY, moved:false };
     if (e.button === 2) drag = {t:'pan'};
@@ -5263,6 +5732,9 @@ window.addEventListener('keydown', e => {
 // truncated has told the reader nothing.
 function hintText(drawing){
   const phone = onPhone();
+  if (modeSheet)
+    return phone ? 'Elevations · drag to move · pinch to zoom'
+                 : 'Elevations of every fence at true length · drag to move the sheet · scroll or pinch to zoom.';
   if (mode3d)
     return phone
       ? 'Drag to orbit · two fingers to move · pinch to zoom'
@@ -5296,7 +5768,7 @@ function hintText(drawing){
 }
 function updateHint(){
   const drawing = !!drawTarget();
-  cv.classList.toggle('selmode', !drawing || mode3d);
+  cv.classList.toggle('selmode', !drawing || mode3d || modeSheet);
   const el = $('hint'), text = hintText(drawing);
   if (el.textContent === text) return;   // a redraw is not new advice — don't restart the timer
   el.textContent = text;
@@ -5368,7 +5840,7 @@ $('showAllTotals').addEventListener('change', e => {
 const camZoom = f => { cam.dist *= f; clampCam(); paint(); };
 $('bZoomIn').addEventListener('click', () => mode3d ? camZoom(1/1.3) : zoomAt(cw/2, ch/2, 1.3));
 $('bZoomOut').addEventListener('click', () => mode3d ? camZoom(1.3) : zoomAt(cw/2, ch/2, 1/1.3));
-$('bFit').addEventListener('click', () => mode3d ? fit3() : fitView());
+$('bFit').addEventListener('click', () => mode3d ? fit3() : modeSheet ? (fitSheet(), paint()) : fitView());
 $('bFull').addEventListener('click', toggleFullscreen);
 $('bOrbit').addEventListener('click', () => setAutoOrbit(!autoOrbit));
 $('bOrbitDir').addEventListener('click', e => {
@@ -5386,6 +5858,8 @@ $('bOrbitSpeed').addEventListener('click', () => {
   setOrbitSpeed(next || speeds[0]);
 });
 $('b3d').addEventListener('click', () => set3d(!mode3d));
+$('bSheet').addEventListener('click', () => setSheetView(!modeSheet));
+$('bPdf').addEventListener('click', exportSheetPdf);
 
 // materials inputs
 $('iFenceName').addEventListener('keydown', e => {

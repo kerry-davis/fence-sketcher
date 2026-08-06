@@ -7,7 +7,7 @@ const html = fs.readFileSync(new URL('../fence-fable.html', import.meta.url), 'u
 test('3D measures the selected fence with the plan\'s own dimension renderer', () => {
   // reusing renderDimension is the point: one dimension style, not two that drift
   assert.match(html, /function drawFenceDims3\(B\)\{/);
-  assert.match(html, /renderDimension\(A, Bs, txt, off \* dimSide3\(A, Bs, away\)\);/);
+  assert.match(html, /renderDimension\(A, Bs, txt, off \* dimSide3\(A, Bs, avoid \? to\(avoid\) : null\), \{scale:k\}\);/);
   assert.doesNotMatch(html, /function drawDimension3|dimArrow3/);   // no second implementation
   // only a selected fence measures itself, and never a hidden one
   assert.match(html, /const selectedFence3 = \(\) =>\s*\n?\s*sel && \(sel\.t === 'seg' \|\| sel\.t === 'pt'\) \? state\.polys\[sel\.p\] : null;/);
@@ -23,7 +23,8 @@ test('3D measures every part of the fence, not just its outline', () => {
   // rail spacing: a chain of the drawn rail edges, so the ground gap, each rail and each
   // gap between them all read off — the cap continues the same chain
   assert.match(html, /for \(const ry of railYs\(mat\)\)\{\s*\n\s*if \(ry \+ mat\.railW\/2 > H \+ 1e-6\) break;\s*\n\s*bounds\.push\(ry - mat\.railW\/2, ry \+ mat\.railW\/2\);/);
-  assert.match(html, /if \(hr\.on && !station\.gate\) bounds\.push\(H \+ hr\.t\);/);
+  assert.match(html, /if \(hr\.on && !isGate\) bounds\.push\(H \+ hr\.t\);/);
+  assert.match(html, /const bounds = verticalChainBounds\(mat, H, station\.gate\);/);
   // taken at mid-span of the run facing the camera, not at an end post
   assert.match(html, /const m = \{ x:\(a\.x\+b\.x\)\/2, y:\(a\.y\+b\.y\)\/2 \};/);
   assert.match(html, /station = \{ m, z:c\[2\], gate \};/);
@@ -37,10 +38,10 @@ test('3D measures every part of the fence, not just its outline', () => {
   assert.match(html, /if \(3\*pitch\/2 <= L \+ 1e-9\)/);
   assert.match(html, /txt:fmtSmall\(mat\.paling, u\)/);
   assert.match(html, /txt:fmtSmall\(mat\.gap, u\)/);
-  assert.match(html, /if \(boards\.length\) dimChain\(B, boards, along\(s \+ mat\.paling\/2\)\);/);
+  assert.match(html, /if \(boards\.length\) dimChain\(to, boards, along\(s \+ mat\.paling\/2\)\);/);
   // the whole run and height stand clear of however far the chain reached
-  assert.match(html, /dim3\(B, \[a\.x,0,a\.y\], \[b\.x,0,b\.y\], fmtLen\(L, u\), reach \+ CHAIN_OFF\*1\.6, overTop\);/);
-  assert.match(html, /dim3\(B, at\(0\), at\(H\), fmtLen\(H, u\), reach \+ CHAIN_OFF\*1\.6, keepOff\);/);
+  assert.match(html, /dimAt\(to, \[a\.x,0,a\.y\], \[b\.x,0,b\.y\], fmtLen\(L, u\), reach \+ CHAIN_OFF\*1\.6, overTop\);/);
+  assert.match(html, /dimAt\(to, at\(0\), at\(H\), fmtLen\(H, u\), reach \+ CHAIN_OFF\*1\.6, keepOff\);/);
 });
 
 test('a gate is measured as the leaf that was built, not as a fence panel', () => {
@@ -49,8 +50,9 @@ test('a gate is measured as the leaf that was built, not as a fence panel', () =
   assert.match(html, /const built = gateLeafBuild\(H, mat\), bottom = built\.bottom, leafH = built\.leafH;/);
   assert.match(html, /for \(const ry of built\.rails\)\s*\n\s*pushBox\(F,mid\.x,ry,mid\.y,leaf\.len\/2,mat\.railW\/2/);
   assert.doesNotMatch(html, /bottom\+leafH\*0\.28,bottom\+leafH\*0\.72/);   // no second copy
-  // the chain: ground clearance, then the leaf's own rails
-  assert.match(html, /if \(station\.gate\)\{\s*\n\s*const leaf = gateLeafBuild\(H, mat\);\s*\n\s*bounds\.push\(leaf\.bottom\);/);
+  // the chain: ground clearance, then the leaf's own rails — one definition, shared with paper
+  assert.match(html, /if \(isGate\)\{\s*\n\s*const leaf = gateLeafBuild\(H, mat\);\s*\n\s*bounds\.push\(leaf\.bottom\);/);
+  assert.equal(html.match(/bounds\.push\(leaf\.bottom\);/g).length, 1);
   // a panel is preferred as the station; a gate-only run has nothing else
   assert.match(html, /if \(!station \|\| \(station\.gate && !gate\) \|\| \(station\.gate === gate && c\[2\] < station\.z\)\)/);
 });
@@ -58,12 +60,12 @@ test('a gate is measured as the leaf that was built, not as a fence panel', () =
 test('a tight chain staggers into columns instead of dropping its small values', () => {
   // 150 mm rail gaps against a 45 mm label: one row would overlap, so the chain widens
   assert.match(html, /const cols = Math\.max\(1, Math\.min\(3, Math\.ceil\(widest \/ tightest\)\)\);/);
-  assert.match(html, /CHAIN_OFF \* \(1 \+ \(k % cols\)\*COL_STEP\) \* dimSide3\(d\.A, d\.Bs, away\)\)\);/);
+  assert.match(html, /CHAIN_OFF\*k \* \(1 \+ \(n % cols\)\*COL_STEP\) \* dimSide3\(d\.A, d\.Bs, away\), \{scale:k\}\)\);/);
   // a chain step only needs room for its arrows; a lone dimension must fit its own value
-  assert.match(html, /if \(span >= MIN_CHAIN_PX\) drawn\.push/);
-  assert.match(html, /Math\.hypot\(Bs\.x-A\.x, Bs\.y-A\.y\) < Math\.max\(MIN_DIM_PX, ctx\.measureText\(txt\)\.width \+ 10\)\) return;/);
+  assert.match(html, /if \(span >= MIN_CHAIN_PX\*k\) drawn\.push/);
+  assert.match(html, /Math\.hypot\(Bs\.x-A\.x, Bs\.y-A\.y\) < Math\.max\(MIN_DIM_PX\*k, ctx\.measureText\(txt\)\.width \+ 10\*k\)\) return;/);
   // and the chain reports its reach so nothing lands on top of it
-  assert.match(html, /return CHAIN_OFF \* \(1 \+ \(cols-1\)\*COL_STEP\);/);
+  assert.match(html, /return CHAIN_OFF\*k \* \(1 \+ \(cols-1\)\*COL_STEP\);/);
 });
 
 test('the 3D sizes toggle is on by default, persisted, and on the canvas', () => {

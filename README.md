@@ -234,6 +234,93 @@ follows, but a value you typed always wins.
 
 ---
 
+## The drawing sheet
+
+**Sheet** in the toolbar swaps the plan for a set of A4 pages — the drawing you take to
+site. One page per fence, each carrying a **developed elevation**: the run unrolled onto a
+vertical plane, so a corner is a fold rather than a break and every length on the page is a
+true length.
+
+Each page carries the fence at the largest standard scale that fits it — `1:5` through
+`1:2000` — so a 1.5 m gate is drawn at `1:20` while a 10.5 m run beside it is `1:50`, each
+legible in its own right. The scale, the fence name and the drawing name are printed at the
+foot of every page, because a drawing without them cannot be read.
+
+Each elevation reads the way the plan reads, left to right: a run whose first point is its
+right-hand end is developed from the other end, so the drawing is never a mirror of the
+plan and the 3D view.
+
+On the page: posts at their true stations, rails per bay, palings at their pitch, gate
+leaves clear of the ground, the handrail cap, and a dashed fold line at each corner. Below
+it, the post spacing chain and the overall run. Up the far end, the whole section — ground
+to the first rail, each rail, each gap between them, the top, the handrail — from the same
+`verticalChainBounds()` the 3D view measures with, and the fence height standing outside
+it. Board width and gap are taken off the two boards the elevation actually drew. The
+dimensions are the plan's own `renderDimension()`, so the sheet, the plan and the 3D view
+share one dimension style.
+
+**Print style.** On paper the dimensions are near-black on white in a plain sans
+(`Helvetica / Arial / Liberation Sans`) at 3.1 mm, and the break where a value crosses its
+own dimension line is a *cleared box*, not a stroked halo — stroking swells every glyph, and
+at that size the decimal point in `1.5 m` thickened into a dash. The screen keeps its own
+style, ink and halo from the canvas palette; `dimStyle` swaps between the two. The theme is
+not consulted for paper, which is what put a near-black outline round every value when a
+dark-theme drawing was exported.
+
+**The annotations belong to the paper, not the screen.** Text is 3.1 mm whatever the zoom,
+and every threshold in `dimAt()`/`dimChain()` scales with it, so the sheet carries exactly
+the same dimensions at every zoom — zooming magnifies the drawing rather than revealing
+more of it, and what you see is what a PDF will hold. The plan and the 3D view keep the
+opposite behaviour, where a value is a constant size on screen; `renderDimension()` takes
+an `opts.scale` and serves both.
+
+Because of that, a dimension has to *fit the paper*, and a run's fine build-up cannot fit
+its own elevation: a 75 mm rail against a 10.5 m fence is 1.5 mm of paper at 1:50. So each
+fence gets a **section page** after its elevation — the same elevation cropped to one whole
+bay, post to post, blown up to the largest scale where its tightest step still has room
+(typically 1:10 or 1:20). It carries the ground gap, every rail, every gap between them and
+the handrail up one post, the fence height outside that, and the bay span underneath. The
+representative bay is the widest one, since a short remainder bay at the end of a run says
+nothing about how the fence is built — and the chain follows **that bay's** build-up, so a
+gate opening wide enough to be the widest bay is sectioned as a leaf even though the run
+around it is ordinary fence. The elevation keeps the lengths; the section says how
+it goes together.
+
+The geometry comes from `elevationParts()`, which reads `postsAlong()`, `railYs()`,
+`gateLeafBuild()` and `materialPostEndFlags()` — the same helpers the plan, the 3D scene and
+the materials take-off use. An elevation therefore cannot show a fence that the model,
+the scene and the quantities do not agree on.
+
+**The BOM exclusions are part of the drawing.** Whatever `Include rails in BOM`,
+`Include palings in BOM` or the whole-fence materials tick leaves out is drawn **dashed and
+unfilled** — it still gets built, so the drawing still shows it — and the page carries the
+take-off's own words underneath the fence name: `Dashed: rails not included in BOM`. A gate
+leaf's body follows whichever exclusion clads it, since the body *is* the cladding. Drawing
+excluded work as though it were supplied would put the sheet at odds with the take-off it
+was priced from.
+
+The sheet is paper: dragging moves it, scroll or pinch zooms it, and nothing on it can be
+edited. Fences hidden from 3D are off the sheet too. Pages stack down the strip — drag past
+the bottom of one to reach the next.
+
+**PDF** writes the whole set out as a real file. Each page is painted into an offscreen
+canvas at 200 dpi by the same `paintSheetPage()` the screen uses — only the target canvas
+and the scale change — and the pages are wrapped in a hand-written PDF at A4 landscape
+(841.89 × 595.28 pt). The JPEGs go in under `/Filter /DCTDecode`, which takes their own
+bytes verbatim, so there is nothing to compress and no font to embed. No dependency, no
+second renderer, and because the sheet is already paper-locked the file is exactly what was
+on screen.
+
+`test/pdf-export.test.mjs` checks the structure the way a reader would, including that every
+xref offset lands on its own `N 0 obj` — the one part of a hand-written PDF that rots
+silently when an object is added or a stream length changes.
+
+ponytail: the pages are raster. Vector would mean redrawing the whole sheet through a PDF
+device, and is only worth it if someone needs selectable text or to zoom past 200 dpi in the
+file itself.
+
+Not there yet: a title block, a plan view on the sheet, and a BOM table with balloons.
+
 ## The 3D view
 
 Deliberately **not** WebGL or three.js. A fence is boxes — posts, rails,
