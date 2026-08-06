@@ -267,7 +267,7 @@ style, ink and halo from the canvas palette; `dimStyle` swaps between the two. T
 not consulted for paper, which is what put a near-black outline round every value when a
 dark-theme drawing was exported.
 
-**The annotations belong to the paper, not the screen.** Text is 2.6 mm whatever the zoom,
+**The annotations belong to the paper, not the screen.** Text is 3.1 mm whatever the zoom,
 and every threshold in `dimAt()`/`dimChain()` scales with it, so the sheet carries exactly
 the same dimensions at every zoom — zooming magnifies the drawing rather than revealing
 more of it, and what you see is what a PDF will hold. The plan and the 3D view keep the
@@ -281,7 +281,9 @@ bay, post to post, blown up to the largest scale where its tightest step still h
 (typically 1:10 or 1:20). It carries the ground gap, every rail, every gap between them and
 the handrail up one post, the fence height outside that, and the bay span underneath. The
 representative bay is the widest one, since a short remainder bay at the end of a run says
-nothing about how the fence is built. The elevation keeps the lengths; the section says how
+nothing about how the fence is built — and the chain follows **that bay's** build-up, so a
+gate opening wide enough to be the widest bay is sectioned as a leaf even though the run
+around it is ordinary fence. The elevation keeps the lengths; the section says how
 it goes together.
 
 The geometry comes from `elevationParts()`, which reads `postsAlong()`, `railYs()`,

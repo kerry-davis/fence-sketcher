@@ -177,7 +177,7 @@ test('the drawing reads the BOM exclusions', () => {
 test('the sheet carries the whole section, from the same definition 3D uses', () => {
   // one verticalChainBounds(), called by the 3D chain and by the elevation
   assert.equal(html.match(/function verticalChainBounds\(/g).length, 1);
-  assert.match(html, /const bounds = verticalChainBounds\(ev\.mat, ev\.fenceHeight, ev\.gateOnly\);/);
+  assert.match(html, /const bounds = verticalChainBounds\(ev\.mat, ev\.fenceHeight, bay\.gate\);/);
   assert.match(html, /const bounds = verticalChainBounds\(mat, H, station\.gate\);/);
   // a gate-only run is sectioned as a leaf
   assert.match(html, /gateOnly: segsOf\(pl\)\.every\(\(\[, a\]\) => !!a\.gateAfter\)/);
@@ -190,7 +190,7 @@ test('the sheet carries the whole section, from the same definition 3D uses', ()
 test('a section is taken through a whole bay, post to post', () => {
   // the representative bay is the widest: a short remainder bay says nothing about the build
   assert.match(html, /function widestBay\(ev\)\{/);
-  assert.match(html, /if \(w > span\)\{ span = w; best = \{ a:ev\.stations\[n\], b:ev\.stations\[n\+1\] \}; \}/);
+  assert.match(html, /for \(const bay of ev\.bays\)\s*\n\s*if \(bay\.b - bay\.a > span\)\{ span = bay\.b - bay\.a; best = bay; \}/);
   // the window takes in both posts, and the scale has to fit it as well as the height
   assert.match(html, /const win = \{ lo: bay\.a - postW\*0\.75, hi: bay\.b \+ postW\*0\.75 \};/);
   assert.match(html, /tall\*\(1000\/d\) <= room\.h\*0\.84 && wide\*\(1000\/d\) <= room\.w\*0\.78/);
@@ -198,6 +198,58 @@ test('a section is taken through a whole bay, post to post', () => {
   assert.match(html, /const clip = p => \(\{ lo: Math\.max\(p\.x, win\.lo\), hi: Math\.min\(p\.x \+ p\.w, win\.hi\) \}\);/);
   // and the span itself is dimensioned under it
   assert.match(html, /dimAt\(toScreen, at\(bay\.a, 0\), at\(bay\.b, 0\), fmtLen\(bay\.b - bay\.a, u\)/);
+});
+
+test('a gate bay is sectioned as a gate, even in a run that is mostly fence', () => {
+  const start = html.indexOf('function elevationParts(');
+  const end = html.indexOf('// Midpoint offset to a chosen side', start);
+  const context = { Math, Set, state:{ mat:{} } };
+  const helpers = `
+    const GATE_GAP=0.04, GATE_STILE=0.09, GATE_BOTTOM=0.08, POST_SIDE=0.1;
+    const segLen=(a,b)=>Math.hypot(b.x-a.x,b.y-a.y);
+    const segsOf=pl=>{const n=pl.closed?pl.pts.length:pl.pts.length-1;
+      return Array.from({length:n},(_,i)=>[i,pl.pts[i],pl.pts[(i+1)%pl.pts.length]]);};
+    const postSizeOf=m=>m.postSize??0.1, postTOf=m=>m.postT??0.1;
+    const fenceHeightOf=m=>m.height-(m.postDepth||0);
+    const hrOf=m=>({on:!!m.handrail,w:0.1,t:0.045});
+    const railYs=m=>{const d=m.railW+m.railGap,ys=[];for(let k=0;k<(m.rails|0);k++)
+      ys.push((m.botOff||0)+k*d+m.railW/2);return ys;};
+    const postsAlong=(a,b,sp,gate)=>{const L=segLen(a,b),n=gate?1:Math.max(1,Math.ceil(L/sp-1e-9)),o=[];
+      for(let k=0;k<=n;k++){const d=gate?L*k:Math.min(L,sp*k),t=L?d/L:0;
+        o.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});}return o;};
+    const materialPostEndFlags=()=>({start:true,end:true});
+    const gateLeafInset=m=>postSizeOf(m)/2+GATE_GAP+GATE_STILE/2;
+    const gateLeafLength=(L,m)=>Math.max(0,L-2*gateLeafInset(m));
+    const gateLeafBuild=(H,m)=>{const bottom=Math.min(GATE_BOTTOM,H*0.15),leafH=Math.max(0.2,H-bottom);
+      return {bottom,leafH,railW:0.15,rails:[bottom+leafH*0.28,bottom+leafH*0.72]};};
+  `;
+  vm.createContext(context);
+  vm.runInContext(helpers + html.slice(start, end) +
+                  html.slice(html.indexOf('function widestBay(ev){'),
+                             html.indexOf('function sheetRect(')), context);
+  const mat = { style:'rail', spacing:2.4, rails:2, railW:0.15, railGap:0.15, botOff:0.15,
+                height:1.8, postDepth:0.6, paling:0.1, gap:0.005 };
+  // 2.4 m of fence then a 3.2 m gate: the opening is the widest bay in the run
+  const mixed = context.elevationParts(
+    [{ pts:[{x:0,y:0},{x:2.4,y:0,gateAfter:true},{x:5.6,y:0}], closed:false, mat }], 0);
+  assert.equal(mixed.gateOnly, false);                    // the run is not a gate run
+  const bay = context.widestBay(mixed);
+  assert.deepEqual({ a:bay.a, b:bay.b, gate:bay.gate }, { a:2.4, b:5.6, gate:true });
+  // ...and the leaf really is in that bay, so the section must dimension a leaf
+  assert.ok(mixed.parts.some(p => p.k === 'gate' && p.x >= 2.4 && p.x + p.w <= 5.6));
+
+  // a narrow gate leaves an ordinary bay widest, and that one is not a gate
+  const narrow = context.elevationParts(
+    [{ pts:[{x:0,y:0},{x:2.4,y:0,gateAfter:true},{x:3.4,y:0}], closed:false, mat }], 0);
+  assert.equal(context.widestBay(narrow).gate, false);
+
+  // mirroring carries the flag and the span with it
+  const flipped = context.elevationParts(
+    [{ pts:[{x:5.6,y:0},{x:3.2,y:0,gateAfter:true},{x:0,y:0}], closed:false, mat }], 0);
+  assert.equal(flipped.flipped, true);
+  const fbay = context.widestBay(flipped);
+  assert.deepEqual({ a:+fbay.a.toFixed(4), b:+fbay.b.toFixed(4), gate:fbay.gate },
+                   { a:0, b:3.2, gate:true });
 });
 
 test('paper gets paper\'s ink, not the screen theme\'s', () => {

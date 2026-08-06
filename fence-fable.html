@@ -3876,7 +3876,7 @@ function elevationParts(polys, idx){
   const pl = polys[idx], mat = pl.mat || state.mat;
   const H = fenceHeightOf(mat), hr = hrOf(mat), spacing = Math.max(0.1, mat.spacing);
   const ends = materialPostEndFlags(polys, idx, mat);
-  const postW = postSizeOf(mat), parts = [], stations = [];
+  const postW = postSizeOf(mat), parts = [], stations = [], bays = [];
   /* The BOM exclusions are part of the drawing: a rail nobody is supplying still gets built,
      so it is drawn — but drawn as reference, and the page says so. Omitting it silently would
      make the sheet disagree with the take-off it was priced from. */
@@ -3898,9 +3898,12 @@ function elevationParts(polys, idx){
                               h:Math.max(0, H-leaf.bottom), rails:leaf.rails, railW:leaf.railW,
                               off:omitted.gate, railsOff:omitted.rail });
       stations.push(x0, x0+L);
+      bays.push({ a:x0, b:x0+L, gate:true });        // the opening is the bay here
     } else {
       const posts = postsAlong(a, b, spacing, false).map(q => x0 + segLen(a, q));
       stations.push(...posts);
+      for (let k = 0; k < posts.length-1; k++)
+        bays.push({ a:posts[k], b:posts[k+1], gate:false });
       if (mat.style === 'rail')
         for (let k = 0; k < posts.length-1; k++)
           for (const ry of railYs(mat)){
@@ -3937,13 +3940,14 @@ function elevationParts(polys, idx){
   if (flip){
     for (const q of parts) q.x = total - q.x - (q.k === 'corner' ? 0 : q.w);
     for (let n = 0; n < stations.length; n++) stations[n] = total - stations[n];
+    for (const q of bays){ const a2 = q.a; q.a = total - q.b; q.b = total - a2; }
   }
   const notIncluded = pl.excludeMaterials ? ['fence not included in BOM']
     : [pl.excludeRails ? 'rails not included in BOM' : '',
        pl.excludePalings && mat.style !== 'rail' ? 'palings not included in BOM' : '']
       .filter(Boolean);
   return { len: total, height: H + (hr.on ? hr.t : 0), fenceHeight: H, flipped: flip,
-           notIncluded, gateOnly: segsOf(pl).every(([, a]) => !!a.gateAfter),
+           notIncluded, bays, gateOnly: segsOf(pl).every(([, a]) => !!a.gateAfter),
            stations: [...new Set(stations.map(x => Math.round(x*1e4)/1e4))].sort((p,q) => p-q),
            parts, mat };
 }
@@ -4525,11 +4529,13 @@ function sheetLayout(){
     place({ kind:'elevation', i, ev, den, k,
             x: SHEET.margin + 8 + Math.max(0, (room.w - ev.len*k)/2),
             base: SHEET.margin + 8 + (room.h + ev.height*k)/2 });
-    const bounds = verticalChainBounds(ev.mat, ev.fenceHeight, ev.gateOnly);
+    // the section is through one bay, so it is that bay's build-up — a gate opening in an
+    // otherwise ordinary run is still a leaf, and a leaf has none of the panel's rails
+    const bay = widestBay(ev), postW = postSizeOf(ev.mat);
+    const bounds = verticalChainBounds(ev.mat, ev.fenceHeight, bay.gate);
     const steps = bounds.slice(0,-1).map((y,n) => bounds[n+1]-y).filter(v => v > 1e-6);
     if (!steps.length) continue;
     const tightest = Math.min(...steps), tall = bounds[bounds.length-1];
-    const bay = widestBay(ev), postW = postSizeOf(ev.mat);
     const win = { lo: bay.a - postW*0.75, hi: bay.b + postW*0.75 };
     const wide = win.hi - win.lo;
     // largest scale that fits the bay on the page and leaves the tightest step room for its
@@ -4549,11 +4555,9 @@ function sheetLayout(){
    The widest bay is the representative one: a short remainder bay at the end of a run says
    nothing about how the fence is built. */
 function widestBay(ev){
-  let best = { a:0, b:ev.len }, span = -1;
-  for (let n = 0; n < ev.stations.length-1; n++){
-    const w = ev.stations[n+1] - ev.stations[n];
-    if (w > span){ span = w; best = { a:ev.stations[n], b:ev.stations[n+1] }; }
-  }
+  let best = { a:0, b:ev.len, gate:ev.gateOnly }, span = -1;
+  for (const bay of ev.bays)
+    if (bay.b - bay.a > span){ span = bay.b - bay.a; best = bay; }
   return best;
 }
 function sheetRect(x, y, w, h, fill, off){                    // paper mm rectangle, ground-up y
