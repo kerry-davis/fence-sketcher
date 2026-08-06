@@ -4500,9 +4500,9 @@ function sheetFences(){
   return state.polys.map((pl, i) => i).filter(i =>
     !state.polys[i].hidden3d && state.polys[i].pts.length > 1);
 }
-/* Annotations belong to the paper, not the screen: 2.6 mm of text whatever the zoom. Every
-   threshold in dimAt/dimChain scales with it, so the sheet carries the same dimensions at
-   every zoom — and the same ones will be in the PDF. */
+/* Annotations belong to the paper, not the screen: a fixed height of text whatever the zoom.
+   Every threshold in dimAt/dimChain scales with it, so the sheet carries the same dimensions
+   at every zoom — and the same ones will be in the PDF. */
 const ANNOT_MM = 3.1;          // font size on paper; ~2.2 mm cap height, ISO-ish for A4
 const annotScale = () => ANNOT_MM*view.s/12;
 /* One elevation per page, at the largest standard scale that fits it. A run's fine build-up
@@ -4600,7 +4600,7 @@ function paintSheetPageInk(pg, u, k){
    those as JPEGs in a hand-written PDF. DCTDecode takes a JPEG's own bytes verbatim, so there
    is nothing to compress and no font to embed — and no second renderer to keep in step.
    ponytail: raster pages. Vector would need the whole sheet redrawn through a PDF device;
-   worth it only if someone needs to select text or zoom past 200 dpi in the file. */
+   worth it only if someone needs to select text, or to zoom past PDF_DPI in the file. */
 const PDF_DPI = 200;
 const PT_PER_MM = 72/25.4;
 function pdfBytes(chunks){                    // latin1 strings and raw arrays into one buffer
