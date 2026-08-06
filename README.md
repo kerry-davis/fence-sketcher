@@ -268,10 +268,13 @@ an `opts.scale` and serves both.
 
 Because of that, a dimension has to *fit the paper*, and a run's fine build-up cannot fit
 its own elevation: a 75 mm rail against a 10.5 m fence is 1.5 mm of paper at 1:50. So each
-fence gets a **section page** after its elevation, drawn at the largest scale where its
-tightest step still has room — typically 1:10 or 1:20 — carrying the ground gap, every rail,
-every gap between them and the handrail. The elevation keeps the lengths and the height;
-the section says how it goes together.
+fence gets a **section page** after its elevation — the same elevation cropped to one whole
+bay, post to post, blown up to the largest scale where its tightest step still has room
+(typically 1:10 or 1:20). It carries the ground gap, every rail, every gap between them and
+the handrail up one post, the fence height outside that, and the bay span underneath. The
+representative bay is the widest one, since a short remainder bay at the end of a run says
+nothing about how the fence is built. The elevation keeps the lengths; the section says how
+it goes together.
 
 The geometry comes from `elevationParts()`, which reads `postsAlong()`, `railYs()`,
 `gateLeafBuild()` and `materialPostEndFlags()` — the same helpers the plan, the 3D scene and

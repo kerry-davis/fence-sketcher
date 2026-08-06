@@ -30,7 +30,7 @@ test('one page per fence, each at the largest standard scale that fits it', () =
   // every page states what it is and what scale it is at
   assert.match(html, /\$\{pg\.kind\} 1:\$\{pg\.den\} at A4/);
   // and a fence gets a section page beside its elevation
-  assert.match(html, /place\(\{ kind:'section', i, ev, bounds, den:sden, k:1000\/sden,/);
+  assert.match(html, /place\(\{ kind:'section', i, ev, bounds, bay, win, den:sden, k:sk,/);
   assert.match(html, /SCALES\.find\(d => fits\(d\) && tightest\*\(1000\/d\) >= SECTION_MIN_MM\)\s*\n?\s*\?\? SCALES\.find\(fits\)/);
 });
 
@@ -120,5 +120,18 @@ test('the sheet carries the whole section, from the same definition 3D uses', ()
   // board width and gap come off the boards the elevation actually drew
   assert.match(html, /const boards = ev\.parts\.filter\(p => p\.k === 'board'\)\.sort\(\(a2,b2\) => a2\.x-b2\.x\)\.slice\(0,2\);/);
   // the run's own height stands outside whatever the section chain reached
-  assert.match(html, /dimAt\(toScreen, at\(reach\/2, 0\), at\(reach\/2, ev\.fenceHeight\)[\s\S]{0,80}?up \+ CHAIN_OFF\*k\*1\.6, inside, k\);/);
+  assert.match(html, /dimAt\(toScreen, at\(win\.hi, 0\), at\(win\.hi, ev\.fenceHeight\)[\s\S]{0,80}?up \+ CHAIN_OFF\*k\*1\.6, inside, k\);/);
+});
+
+test('a section is taken through a whole bay, post to post', () => {
+  // the representative bay is the widest: a short remainder bay says nothing about the build
+  assert.match(html, /function widestBay\(ev\)\{/);
+  assert.match(html, /if \(w > span\)\{ span = w; best = \{ a:ev\.stations\[n\], b:ev\.stations\[n\+1\] \}; \}/);
+  // the window takes in both posts, and the scale has to fit it as well as the height
+  assert.match(html, /const win = \{ lo: bay\.a - postW\*0\.75, hi: bay\.b \+ postW\*0\.75 \};/);
+  assert.match(html, /tall\*\(1000\/d\) <= room\.h\*0\.84 && wide\*\(1000\/d\) <= room\.w\*0\.78/);
+  // it is the elevation cropped to that window, not a second drawing of a post
+  assert.match(html, /const clip = p => \(\{ lo: Math\.max\(p\.x, win\.lo\), hi: Math\.min\(p\.x \+ p\.w, win\.hi\) \}\);/);
+  // and the span itself is dimensioned under it
+  assert.match(html, /dimAt\(toScreen, at\(bay\.a, 0\), at\(bay\.b, 0\), fmtLen\(bay\.b - bay\.a, u\)/);
 });

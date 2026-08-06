@@ -4484,17 +4484,32 @@ function sheetLayout(){
     const steps = bounds.slice(0,-1).map((y,n) => bounds[n+1]-y).filter(v => v > 1e-6);
     if (!steps.length) continue;
     const tightest = Math.min(...steps), tall = bounds[bounds.length-1];
-    // largest scale that both fits the page and gives the tightest step room for arrows;
-    // a tall fence with a 45 mm cap satisfies no scale at all, so fitting the page wins and
-    // the finest step drops rather than the section collapsing to 1:2000
-    const fits = d => tall*(1000/d) <= room.h*0.86;
-    let sden = SCALES.find(d => fits(d) && tightest*(1000/d) >= SECTION_MIN_MM)
-            ?? SCALES.find(fits) ?? SCALES[SCALES.length-1];
-    place({ kind:'section', i, ev, bounds, den:sden, k:1000/sden,
-            x: SHEET.margin + 8 + room.w*0.34,
-            base: SHEET.margin + 8 + (room.h + tall*(1000/sden))/2 });
+    const bay = widestBay(ev), postW = postSizeOf(ev.mat);
+    const win = { lo: bay.a - postW*0.75, hi: bay.b + postW*0.75 };
+    const wide = win.hi - win.lo;
+    // largest scale that fits the bay on the page and leaves the tightest step room for its
+    // arrows; a tall fence with a 45 mm cap satisfies no scale, so fitting wins and the
+    // finest step drops rather than the section collapsing to 1:2000
+    const fits = d => tall*(1000/d) <= room.h*0.84 && wide*(1000/d) <= room.w*0.78;
+    const sden = SCALES.find(d => fits(d) && tightest*(1000/d) >= SECTION_MIN_MM)
+              ?? SCALES.find(fits) ?? SCALES[SCALES.length-1];
+    const sk = 1000/sden;
+    place({ kind:'section', i, ev, bounds, bay, win, den:sden, k:sk,
+            x: SHEET.margin + 8 + Math.max(0, (room.w - wide*sk)/2),
+            base: SHEET.margin + 8 + (room.h + tall*sk)/2 });
   }
   return { pages };
+}
+/* A section is taken through a full bay — post, span, post — not through a post on its own.
+   The widest bay is the representative one: a short remainder bay at the end of a run says
+   nothing about how the fence is built. */
+function widestBay(ev){
+  let best = { a:0, b:ev.len }, span = -1;
+  for (let n = 0; n < ev.stations.length-1; n++){
+    const w = ev.stations[n+1] - ev.stations[n];
+    if (w > span){ span = w; best = { a:ev.stations[n], b:ev.stations[n+1] }; }
+  }
+  return best;
 }
 function sheetRect(x, y, w, h, fill){                         // paper mm rectangle, ground-up y
   const a = P2S(x, y), b = P2S(x+w, y-h);
@@ -4575,28 +4590,40 @@ function paintElevation(bl, u, k){
    whole vertical chain beside it. The elevation says how long the fence is; this says how
    it goes together. */
 function paintSection(pg, u, k){
-  const { ev, bounds, x, base } = pg, mm = v => v*pg.k;
-  const at = (px, py) => [x + mm(px), base - mm(py)];
+  const { ev, bounds, bay, win, x, base } = pg, mm = v => v*pg.k;
+  const at = (px, py) => [x + mm(px - win.lo), base - mm(py)];   // window-relative paper mm
   const toScreen = p => P2S(p[0], p[1]);
-  const postW = postSizeOf(ev.mat), reach = Math.max(0.5, postW*4), top = bounds[bounds.length-1];
+  const fill = { post:'#cbd5e1', rail:'#e2e8f0', board:'#eef2f6', cap:'#cbd5e1', gate:'#f1f5f9' };
+  const top = bounds[bounds.length-1];
   ctx.font = `600 ${ANNOT_MM*view.s}px system-ui`; ctx.fillStyle = SHEET_INK;
-  const title = P2S(x - mm(reach/2), base - mm(top) - 4);
+  const title = P2S(x, base - mm(top) - 4);
   ctx.fillText(`Section — ${fenceName(state.polys[pg.i], pg.i)}  1:${pg.den}`, title.x, title.y);
-  if (!ev.gateOnly) sheetRect(x - mm(postW/2), base, mm(postW), mm(ev.fenceHeight), '#cbd5e1');
-  for (let n = 1; n < bounds.length-1; n += 2)                  // rails sit on the odd steps
-    if (bounds[n+1] - bounds[n] > 1e-6)
-      sheetRect(x - mm(reach/2), base - mm(bounds[n]), mm(reach), mm(bounds[n+1]-bounds[n]), '#e2e8f0');
-  if (hrOf(ev.mat).on && !ev.gateOnly && top > ev.fenceHeight)
-    sheetRect(x - mm(reach/2), base - mm(ev.fenceHeight), mm(reach), mm(top-ev.fenceHeight), '#cbd5e1');
-  const g0 = P2S(x - mm(reach*0.8), base), g1 = P2S(x + mm(reach*0.8), base);
+  const clip = p => ({ lo: Math.max(p.x, win.lo), hi: Math.min(p.x + p.w, win.hi) });
+  for (const p of ev.parts){                                     // the elevation, cropped
+    if (p.k === 'corner') continue;
+    const c = clip(p);
+    if (c.hi <= c.lo + 1e-9) continue;
+    if (p.k === 'gate'){
+      sheetRect(x + mm(c.lo - win.lo), base - mm(p.y), mm(c.hi-c.lo), mm(p.h), fill.gate);
+      for (const ry of p.rails)
+        sheetRect(x + mm(c.lo - win.lo), base - mm(ry - p.railW/2), mm(c.hi-c.lo),
+                  mm(p.railW), fill.rail);
+      continue;
+    }
+    sheetRect(x + mm(c.lo - win.lo), base - mm(p.y), mm(c.hi-c.lo), mm(p.h), fill[p.k] || '#e2e8f0');
+  }
+  const g0 = P2S(x - 3, base), g1 = P2S(x + mm(win.hi - win.lo) + 3, base);
   ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(g0.x, g0.y); ctx.lineTo(g1.x, g1.y); ctx.stroke();
-  const inside = at(-reach/2, top/2);
+  // the build-up up the right-hand post, the height outside it, the span underneath
+  const inside = at((bay.a+bay.b)/2, top/2);
   const rungs = bounds.slice(0,-1).flatMap((y, n) => bounds[n+1] - y > 1e-6
-    ? [{ p: at(reach/2, y), q: at(reach/2, bounds[n+1]), txt: fmtSmall(bounds[n+1]-y, u) }] : []);
+    ? [{ p: at(win.hi, y), q: at(win.hi, bounds[n+1]), txt: fmtSmall(bounds[n+1]-y, u) }] : []);
   const up = dimChain(toScreen, rungs, inside, k);
-  dimAt(toScreen, at(reach/2, 0), at(reach/2, ev.fenceHeight), fmtLen(ev.fenceHeight, u),
+  dimAt(toScreen, at(win.hi, 0), at(win.hi, ev.fenceHeight), fmtLen(ev.fenceHeight, u),
         up + CHAIN_OFF*k*1.6, inside, k);
+  dimAt(toScreen, at(bay.a, 0), at(bay.b, 0), fmtLen(bay.b - bay.a, u), CHAIN_OFF*k*1.6,
+        at((bay.a+bay.b)/2, top), k);
 }
 
 /* ---- orientation cube: which way am I looking, and click a face to go there ----
