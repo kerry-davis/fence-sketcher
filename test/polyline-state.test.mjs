@@ -23,6 +23,7 @@ test('splitting a fence preserves its per-fence settings', () => {
     excludeRails:true,
     excludePalings:true,
     hidden3d:true,
+    hiddenSheet:true,
     oneEnd:'end',
   };
   const polys = [source];
@@ -36,6 +37,7 @@ test('splitting a fence preserves its per-fence settings', () => {
     assert.equal(part.excludeRails, true);
     assert.equal(part.excludePalings, true);
     assert.equal(part.hidden3d, true);
+    assert.equal(part.hiddenSheet, true);
     assert.equal(part.oneEnd, 'end');
   }
   assert.notEqual(polys[0].mat, polys[1].mat);
