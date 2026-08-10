@@ -3924,7 +3924,12 @@ function elevationParts(polys, idx){
           parts.push({ k:'board', x:x0 + t - mat.paling/2, w:mat.paling, y:0, h:H,
                        off:omitted.board });
       }
-      if (hr.on) parts.push({ k:'cap', x:x0, w:L, y:H, h:hr.t, off:omitted.cap });
+      if (hr.on){
+        const startOverhang = !pl.closed && i === 0 && ends.start ? postW/2 : 0;
+        const endOverhang = !pl.closed && i === pl.pts.length-2 && ends.end ? postW/2 : 0;
+        parts.push({ k:'cap', x:x0-startOverhang, w:L+startOverhang+endOverhang,
+                     y:H, h:hr.t, off:omitted.cap });
+      }
     }
     x0 += L;
   }
@@ -4576,7 +4581,7 @@ function sheetPlanGeometry(polys, idx){
   const all = pl.pts.concat(posts), xs = all.map(q => q.x), ys = all.map(q => q.y);
   const loX = Math.min(...xs) - pad, hiX = Math.max(...xs) + pad;
   const loY = Math.min(...ys) - pad, hiY = Math.max(...ys) + pad;
-  return { pl, mat, segments, posts, angles, postSize:size,
+  return { pl, mat, segments, posts, angles, postSize:size, ends,
            bounds:{loX, hiX, loY, hiY, width:Math.max(hiX-loX, 0.1),
                    height:Math.max(hiY-loY, 0.1)} };
 }
@@ -4691,6 +4696,28 @@ function sheetPlanPost(p, at, plan, pg){
   }
   ctx.restore();
 }
+function sheetPlanHandrail(seg, at, plan){
+  if (seg.gate || !hrOf(plan.mat).on || seg.len < 1e-9) return;
+  const first = seg.i === 0, last = seg.i === plan.pl.pts.length-2;
+  const start = !plan.pl.closed && first && plan.ends.start ? plan.postSize/2 : 0;
+  const end = !plan.pl.closed && last && plan.ends.end ? plan.postSize/2 : 0;
+  const ux = (seg.b.x-seg.a.x)/seg.len, uy = (seg.b.y-seg.a.y)/seg.len;
+  const half = hrOf(plan.mat).w/2;
+  const a = {x:seg.a.x-ux*start, y:seg.a.y-uy*start};
+  const b = {x:seg.b.x+ux*end, y:seg.b.y+uy*end};
+  const corners = [
+    {x:a.x-uy*half,y:a.y+ux*half}, {x:b.x-uy*half,y:b.y+ux*half},
+    {x:b.x+uy*half,y:b.y-ux*half}, {x:a.x+uy*half,y:a.y-ux*half},
+  ].map(at);
+  ctx.save();
+  ctx.fillStyle = plan.pl.excludeMaterials ? '#ffffff' : '#cbd5e1';
+  ctx.strokeStyle = plan.pl.excludeMaterials ? SHEET_LINE : SHEET_INK;
+  ctx.lineWidth = 1;
+  if (plan.pl.excludeMaterials) ctx.setLineDash([3,2]);
+  ctx.beginPath();
+  corners.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y));
+  ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+}
 /* Plan angle notes use the same paper ink, font and arrow primitive as linear dimensions. The
    geometry is transformed before it gets here, so the arc follows the item's actual bend and
    never asks the overall drawing (or a neighbouring fence) for context. */
@@ -4739,6 +4766,7 @@ function paintPlan(pg, u, scale){
     const L = Math.hypot(dx,dy) || 1, nx = -dy/L, ny = dx/L, down = ny >= 0 ? 1 : -1;
     return {x:(A[0]+B[0])/2 - nx*down*100, y:(A[1]+B[1])/2 - ny*down*100};
   };
+  for (const seg of plan.segments) sheetPlanHandrail(seg, at, plan);
   // The centreline is the item's actual XY path. Gates retain the plan's dashed convention;
   // no other item is visited here, so this is an isolated run rather than a site overview.
   for (const seg of plan.segments){
@@ -4891,7 +4919,7 @@ function paintElevation(bl, u, k){
   const at = (px, py) => [xAt(px), base - mm(py)];           // chainage → aligned paper X, y up
   const toScreen = p => P2S(p[0], p[1]);
   for (const p of ev.parts){                                  // boards first, posts last
-    if (p.k === 'corner' || p.k === 'gate') continue;
+    if (p.k === 'corner' || p.k === 'gate' || p.k === 'cap') continue;
     sheetRect(xAt(p.x), base - mm(p.y), xAt(p.x+p.w)-xAt(p.x), mm(p.h),
               fill[p.k] || '#e2e8f0', p.off);
   }
@@ -4908,6 +4936,9 @@ function paintElevation(bl, u, k){
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
     }
   }
+  // The handrail sits on the post tops, so it is the final continuous member in elevation.
+  for (const p of ev.parts.filter(part => part.k === 'cap'))
+    sheetRect(xAt(p.x), base - mm(p.y), xAt(p.x+p.w)-xAt(p.x), mm(p.h), fill.cap, p.off);
   const ground = P2S(xAt(0) - 3, base), groundEnd = P2S(xAt(ev.len) + 3, base);
   ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(ground.x, ground.y); ctx.lineTo(groundEnd.x, groundEnd.y); ctx.stroke();
@@ -4941,7 +4972,7 @@ function paintSection(pg, u, k){
   const top = bounds[bounds.length-1];
   const clip = p => ({ lo: Math.max(p.x, win.lo), hi: Math.min(p.x + p.w, win.hi) });
   for (const p of ev.parts){                                     // the elevation, cropped
-    if (p.k === 'corner') continue;
+    if (p.k === 'corner' || p.k === 'cap') continue;
     const c = clip(p);
     if (c.hi <= c.lo + 1e-9) continue;
     if (p.k === 'gate'){
@@ -4953,6 +4984,12 @@ function paintSection(pg, u, k){
     }
     sheetRect(x + mm(c.lo - win.lo), base - mm(p.y), mm(c.hi-c.lo), mm(p.h),
               fill[p.k] || '#e2e8f0', p.off);
+  }
+  // As in elevation, the cap is on top of the posts rather than hidden behind them.
+  for (const p of ev.parts.filter(part => part.k === 'cap')){
+    const c = clip(p);
+    if (c.hi > c.lo + 1e-9)
+      sheetRect(x + mm(c.lo - win.lo), base - mm(p.y), mm(c.hi-c.lo), mm(p.h), fill.cap, p.off);
   }
   const g0 = P2S(x - 3, base), g1 = P2S(x + mm(win.hi - win.lo) + 3, base);
   ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;

@@ -251,6 +251,14 @@ test('the developed elevation agrees with the model it is drawn from', () => {
   assert.ok(rails.length > 0 && rails.every(r => r.w <= 2.4 + 1e-9));
   assert.equal(+bent.fenceHeight.toFixed(6), 1.2);
 
+  const capped = context.elevationParts(
+    [{ pts:[{x:0,y:0},{x:4,y:0}], closed:false, mat:{...mat, handrail:true} }], 0);
+  const cap = capped.parts.find(p => p.k === 'cap');
+  assert.ok(cap, 'enabled handrail should be part of the drawing');
+  assert.equal(+cap.x.toFixed(4), -0.05);
+  assert.equal(+cap.w.toFixed(4), 4.1);
+  assert.equal(+cap.h.toFixed(4), 0.045);
+
   // A run whose first point is its right-hand end would draw mirrored against the plan.
   // 5 m at 2.4 spacing has its short 0.2 m bay beside the last point, so drawing left to
   // right in plan terms puts that bay first.
@@ -330,6 +338,15 @@ test('the drawing reads the BOM exclusions', () => {
   assert.match(html, /ctx\.fillText\('Dashed: ' \+ pg\.ev\.notIncluded\.join\(' · '\), note\.x, note\.y\);/);
   assert.match(html, /ctx\.fillStyle = off \? '#ffffff' : fill;/);
   assert.match(html, /if \(off\) ctx\.setLineDash\(\[3,2\]\);/);
+});
+
+test('enabled handrail is visible in plan, elevation and section', () => {
+  assert.match(html, /function sheetPlanHandrail\(seg, at, plan\)\{/);
+  assert.match(html, /for \(const seg of plan\.segments\) sheetPlanHandrail\(seg, at, plan\);/);
+  assert.match(html, /if \(seg\.gate \|\| !hrOf\(plan\.mat\)\.on/);
+  assert.match(html, /for \(const p of ev\.parts\.filter\(part => part\.k === 'cap'\)\)/);
+  assert.match(html, /The handrail sits on the post tops/);
+  assert.match(html, /As in elevation, the cap is on top of the posts/);
 });
 
 test('the sheet carries the whole section, from the same definition 3D uses', () => {
