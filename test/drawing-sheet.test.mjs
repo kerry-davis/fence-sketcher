@@ -194,7 +194,7 @@ test('all sheet views use one fixed page header independent of dimensions', () =
 
 test('the sheet draws dimensions with the same renderer as the plan and 3D', () => {
   // dimAt/dimChain take a projector, so one implementation serves the scene and the paper
-  assert.match(html, /function dimAt\(to, p, q, txt, off, avoid, k = 1\)\{/);
+  assert.match(html, /function dimAt\(to, p, q, txt, off, avoid, k = 1, force = false\)\{/);
   assert.match(html, /function dimChain\(to, items, avoid, k = 1\)\{/);
   assert.match(html, /const toScreen = p => P2S\(p\[0\], p\[1\]\);/);
   assert.match(html, /const reach = ev\.stations\.length > 2 \? dimChain\(toScreen, bays, at\(0, ev\.height\/2\), k\)/);
@@ -343,6 +343,13 @@ test('the drawing reads the BOM exclusions', () => {
 test('enabled handrail is visible in plan, elevation and section', () => {
   assert.match(html, /function sheetPlanHandrail\(seg, at, plan\)\{/);
   assert.match(html, /for \(const seg of plan\.segments\) sheetPlanHandrail\(seg, at, plan\);/);
+  assert.match(html, /function sheetPlanHandrailDimension\(plan, u, paperPoint, toScreen, scale\)\{/);
+  assert.match(html, /sheetPlanHandrailDimension\(plan, u, paperPoint, toScreen, scale\);/);
+  assert.match(html, /fmtSmall\(hr\.w, u\)/);
+  assert.match(html, /paperPoint\(inside\), scale, true\);/);
+  assert.match(html, /function sheetPlanPostUnderHandrail\(p, plan\)\{/);
+  assert.match(html, /if \(off \|\| covered\) ctx\.setLineDash\(\[3,2\]\);/);
+  assert.match(html, /if \(!covered\) ctx\.fill\(\);/);
   assert.match(html, /if \(seg\.gate \|\| !hrOf\(plan\.mat\)\.on/);
   assert.match(html, /for \(const p of ev\.parts\.filter\(part => part\.k === 'cap'\)\)/);
   assert.match(html, /The handrail sits on the post tops/);

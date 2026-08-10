@@ -4318,11 +4318,12 @@ function verticalChainBounds(mat, H, isGate){
 // One dimension between two points, placed clear of `avoid`. It must have room for its own
 // value or it waits for a closer look, rather than printing a label over its neighbour.
 // `to` projects a point to the screen, so the 3D scene and the drawing sheet share this.
-function dimAt(to, p, q, txt, off, avoid, k = 1){
+function dimAt(to, p, q, txt, off, avoid, k = 1, force = false){
   const A = to(p), Bs = to(q);
   if (!A || !Bs) return;
   ctx.font = dimFont(k);
-  if (Math.hypot(Bs.x-A.x, Bs.y-A.y) < Math.max(MIN_DIM_PX*k, ctx.measureText(txt).width + 10*k)) return;
+  if (!force && Math.hypot(Bs.x-A.x, Bs.y-A.y) <
+      Math.max(MIN_DIM_PX*k, ctx.measureText(txt).width + 10*k)) return;
   renderDimension(A, Bs, txt, off * dimSide3(A, Bs, avoid ? to(avoid) : null), {scale:k});
 }
 /* A chain of adjacent parts — bays along the run, rail gaps up the post. Rail gaps are
@@ -4683,17 +4684,30 @@ function sheetRect(x, y, w, h, fill, off){                    // paper mm rectan
   ctx.fill(); ctx.stroke();
   ctx.restore();
 }
+function sheetPlanPostUnderHandrail(p, plan){
+  if (!hrOf(plan.mat).on) return false;
+  return plan.segments.some(seg => {
+    if (seg.gate || seg.len < 1e-9) return false;
+    const vx = seg.b.x-seg.a.x, vy = seg.b.y-seg.a.y;
+    const t = ((p.x-seg.a.x)*vx + (p.y-seg.a.y)*vy)/(seg.len*seg.len);
+    if (t < -1e-6 || t > 1+1e-6) return false;
+    return Math.hypot(p.x-(seg.a.x+vx*t), p.y-(seg.a.y+vy*t)) < FENCE_JOIN_TOL;
+  });
+}
 function sheetPlanPost(p, at, plan, pg){
-  const S = at(p), r = Math.max(1.5, plan.postSize*pg.k*view.s/2), off = plan.pl.excludeMaterials;
+  const S = at(p), r = Math.max(1.5, plan.postSize*pg.k*view.s/2);
+  const off = plan.pl.excludeMaterials, covered = sheetPlanPostUnderHandrail(p, plan);
   ctx.save();
   ctx.fillStyle = off ? '#ffffff' : '#cbd5e1';
-  ctx.strokeStyle = off ? SHEET_LINE : SHEET_INK; ctx.lineWidth = 1;
-  if (off) ctx.setLineDash([3,2]);
+  ctx.strokeStyle = off || covered ? SHEET_LINE : SHEET_INK; ctx.lineWidth = 1;
+  if (off || covered) ctx.setLineDash([3,2]);
   if (p.shape === 'round'){
-    ctx.beginPath(); ctx.arc(S.x, S.y, r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(S.x, S.y, r, 0, Math.PI*2);
   } else {
-    ctx.beginPath(); ctx.rect(S.x-r, S.y-r, r*2, r*2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.rect(S.x-r, S.y-r, r*2, r*2);
   }
+  if (!covered) ctx.fill();
+  ctx.stroke();
   ctx.restore();
 }
 function sheetPlanHandrail(seg, at, plan){
@@ -4717,6 +4731,19 @@ function sheetPlanHandrail(seg, at, plan){
   ctx.beginPath();
   corners.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y));
   ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+}
+function sheetPlanHandrailDimension(plan, u, paperPoint, toScreen, scale){
+  const seg = plan.segments.find(item => !item.gate && item.len > 1e-9);
+  const hr = hrOf(plan.mat);
+  if (!seg || !hr.on || !(hr.w > 0)) return;
+  const ux = (seg.b.x-seg.a.x)/seg.len, uy = (seg.b.y-seg.a.y)/seg.len;
+  const start = !plan.pl.closed && seg.i === 0 && plan.ends.start ? plan.postSize/2 : 0;
+  const c = {x:seg.a.x-ux*start, y:seg.a.y-uy*start}, half = hr.w/2;
+  const p = {x:c.x-uy*half, y:c.y+ux*half};
+  const q = {x:c.x+uy*half, y:c.y-ux*half};
+  const inside = {x:seg.a.x+ux*seg.len*0.35, y:seg.a.y+uy*seg.len*0.35};
+  dimAt(toScreen, paperPoint(p), paperPoint(q), fmtSmall(hr.w, u),
+        CHAIN_OFF*scale*1.25, paperPoint(inside), scale, true);
 }
 /* Plan angle notes use the same paper ink, font and arrow primitive as linear dimensions. The
    geometry is transformed before it gets here, so the arc follows the item's actual bend and
@@ -4794,6 +4821,7 @@ function paintPlan(pg, u, scale){
     }
   }
   for (const post of plan.posts) sheetPlanPost(post, at, plan, pg);
+  sheetPlanHandrailDimension(plan, u, paperPoint, toScreen, scale);
   for (const angle of plan.angles) sheetPlanAngle(pg, angle, at, scale);
 }
 function paintSheet(){
