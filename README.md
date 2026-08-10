@@ -262,7 +262,8 @@ site are absent.
 Plan dimensions are layered like a set-out drawing: each segment's post-to-post bay chain
 comes first, and its segment/overall length is placed farther out. A 10.5 m run at 1.5 m
 spacing therefore shows seven `1.5 m` bays plus the `10.5 m` overall; a gate remains one whole
-bay. The plan title lives in the page header, clear of those dimension bands.
+bay. Plan, elevation and section all use the same fixed two-line page header: view/name/scale,
+then any dashed-work BOM note. Its white paper band stays clear of every dimension.
 
 On the page: posts at their true stations, rails per bay, palings at their pitch, gate
 leaves clear of the ground, the handrail cap, and a dashed fold line at each corner. Below

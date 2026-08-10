@@ -26,7 +26,7 @@ test('three pages per fence, with plan and elevation at one fitted scale', () =>
   assert.match(html, /ev\.len\*k <= room\.w && ev\.height\*k <= room\.h\*0\.62/);
   assert.match(html, /b\.width\*k <= room\.w && b\.height\*k <= room\.h\*0\.70/);
   assert.match(html, /const paired = sheetPlanElevationScale\(ev, plan, room\);/);
-  assert.match(html, /place\(\{ kind:'plan', i, plan, den:paired\.den, k:paired\.k,/);
+  assert.match(html, /place\(\{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
   assert.match(html, /place\(\{ kind:'elevation', i, ev, den:paired\.den, k:paired\.k,/);
   // a page is laid out page-relative, then dropped onto its own sheet
   assert.match(html, /page\.top = pages\.length\*\(SHEET\.h \+ SHEET\.gap\*2\);\s*\n\s*page\.base \+= page\.top;/);
@@ -68,7 +68,7 @@ test('paired plan and elevation scales fit together', () => {
 test('each item gets an isolated, dimensioned plan page', () => {
   assert.match(html, /function sheetPlanGeometry\(polys, idx\)\{/);
   assert.match(html, /const plan = sheetPlanGeometry\(state\.polys, i\), pb = plan\.bounds;/);
-  assert.match(html, /place\(\{ kind:'plan', i, plan, den:paired\.den, k:paired\.k,/);
+  assert.match(html, /place\(\{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
   assert.match(html, /else if \(pg\.kind === 'plan'\) paintPlan\(pg, u, k\);/);
   assert.match(html, /for \(const seg of plan\.segments\)\{/);
   assert.match(html, /const dimItems = seg\.bays\.length > 1\s*\n\s*\? seg\.bays\.map\(bay =>/);
@@ -145,18 +145,28 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
   assert.match(html, /A single bay is already the segment overall/);
 });
 
-test('plan titles use a fixed page header independent of dimensions', () => {
-  const start = html.indexOf('function sheetPlanHeader(');
+test('all sheet views use one fixed page header independent of dimensions', () => {
+  const start = html.indexOf('function sheetHeaderPosition(');
   const end = html.indexOf('/* A fence\'s plan on the sheet', start);
   assert.ok(start >= 0 && end > start);
   const context = { SHEET:{margin:10} };
   vm.createContext(context);
   vm.runInContext(html.slice(start, end), context);
-  const first = context.sheetPlanHeader({top:0, x:14, base:140, plan:{bounds:{width:1,height:1}}});
-  const second = context.sheetPlanHeader({top:420, x:900, base:-20, plan:{bounds:{width:99,height:77}}});
+  const first = context.sheetHeaderPosition({top:0, x:14, base:140, plan:{bounds:{width:1,height:1}}});
+  const second = context.sheetHeaderPosition({top:420, x:900, base:-20, plan:{bounds:{width:99,height:77}}});
   assert.deepEqual({x:first.x,y:first.y}, {x:18,y:18});
   assert.equal(second.x, first.x);
   assert.equal(second.y-first.y, 420);
+  assert.match(html, /function paintSheetHeader\(pg\)\{/);
+  assert.match(html, /ctx\.fillText\(`\$\{kind\} — \$\{fenceName\(state\.polys\[pg\.i\], pg\.i\)\}  1:\$\{pg\.den\}`/);
+  assert.match(html, /else paintElevation\(pg, u, k\);\s*\n\s*paintSheetHeader\(pg\);/);
+  assert.doesNotMatch(html, /function sheetPlanHeader|function sheetNotIncluded/);
+  const planPaint = html.slice(html.indexOf('function paintPlan('), html.indexOf('function paintSheet(){'));
+  const elevationPaint = html.slice(html.indexOf('function paintElevation('), html.indexOf('function paintSection('));
+  const sectionPaint = html.slice(html.indexOf('function paintSection('), html.indexOf('/* ---- orientation cube'));
+  assert.doesNotMatch(planPaint, /Plan —|notIncluded|sheetHeader/);
+  assert.doesNotMatch(elevationPaint, /Elevation —|notIncluded|sheetHeader/);
+  assert.doesNotMatch(sectionPaint, /Section —|notIncluded|sheetHeader/);
 });
 
 test('the sheet draws dimensions with the same renderer as the plan and 3D', () => {
@@ -292,9 +302,9 @@ test('the drawing reads the BOM exclusions', () => {
   assert.equal(gate({ excludeRails:true }).off, false);
   assert.equal(gate({ excludeRails:true }).railsOff, true);
 
-  // and the sheet says it, in the take-off's words
-  assert.match(html, /function sheetNotIncluded\(ev, x, yMM\)\{/);
-  assert.match(html, /ctx\.fillText\('Dashed: ' \+ ev\.notIncluded\.join\(' · '\), at\.x, at\.y\);/);
+  // and the shared page header says it, in the take-off's words, for every view kind
+  assert.match(html, /if \(pg\.ev && pg\.ev\.notIncluded\.length\)\{/);
+  assert.match(html, /ctx\.fillText\('Dashed: ' \+ pg\.ev\.notIncluded\.join\(' · '\), note\.x, note\.y\);/);
   assert.match(html, /ctx\.fillStyle = off \? '#ffffff' : fill;/);
   assert.match(html, /if \(off\) ctx\.setLineDash\(\[3,2\]\);/);
 });
