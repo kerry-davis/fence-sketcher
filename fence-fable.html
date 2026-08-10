@@ -4505,6 +4505,11 @@ function sheetFences(){
    at every zoom — and the same ones will be in the PDF. */
 const ANNOT_MM = 3.1;          // font size on paper; ~2.2 mm cap height, ISO-ish for A4
 const annotScale = () => ANNOT_MM*view.s/12;
+function sheetPlanHeader(pg){
+  // A page header is a paper coordinate, never derived from the run's bounds or dimensions.
+  // That keeps an overall dimension line from ever sharing the title's band.
+  return { x:SHEET.margin + 8, y:pg.top + SHEET.margin + 8 };
+}
 /* A fence's plan on the sheet is deliberately not the application's site plan. It is one
    item's real XY geometry, with the same post placement and material end rules used by the
    elevation, 3D scene and take-off. Keeping this as data first makes fitting and painting
@@ -4520,9 +4525,15 @@ function sheetPlanGeometry(polys, idx){
   const runSegs = segsOf(pl);
   for (const [i, a, b] of runSegs){
     const L = segLen(a,b);
-    segments.push({ i, a, b, len:L, gate:!!a.gateAfter });
+    const segment = { i, a, b, len:L, gate:!!a.gateAfter, stations:[], bays:[] };
+    segments.push(segment);
     if (L < 1e-9) continue;
     const segmentPosts = postsAlong(a, b, spacing, !!a.gateAfter);
+    segment.stations = segmentPosts;
+    for (let k = 0; k < segmentPosts.length-1; k++){
+      const p = segmentPosts[k], q = segmentPosts[k+1];
+      segment.bays.push({ a:p, b:q, len:segLen(p,q) });
+    }
     segmentPosts.forEach((q, k) => {
       if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
       if (!pl.closed && i === runSegs.length-1 && k === segmentPosts.length-1 && !ends.end) return;
@@ -4676,11 +4687,20 @@ function paintPlan(pg, u, scale){
   // projector passed to dimAt, rather than converting a screen point back into paper space.
   const toScreen = p => P2S(p[0], p[1]);
   const paperPoint = q => [x + mm(q.x-b.loX), top + mm(q.y-b.loY)];
+  // Dimension bands use the side of each segment that runs down the page where possible;
+  // this keeps the chain and its farther overall line clear of the fixed header above.
+  const dimAvoid = seg => {
+    const A = paperPoint(seg.a), B = paperPoint(seg.b), dx = B[0]-A[0], dy = B[1]-A[1];
+    const L = Math.hypot(dx,dy) || 1, nx = -dy/L, ny = dx/L, down = ny >= 0 ? 1 : -1;
+    return {x:(A[0]+B[0])/2 - nx*down*100, y:(A[1]+B[1])/2 - ny*down*100};
+  };
+  const header = sheetPlanHeader(pg), H = P2S(header.x, header.y);
   ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`; ctx.fillStyle = SHEET_INK;
-  ctx.fillText(`Plan — ${fenceName(plan.pl, pg.i)}  1:${pg.den}`, P2S(x, top-4).x, P2S(x, top-4).y);
+  ctx.fillText(`Plan — ${fenceName(plan.pl, pg.i)}  1:${pg.den}`, H.x, H.y);
   if (plan.pl.excludeMaterials){
     ctx.save(); ctx.font = `${(ANNOT_MM*view.s*0.9).toFixed(2)}px ${PAPER_DIM.font}`;
-    ctx.fillStyle = SHEET_LINE; ctx.fillText('Dashed: fence not included in BOM', P2S(x, top-7.4).x, P2S(x, top-7.4).y); ctx.restore();
+    const note = P2S(header.x, header.y+4.4);
+    ctx.fillStyle = SHEET_LINE; ctx.fillText('Dashed: fence not included in BOM', note.x, note.y); ctx.restore();
   }
   // The centreline is the item's actual XY path. Gates retain the plan's dashed convention;
   // no other item is visited here, so this is an isolated run rather than a site overview.
@@ -4691,9 +4711,13 @@ function paintPlan(pg, u, scale){
     ctx.lineWidth = 1.5; ctx.setLineDash(seg.gate || plan.pl.excludeMaterials ? [8,5] : []);
     ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke(); ctx.restore();
     const mid = {x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+    const dimItems = seg.bays.map(bay => ({ p:paperPoint(bay.a), q:paperPoint(bay.b),
+      txt:(seg.gate ? 'Gate ' : '') + fmtLen(bay.len, u) }));
+    const avoid = dimAvoid(seg);
+    const reach = dimItems.length ? dimChain(toScreen, dimItems, avoid, scale) : CHAIN_OFF*scale;
     dimAt(toScreen, paperPoint(seg.a), paperPoint(seg.b),
-          (seg.gate ? 'Gate ' : '') + fmtLen(seg.len, u), CHAIN_OFF*scale*1.35,
-          paperPoint({x:(b.loX+b.hiX)/2, y:(b.loY+b.hiY)/2}), scale);
+          (seg.gate ? 'Gate ' : '') + fmtLen(seg.len, u), reach + CHAIN_OFF*scale*1.6,
+          avoid, scale);
     // A short gate label makes the dashed bay unambiguous when its dimension is crowded.
     if (seg.gate && Math.hypot(B.x-A.x, B.y-A.y) > 36){
       ctx.save(); ctx.font = `${(ANNOT_MM*view.s*0.85).toFixed(2)}px ${PAPER_DIM.font}`;

@@ -254,10 +254,15 @@ plan and the 3D view.
 
 The item plan preserves the run's actual XY shape: every segment keeps its direction and
 length, gates remain dashed, posts are placed at the same stations as the model, and each
-internal bend carries its measured corner angle. It is fitted independently to a standard
-`1:5`–`1:2000` scale as part of that paired set, so a short gate and a long fence do not share
-a forced scale. Only that item is painted — neighbouring fences, buildings and the rest of the
+internal bend carries its measured corner angle. It uses the standard `1:5`–`1:2000` paired
+scale with its elevation, so a short gate and a long fence do not share a
+forced scale. Only that item is painted — neighbouring fences, buildings and the rest of the
 site are absent.
+
+Plan dimensions are layered like a set-out drawing: each segment's post-to-post bay chain
+comes first, and its segment/overall length is placed farther out. A 10.5 m run at 1.5 m
+spacing therefore shows seven `1.5 m` bays plus the `10.5 m` overall; a gate remains one whole
+bay. The plan title lives in the page header, clear of those dimension bands.
 
 On the page: posts at their true stations, rails per bay, palings at their pitch, gate
 leaves clear of the ground, the handrail cap, and a dashed fold line at each corner. Below

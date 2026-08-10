@@ -71,6 +71,9 @@ test('each item gets an isolated, dimensioned plan page', () => {
   assert.match(html, /place\(\{ kind:'plan', i, plan, den:paired\.den, k:paired\.k,/);
   assert.match(html, /else if \(pg\.kind === 'plan'\) paintPlan\(pg, u, k\);/);
   assert.match(html, /for \(const seg of plan\.segments\)\{/);
+  assert.match(html, /const dimItems = seg\.bays\.map\(bay =>/);
+  assert.match(html, /const reach = dimItems\.length \? dimChain\(toScreen, dimItems, avoid, scale\) : CHAIN_OFF\*scale;/);
+  assert.match(html, /reach \+ CHAIN_OFF\*scale\*1\.6/);
   assert.match(html, /dimAt\(toScreen, paperPoint\(seg\.a\), paperPoint\(seg\.b\)/);
   assert.match(html, /for \(const angle of plan\.angles\) sheetPlanAngle\(pg, angle, at, scale\);/);
   // State and canvas coordinates are both Y-down. Increasing state Y must therefore move
@@ -118,14 +121,38 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
   assert.deepEqual(Array.from(plan.segments).map(s => +s.len.toFixed(4)), [3,4]);
   assert.deepEqual(Array.from(plan.posts).map(p => [+p.x.toFixed(4),+p.y.toFixed(4)]),
                    [[0,0],[2.4,0],[3,0],[3,2.4],[3,4]]);
+  assert.deepEqual(Array.from(plan.segments).map(seg => Array.from(seg.bays).map(b => +b.len.toFixed(4))),
+                   [[2.4,0.6],[2.4,1.6]]);
   assert.equal(plan.angles.length, 1);
   assert.equal(+plan.angles[0].degrees.toFixed(4), 90);
+
+  const tenFive = context.sheetPlanGeometry([
+    {pts:[{x:0,y:0},{x:10.5,y:0}],closed:false,mat:{...mat, spacing:1.5}}
+  ], 0);
+  assert.equal(tenFive.segments[0].bays.length, 7);
+  assert.deepEqual(Array.from(tenFive.segments[0].bays).map(b => +b.len.toFixed(4)),
+                   [1.5,1.5,1.5,1.5,1.5,1.5,1.5]);
 
   const gate = context.sheetPlanGeometry([
     {pts:[{x:0,y:0,gateAfter:true},{x:1.8,y:0}],closed:false,mat}
   ], 0);
   assert.equal(gate.segments[0].gate, true);
+  assert.equal(gate.segments[0].bays.length, 1);
   assert.equal(gate.posts.length, 2);
+});
+
+test('plan titles use a fixed page header independent of dimensions', () => {
+  const start = html.indexOf('function sheetPlanHeader(');
+  const end = html.indexOf('/* A fence\'s plan on the sheet', start);
+  assert.ok(start >= 0 && end > start);
+  const context = { SHEET:{margin:10} };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  const first = context.sheetPlanHeader({top:0, x:14, base:140, plan:{bounds:{width:1,height:1}}});
+  const second = context.sheetPlanHeader({top:420, x:900, base:-20, plan:{bounds:{width:99,height:77}}});
+  assert.deepEqual({x:first.x,y:first.y}, {x:18,y:18});
+  assert.equal(second.x, first.x);
+  assert.equal(second.y-first.y, 420);
 });
 
 test('the sheet draws dimensions with the same renderer as the plan and 3D', () => {
