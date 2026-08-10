@@ -241,12 +241,11 @@ site. Each fence or gate run gets three pages: an isolated **plan view** from di
 a **developed elevation** unrolled onto a vertical plane, and a section through a representative
 bay. The plan belongs to that item alone, not to the overall app/site plan.
 
-The plan and developed elevation are a paired set: both use the same largest standard scale
-that fits both views — `1:5` through `1:2000` — so their post stations and longitudinal extent
-correspond across the adjacent pages. A 10.5 m horizontal run therefore stays `1:50` on both
-pages; a vertical or tightly bent plan can make the pair step down to `1:100` together. The
-section keeps its own larger detail scale. The scale, the fence name and the drawing name are
-printed at the foot of every page, because a drawing without them cannot be read.
+The plan and developed elevation are a paired set: both use the same largest whole-denominator
+scale that fits their current orientation and leaves room for dimensions. The scale is fitted
+to the available page instead of jumping between coarse presets, so unused whitespace does not
+needlessly shrink the drawings. The section keeps its own larger detail scale. The scale, the
+fence name and the drawing name are printed at the foot of every page.
 
 The elevation uses the plan's paper X coordinate at every chainage rather than centring an
 independent straight strip. Corresponding post centres therefore sit on the same vertical

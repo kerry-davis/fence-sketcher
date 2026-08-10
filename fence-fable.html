@@ -4576,17 +4576,14 @@ function sheetPlanGeometry(polys, idx){
            bounds:{loX, hiX, loY, hiY, width:Math.max(hiX-loX, 0.1),
                    height:Math.max(hiY-loY, 0.1)} };
 }
-/* Plan and elevation are a paired set: their paper geometry must use one denominator so a
-   post station or the end of a straight run lines up visually between adjacent pages. A bent
-   or vertical plan can therefore make both views step down to the next coarser scale. */
+/* Plan and elevation are a paired set: use the largest shared scale that fits their current
+   orientation. Rounding the denominator up to a whole number keeps the printed scale honest
+   without wasting the page by jumping to the next coarse preset (for example 1:25 → 1:50). */
 function sheetPlanElevationScale(ev, plan, room){
   const b = plan.bounds;
-  const fits = d => {
-    const k = 1000/d;
-    return ev.len*k <= room.w && ev.height*k <= room.h*0.62 &&
-           b.width*k <= room.w && b.height*k <= room.h*0.70;
-  };
-  const den = SCALES.find(fits) ?? SCALES[SCALES.length-1];
+  const maxK = Math.min(room.w/ev.len, room.h*0.78/ev.height,
+                        room.w/b.width, room.h*0.82/b.height);
+  const den = Math.max(5, Math.ceil(1000/maxK));
   return { den, k:1000/den };
 }
 // Convert developed chainage back to the physical point in plan. The elevation uses this
@@ -4604,7 +4601,7 @@ function sheetPlanPointAtStation(plan, station){
   }
   return plan.pl.pts[0];
 }
-/* One plan/elevation pair per item, at the largest common standard scale that fits both. A
+/* One plan/elevation pair per item, at the largest common scale that fits both. A
    run's fine build-up cannot share that pair: a 75 mm rail against a 10.5 m fence is 1.5 mm of
    paper at 1:50, and no arrangement makes that legible. It gets a section page of its own,
    drawn at a scale where its tightest step still has room — which is what a drawing office

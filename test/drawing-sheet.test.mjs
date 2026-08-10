@@ -35,8 +35,9 @@ test('desktop wheel scrolls through sheet pages while modified wheel still zooms
 test('three pages per fence, with plan and elevation at one fitted scale', () => {
   assert.match(html, /const SCALES = \[5,10,20,25,50,100,200,500,1000,2000\];/);
   assert.match(html, /function sheetPlanElevationScale\(ev, plan, room\)\{/);
-  assert.match(html, /ev\.len\*k <= room\.w && ev\.height\*k <= room\.h\*0\.62/);
-  assert.match(html, /b\.width\*k <= room\.w && b\.height\*k <= room\.h\*0\.70/);
+  assert.match(html, /const maxK = Math\.min\(room\.w\/ev\.len, room\.h\*0\.78\/ev\.height,/);
+  assert.match(html, /room\.w\/b\.width, room\.h\*0\.82\/b\.height\);/);
+  assert.match(html, /const den = Math\.max\(5, Math\.ceil\(1000\/maxK\)\);/);
   assert.match(html, /const paired = sheetPlanElevationScale\(ev, plan, room\);/);
   assert.match(html, /const planPage = \{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
   assert.match(html, /place\(\{ kind:'elevation', i, ev, den:paired\.den, k:paired\.k,/);
@@ -60,21 +61,20 @@ test('paired plan and elevation scales fit together', () => {
   const start = html.indexOf('function sheetPlanElevationScale(');
   const end = html.indexOf('/* One plan/elevation pair per item', start);
   assert.ok(start >= 0 && end > start);
-  const context = { Math, SCALES:[5,10,20,25,50,100,200,500,1000,2000] };
+  const context = { Math };
   vm.createContext(context);
   vm.runInContext(html.slice(start, end), context);
   const room = { w:261, h:174 };
   const elevation = { len:10.5, height:1.8 };
-  // The post padding makes the plan 10.6 m wide, but it still fits at 1:50 alongside the
-  // 10.5 m elevation. The pair must not independently drop the plan to 1:100.
+  // The pair uses the page closely instead of discarding space at the next coarse preset.
   const horizontal = context.sheetPlanElevationScale(elevation,
     {bounds:{width:10.6,height:0.1}}, room);
-  assert.equal(horizontal.den, 50);
-  // Turning that same run vertically makes the plan's height the limiting view, so both pages
-  // step down together to 1:100 rather than leaving one view clipped.
+  assert.equal(horizontal.den, 41);
+  assert.equal(horizontal.k, 1000/41);
+  // Turning that same run vertically makes height the limiting constraint, without rotation.
   const vertical = context.sheetPlanElevationScale(elevation,
     {bounds:{width:0.1,height:10.6}}, room);
-  assert.equal(vertical.den, 100);
+  assert.equal(vertical.den, 75);
 });
 
 test('elevation post centres use the exact paper X coordinates from plan', () => {
