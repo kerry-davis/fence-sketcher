@@ -43,8 +43,11 @@ test('three pages per fence, with plan and elevation at one fitted scale', () =>
   assert.match(html, /place\(\{ kind:'elevation', i, ev, den:paired\.den, k:paired\.k,/);
   // a page is laid out page-relative, then dropped onto its own sheet
   assert.match(html, /page\.top = pages\.length\*\(SHEET\.h \+ SHEET\.gap\*2\);\s*\n\s*page\.base \+= page\.top;/);
-  // a hidden fence is off the sheet, as it is out of the 3D scene
-  assert.match(html, /!state\.polys\[i\]\.hidden3d && state\.polys\[i\]\.pts\.length > 1/);
+  // sheet inclusion is independent of the 3D visibility switch
+  assert.match(html, /!state\.polys\[i\]\.hiddenSheet && state\.polys\[i\]\.pts\.length > 1/);
+  assert.doesNotMatch(html.slice(html.indexOf('function sheetFences(){'),
+                                 html.indexOf('/\* Annotations belong', html.indexOf('function sheetFences(){'))),
+                      /hidden3d/);
   // every page states what it is and what scale it is at
   assert.match(html, /\$\{pg\.kind\} 1:\$\{pg\.den\} at A4/);
   // and a fence gets a section page beside its elevation

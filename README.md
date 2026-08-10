@@ -68,7 +68,8 @@ screens.
 - **Per-fence settings.** Every fence line follows the shared defaults until you
   tick "This fence has its own settings", then it can keep its own name,
   spacing, style, height, rail side, post shapes, end-post rule, handrail and
-  materials inclusion. Totals aggregate across all included fences.
+  materials inclusion. Its 3D and drawing-sheet visibility can be controlled
+  independently. Totals aggregate across all included fences.
 - **Gates.** Mark any segment as a gate: its opening is excluded from fence length
   and panel totals, while its support posts and leaf rails/palings are included in
   materials unless those BOM components are excluded. Gate-only runs are named

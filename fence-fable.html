@@ -227,7 +227,8 @@
             background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:10px;
             font-size:12.5px;font-weight:600;cursor:pointer}
   label.own input{width:16px;height:16px;accent-color:var(--accent)}
-  #matIncludeWrap.off,#fenceVisibleWrap.off{background:var(--field);border-color:var(--line)}
+  #matIncludeWrap.off,#fenceVisibleWrap.off,#fenceSheetWrap.off{
+    background:var(--field);border-color:var(--line)}
   .note{color:var(--muted);font-size:12px;margin:6px 0 0}
   .srOnly{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
           clip:rect(0,0,0,0);white-space:nowrap;border:0}
@@ -686,6 +687,8 @@
           <input type="checkbox" id="fenceVisible" checked> Show this fence in 3D</label>
         <p class="note" id="fenceHiddenNote" style="display:none;margin:0 0 8px">
           Hidden from 3D; retained as a dotted line in the plan and included in materials.</p>
+        <label id="fenceSheetWrap" class="own" style="display:none">
+          <input type="checkbox" id="fenceSheet" checked> Show this fence in Sheet</label>
       </div>
     </details>
 
@@ -1557,6 +1560,7 @@ function deleteSegment(polys, p, i){
       .map(q => ({ pts:q, closed:false, done:true,
                    excludeMaterials:pl.excludeMaterials || undefined,
                    hidden3d:pl.hidden3d || undefined,
+                   hiddenSheet:pl.hiddenSheet || undefined,
                    mat:pl.mat ? JSON.parse(JSON.stringify(pl.mat)) : undefined,
                    name:pl.name || undefined,
                    excludeRails:pl.excludeRails || undefined,
@@ -4501,7 +4505,7 @@ const SECTION_MIN_MM = 3.2;   // paper a chain step needs before its arrows are 
 const P2S = (x, y) => ({ x:(x - view.x)*view.s, y:(y - view.y)*view.s });
 function sheetFences(){
   return state.polys.map((pl, i) => i).filter(i =>
-    !state.polys[i].hidden3d && state.polys[i].pts.length > 1);
+    !state.polys[i].hiddenSheet && state.polys[i].pts.length > 1);
 }
 /* Annotations belong to the paper, not the screen: a fixed height of text whatever the zoom.
    Every threshold in dimAt/dimChain scales with it, so the sheet carries the same dimensions
@@ -5167,6 +5171,7 @@ function syncReadOnlyDetails(){
     ['Post shape', postShapeOf(M) === 'round' ? 'Round' : 'Square'],
     ['End posts', endsLabel(M,sc.pl)],
     ['3D visibility', sc.pl.hidden3d ? 'Hidden' : 'Shown'],
+    ['Sheet visibility', sc.pl.hiddenSheet ? 'Hidden' : 'Shown'],
     ['Rails per panel', String(M.rails)],
   ];
   if (M.style === 'rail'){
@@ -5223,6 +5228,9 @@ function syncMatInputs(){
   $('fenceVisible').checked = !sc.pl || !sc.pl.hidden3d;
   $('fenceVisibleWrap').classList.toggle('off', !!(sc.pl && sc.pl.hidden3d));
   $('fenceHiddenNote').style.display = sc.pl && sc.pl.hidden3d ? '' : 'none';
+  $('fenceSheetWrap').style.display = sc.pl ? 'flex' : 'none';
+  $('fenceSheet').checked = !sc.pl || !sc.pl.hiddenSheet;
+  $('fenceSheetWrap').classList.toggle('off', !!(sc.pl && sc.pl.hiddenSheet));
   $('matOwnWrap').style.display = sc.pl ? 'flex' : 'none';
   $('matOwn').checked = sc.own;
   $('matWho').textContent = !sc.pl ? 'Editing the defaults — used by every fence without its own settings.'
@@ -6207,6 +6215,12 @@ $('fenceVisible').addEventListener('change', e => {
   const sc = matScope();
   if (!sc.pl) return;
   commitEdit(() => sc.pl.hidden3d = e.target.checked ? undefined : true);
+  updateAll();
+});
+$('fenceSheet').addEventListener('change', e => {
+  const sc = matScope();
+  if (!sc.pl) return;
+  commitEdit(() => sc.pl.hiddenSheet = e.target.checked ? undefined : true);
   updateAll();
 });
 $('matOwn').addEventListener('change', e => {

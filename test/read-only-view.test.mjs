@@ -19,6 +19,12 @@ test('hidden fences stay identifiable in plan while being omitted from 3D', () =
   assert.match(html, /const visiblePolys = state\.polys\.filter\(pl => !pl\.hidden3d\)/);
 });
 
+test('each fence controls drawing-sheet visibility independently from 3D', () => {
+  assert.match(html, /id="fenceSheet" checked> Show this fence in Sheet/);
+  assert.match(html, /commitEdit\(\(\) => sc\.pl\.hiddenSheet = e\.target\.checked \? undefined : true\)/);
+  assert.match(html, /\['Sheet visibility', sc\.pl\.hiddenSheet \? 'Hidden' : 'Shown'\]/);
+});
+
 test('share management exposes explicit link removal confirmation', () => {
   assert.match(html, /id="shareStop"[^>]*>Remove link<\/button>/);
   assert.match(html, /id="shareStopPanel" hidden/);
