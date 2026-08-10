@@ -242,6 +242,7 @@ test('the developed elevation agrees with the model it is drawn from', () => {
   assert.equal(+bent.len.toFixed(6), 7);
   assert.equal(bent.parts.filter(p => p.k === 'corner').length, 1);
   assert.equal(bent.parts.filter(p => p.k === 'corner')[0].x, 3);
+  assert.match(html, /ctx\.fillText\('CORNER FOLD', b\.x, b\.y-1\.5\*view\.s\);/);
   // posts at 0, 2.4, 3 (the fold), 5.4, 7 — the junction counted once
   // Array.from: the vm realm's arrays are structurally equal but not reference-equal
   assert.deepEqual(Array.from(bent.stations), [0, 2.4, 3, 5.4, 7]);

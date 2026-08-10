@@ -4967,7 +4967,12 @@ function paintElevation(bl, u, k){
     if (p.k === 'corner'){                                    // a fold in the developed view
       const a = P2S(xAt(p.x), base), b = P2S(xAt(p.x), base - mm(ev.height) - 2);
       ctx.save(); ctx.setLineDash([3,3]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = SHEET_INK; ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.font = `600 ${(ANNOT_MM*view.s*0.78).toFixed(2)}px ${PAPER_DIM.font}`;
+      ctx.fillText('CORNER FOLD', b.x, b.y-1.5*view.s);
+      ctx.restore();
     }
   }
   // The handrail sits on the post tops, so it is the final continuous member in elevation.
