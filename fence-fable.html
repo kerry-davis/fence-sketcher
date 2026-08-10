@@ -4711,8 +4711,12 @@ function paintPlan(pg, u, scale){
     ctx.lineWidth = 1.5; ctx.setLineDash(seg.gate || plan.pl.excludeMaterials ? [8,5] : []);
     ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke(); ctx.restore();
     const mid = {x:(A.x+B.x)/2, y:(A.y+B.y)/2};
-    const dimItems = seg.bays.map(bay => ({ p:paperPoint(bay.a), q:paperPoint(bay.b),
-      txt:(seg.gate ? 'Gate ' : '') + fmtLen(bay.len, u) }));
+    // A single bay is already the segment overall (not a second identical label). Longer
+    // segments get the post-to-post chain plus their farther overall dimension.
+    const dimItems = seg.bays.length > 1
+      ? seg.bays.map(bay => ({ p:paperPoint(bay.a), q:paperPoint(bay.b),
+          txt:(seg.gate ? 'Gate ' : '') + fmtLen(bay.len, u) }))
+      : [];
     const avoid = dimAvoid(seg);
     const reach = dimItems.length ? dimChain(toScreen, dimItems, avoid, scale) : CHAIN_OFF*scale;
     dimAt(toScreen, paperPoint(seg.a), paperPoint(seg.b),

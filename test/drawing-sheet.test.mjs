@@ -71,7 +71,8 @@ test('each item gets an isolated, dimensioned plan page', () => {
   assert.match(html, /place\(\{ kind:'plan', i, plan, den:paired\.den, k:paired\.k,/);
   assert.match(html, /else if \(pg\.kind === 'plan'\) paintPlan\(pg, u, k\);/);
   assert.match(html, /for \(const seg of plan\.segments\)\{/);
-  assert.match(html, /const dimItems = seg\.bays\.map\(bay =>/);
+  assert.match(html, /const dimItems = seg\.bays\.length > 1\s*\n\s*\? seg\.bays\.map\(bay =>/);
+  assert.match(html, /txt:\(seg\.gate \? 'Gate ' : ''\) \+ fmtLen\(bay\.len, u\) \}\)\)\s*\n\s*: \[\];/);
   assert.match(html, /const reach = dimItems\.length \? dimChain\(toScreen, dimItems, avoid, scale\) : CHAIN_OFF\*scale;/);
   assert.match(html, /reach \+ CHAIN_OFF\*scale\*1\.6/);
   assert.match(html, /dimAt\(toScreen, paperPoint\(seg\.a\), paperPoint\(seg\.b\)/);
@@ -139,6 +140,9 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
   assert.equal(gate.segments[0].gate, true);
   assert.equal(gate.segments[0].bays.length, 1);
   assert.equal(gate.posts.length, 2);
+  // The painter's one-bay rule leaves this whole gate to the segment overall dimension, so it
+  // cannot emit a duplicate bay-chain label.
+  assert.match(html, /A single bay is already the segment overall/);
 });
 
 test('plan titles use a fixed page header independent of dimensions', () => {
