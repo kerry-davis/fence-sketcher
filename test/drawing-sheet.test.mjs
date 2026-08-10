@@ -20,6 +20,18 @@ test('the drawing sheet is its own view, and does not collide with the phone she
   assert.match(html, /if \(on\)\{ planView = \{\.\.\.view\}; fitSheet\(\); \}\s*\n\s*else if \(planView\)\{ view = planView; planView = null; \}/);
 });
 
+test('desktop wheel scrolls through sheet pages while modified wheel still zooms', () => {
+  const start = html.indexOf("cv.addEventListener('wheel'");
+  const end = html.indexOf('// keyboard:', start);
+  const wheel = html.slice(start, end);
+  assert.match(wheel, /if \(modeSheet && !e\.ctrlKey && !e\.metaKey\)\{/);
+  assert.match(wheel, /view\.x \+= e\.deltaX\*unit\/view\.s;/);
+  assert.match(wheel, /view\.y \+= e\.deltaY\*unit\/view\.s;/);
+  assert.match(wheel, /paint\(\); return;/);
+  assert.match(wheel, /zoomAt\(e\.offsetX, e\.offsetY, Math\.exp\(-e\.deltaY \* 0\.0012\)\);/);
+  assert.match(html, /wheel to scroll pages · Ctrl\+wheel or pinch to zoom/);
+});
+
 test('three pages per fence, with plan and elevation at one fitted scale', () => {
   assert.match(html, /const SCALES = \[5,10,20,25,50,100,200,500,1000,2000\];/);
   assert.match(html, /function sheetPlanElevationScale\(ev, plan, room\)\{/);

@@ -5870,10 +5870,19 @@ function handleClick(hit, sx, sy, multi){
   addPoint(snapFence(S2W(sx, sy)));                             // then starts a new fence
 }
 
-// wheel zoom, centred on the cursor
+// A drawing sheet behaves like a continuous PDF: an ordinary wheel moves through its pages.
+// Ctrl/Cmd-wheel remains cursor-centred zoom (and preserves trackpad pinch zoom). Plan and 3D
+// keep their existing wheel zoom behaviour.
 cv.addEventListener('wheel', e => {
   e.preventDefault();
   if (mode3d){ cam.dist *= Math.exp(e.deltaY * 0.0012); clampCam(); paint(); return; }
+  if (modeSheet && !e.ctrlKey && !e.metaKey){
+    const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
+               : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? ch : 1;
+    view.x += e.deltaX*unit/view.s;
+    view.y += e.deltaY*unit/view.s;
+    paint(); return;
+  }
   zoomAt(e.offsetX, e.offsetY, Math.exp(-e.deltaY * 0.0012));
 }, { passive:false });
 
@@ -5917,7 +5926,7 @@ function hintText(drawing){
   const phone = onPhone();
   if (modeSheet)
     return phone ? 'Plans · elevations · sections · drag to move'
-                 : 'Individual plans, elevations and sections at true scale · drag to move the sheet · scroll or pinch to zoom.';
+                 : 'Individual plans, elevations and sections at true scale · wheel to scroll pages · Ctrl+wheel or pinch to zoom.';
   if (mode3d)
     return phone
       ? 'Drag to orbit · two fingers to move · pinch to zoom'
