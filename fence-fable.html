@@ -2650,6 +2650,9 @@ function zoomAt(sx, sy, factor){
   view.x = w.x - sx/view.s; view.y = w.y - sy/view.s;
   updateAll();
 }
+function hasDrawingContent(){
+  return state.polys.some(pl => Array.isArray(pl.pts) && pl.pts.length) || state.builds.length > 0;
+}
 function fitView(){
   let xs=[], ys=[];
   for (const pl of state.polys) for (const q of pl.pts){ xs.push(q.x); ys.push(q.y); }
@@ -7265,8 +7268,10 @@ async function init(){
   load();
   syncControls();
   resize();                                   // sizes canvas and paints
-  if (!localStorage.getItem(LS_KEY)) view = { x:-2, y:-2, s:24 };
-  updateAll();
+  // A saved pan/zoom belongs to the old viewport. On reload, frame the restored drawing for
+  // the canvas that actually exists now instead of leaving it tiny or stranded in a corner.
+  if (hasDrawingContent()) fitView();
+  else { view = { x:-2, y:-2, s:24 }; updateAll(); }
   refreshBackups();
   refreshShareConfig();
 }
