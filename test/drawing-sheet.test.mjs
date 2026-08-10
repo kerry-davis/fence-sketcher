@@ -342,7 +342,7 @@ test('the drawing reads the BOM exclusions', () => {
 
 test('enabled handrail is visible in plan, elevation and section', () => {
   assert.match(html, /function sheetPlanHandrail\(seg, at, plan\)\{/);
-  assert.match(html, /for \(const seg of plan\.segments\) sheetPlanHandrail\(seg, at, plan\);/);
+  assert.match(html, /no construction centreline can show through the solid handrail/);
   assert.match(html, /function sheetPlanHandrailDimension\(plan, u, paperPoint, toScreen, scale\)\{/);
   assert.match(html, /sheetPlanHandrailDimension\(plan, u, paperPoint, toScreen, scale\);/);
   assert.match(html, /fmtSmall\(hr\.w, u\)/);
