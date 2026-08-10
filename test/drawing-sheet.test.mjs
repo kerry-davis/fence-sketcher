@@ -20,9 +20,14 @@ test('the drawing sheet is its own view, and does not collide with the phone she
   assert.match(html, /if \(on\)\{ planView = \{\.\.\.view\}; fitSheet\(\); \}\s*\n\s*else if \(planView\)\{ view = planView; planView = null; \}/);
 });
 
-test('three pages per fence, each at the largest standard scale that fits it', () => {
+test('three pages per fence, with plan and elevation at one fitted scale', () => {
   assert.match(html, /const SCALES = \[5,10,20,25,50,100,200,500,1000,2000\];/);
-  assert.match(html, /if \(ev\.len\*k <= room\.w && ev\.height\*k <= room\.h\*0\.62\)\{ den = d; break; \}/);
+  assert.match(html, /function sheetPlanElevationScale\(ev, plan, room\)\{/);
+  assert.match(html, /ev\.len\*k <= room\.w && ev\.height\*k <= room\.h\*0\.62/);
+  assert.match(html, /b\.width\*k <= room\.w && b\.height\*k <= room\.h\*0\.70/);
+  assert.match(html, /const paired = sheetPlanElevationScale\(ev, plan, room\);/);
+  assert.match(html, /place\(\{ kind:'plan', i, plan, den:paired\.den, k:paired\.k,/);
+  assert.match(html, /place\(\{ kind:'elevation', i, ev, den:paired\.den, k:paired\.k,/);
   // a page is laid out page-relative, then dropped onto its own sheet
   assert.match(html, /page\.top = pages\.length\*\(SHEET\.h \+ SHEET\.gap\*2\);\s*\n\s*page\.base \+= page\.top;/);
   // a hidden fence is off the sheet, as it is out of the 3D scene
@@ -39,10 +44,31 @@ test('three pages per fence, each at the largest standard scale that fits it', (
   assert.deepEqual(pages, ['plan', 'elevation', 'section']);
 });
 
+test('paired plan and elevation scales fit together', () => {
+  const start = html.indexOf('function sheetPlanElevationScale(');
+  const end = html.indexOf('/* One plan/elevation pair per item', start);
+  assert.ok(start >= 0 && end > start);
+  const context = { Math, SCALES:[5,10,20,25,50,100,200,500,1000,2000] };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  const room = { w:261, h:174 };
+  const elevation = { len:10.5, height:1.8 };
+  // The post padding makes the plan 10.6 m wide, but it still fits at 1:50 alongside the
+  // 10.5 m elevation. The pair must not independently drop the plan to 1:100.
+  const horizontal = context.sheetPlanElevationScale(elevation,
+    {bounds:{width:10.6,height:0.1}}, room);
+  assert.equal(horizontal.den, 50);
+  // Turning that same run vertically makes the plan's height the limiting view, so both pages
+  // step down together to 1:100 rather than leaving one view clipped.
+  const vertical = context.sheetPlanElevationScale(elevation,
+    {bounds:{width:0.1,height:10.6}}, room);
+  assert.equal(vertical.den, 100);
+});
+
 test('each item gets an isolated, dimensioned plan page', () => {
   assert.match(html, /function sheetPlanGeometry\(polys, idx\)\{/);
   assert.match(html, /const plan = sheetPlanGeometry\(state\.polys, i\), pb = plan\.bounds;/);
-  assert.match(html, /place\(\{ kind:'plan', i, plan, den:pden, k:pk,/);
+  assert.match(html, /place\(\{ kind:'plan', i, plan, den:paired\.den, k:paired\.k,/);
   assert.match(html, /else if \(pg\.kind === 'plan'\) paintPlan\(pg, u, k\);/);
   assert.match(html, /for \(const seg of plan\.segments\)\{/);
   assert.match(html, /dimAt\(toScreen, paperPoint\(seg\.a\), paperPoint\(seg\.b\)/);
@@ -62,7 +88,7 @@ test('each item gets an isolated, dimensioned plan page', () => {
 
 test('the item plan keeps XY bends, stations, gate flags and angles', () => {
   const start = html.indexOf('function sheetPlanGeometry(');
-  const end = html.indexOf('/* One elevation per page', start);
+  const end = html.indexOf('/* One plan/elevation pair per item', start);
   assert.ok(start >= 0 && end > start);
   const context = {
     Math, FENCE_JOIN_TOL:1e-4,

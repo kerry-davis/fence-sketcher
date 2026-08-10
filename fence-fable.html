@@ -4542,10 +4542,24 @@ function sheetPlanGeometry(polys, idx){
            bounds:{loX, hiX, loY, hiY, width:Math.max(hiX-loX, 0.1),
                    height:Math.max(hiY-loY, 0.1)} };
 }
-/* One elevation per page, at the largest standard scale that fits it. A run's fine build-up
-   cannot share that page: a 75 mm rail against a 10.5 m fence is 1.5 mm of paper at 1:50,
-   and no arrangement makes that legible. It gets a section page of its own, drawn at a scale
-   where its tightest step still has room — which is what a drawing office would do. */
+/* Plan and elevation are a paired set: their paper geometry must use one denominator so a
+   post station or the end of a straight run lines up visually between adjacent pages. A bent
+   or vertical plan can therefore make both views step down to the next coarser scale. */
+function sheetPlanElevationScale(ev, plan, room){
+  const b = plan.bounds;
+  const fits = d => {
+    const k = 1000/d;
+    return ev.len*k <= room.w && ev.height*k <= room.h*0.62 &&
+           b.width*k <= room.w && b.height*k <= room.h*0.70;
+  };
+  const den = SCALES.find(fits) ?? SCALES[SCALES.length-1];
+  return { den, k:1000/den };
+}
+/* One plan/elevation pair per item, at the largest common standard scale that fits both. A
+   run's fine build-up cannot share that pair: a 75 mm rail against a 10.5 m fence is 1.5 mm of
+   paper at 1:50, and no arrangement makes that legible. It gets a section page of its own,
+   drawn at a scale where its tightest step still has room — which is what a drawing office
+   would do. */
 function sheetLayout(){
   const room = { w: SHEET.w - 2*SHEET.margin - 16, h: SHEET.h - 2*SHEET.margin - 16 };
   const pages = [];
@@ -4559,23 +4573,14 @@ function sheetLayout(){
     // The first page for each item is its isolated top-down plan. Sheet opens on this page,
     // so the paper sequence reads the same way as the drawing: plan, elevation, section.
     const plan = sheetPlanGeometry(state.polys, i), pb = plan.bounds;
-    const planFits = d => pb.width*(1000/d) <= room.w*0.78 &&
-                         pb.height*(1000/d) <= room.h*0.70;
-    const pden = SCALES.find(planFits) ?? SCALES[SCALES.length-1], pk = 1000/pden;
-    place({ kind:'plan', i, plan, den:pden, k:pk,
-            x: SHEET.margin + 8 + Math.max(0, (room.w - pb.width*pk)/2),
-            base: SHEET.margin + 8 + (room.h + pb.height*pk)/2 });
-
     const ev = elevationParts(state.polys, i);
-    let den = SCALES[SCALES.length-1];
-    for (const d of SCALES){
-      const k = 1000/d;
-      if (ev.len*k <= room.w && ev.height*k <= room.h*0.62){ den = d; break; }
-    }
-    const k = 1000/den;
-    place({ kind:'elevation', i, ev, den, k,
-            x: SHEET.margin + 8 + Math.max(0, (room.w - ev.len*k)/2),
-            base: SHEET.margin + 8 + (room.h + ev.height*k)/2 });
+    const paired = sheetPlanElevationScale(ev, plan, room);
+    place({ kind:'plan', i, plan, den:paired.den, k:paired.k,
+            x: SHEET.margin + 8 + Math.max(0, (room.w - pb.width*paired.k)/2),
+            base: SHEET.margin + 8 + (room.h + pb.height*paired.k)/2 });
+    place({ kind:'elevation', i, ev, den:paired.den, k:paired.k,
+            x: SHEET.margin + 8 + Math.max(0, (room.w - ev.len*paired.k)/2),
+            base: SHEET.margin + 8 + (room.h + ev.height*paired.k)/2 });
     // the section is through one bay, so it is that bay's build-up — a gate opening in an
     // otherwise ordinary run is still a leaf, and a leaf has none of the panel's rails
     const bay = widestBay(ev), postW = postSizeOf(ev.mat);

@@ -241,10 +241,12 @@ site. Each fence or gate run gets three pages: an isolated **plan view** from di
 a **developed elevation** unrolled onto a vertical plane, and a section through a representative
 bay. The plan belongs to that item alone, not to the overall app/site plan.
 
-Each page carries the fence at the largest standard scale that fits it — `1:5` through
-`1:2000` — so a 1.5 m gate is drawn at `1:20` while a 10.5 m run beside it is `1:50`, each
-legible in its own right. The scale, the fence name and the drawing name are printed at the
-foot of every page, because a drawing without them cannot be read.
+The plan and developed elevation are a paired set: both use the same largest standard scale
+that fits both views — `1:5` through `1:2000` — so their post stations and longitudinal extent
+correspond across the adjacent pages. A 10.5 m horizontal run therefore stays `1:50` on both
+pages; a vertical or tightly bent plan can make the pair step down to `1:100` together. The
+section keeps its own larger detail scale. The scale, the fence name and the drawing name are
+printed at the foot of every page, because a drawing without them cannot be read.
 
 Each elevation reads the way the plan reads, left to right: a run whose first point is its
 right-hand end is developed from the other end, so the drawing is never a mirror of the
@@ -253,8 +255,9 @@ plan and the 3D view.
 The item plan preserves the run's actual XY shape: every segment keeps its direction and
 length, gates remain dashed, posts are placed at the same stations as the model, and each
 internal bend carries its measured corner angle. It is fitted independently to a standard
-`1:5`–`1:2000` scale, so a short gate and a long fence do not share a forced scale. Only that
-item is painted — neighbouring fences, buildings and the rest of the site are absent.
+`1:5`–`1:2000` scale as part of that paired set, so a short gate and a long fence do not share
+a forced scale. Only that item is painted — neighbouring fences, buildings and the rest of the
+site are absent.
 
 On the page: posts at their true stations, rails per bay, palings at their pitch, gate
 leaves clear of the ground, the handrail cap, and a dashed fold line at each corner. Below
