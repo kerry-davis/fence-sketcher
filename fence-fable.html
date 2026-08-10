@@ -482,7 +482,7 @@
   </div>
   <div class="grp toolbarEnd">
     <button id="b3d" title="Plan / 3D view">3D</button>
-    <button id="bSheet" class="editorOnly" title="Drawing sheet — elevations on paper">Sheet</button>
+    <button id="bSheet" class="editorOnly" title="Drawing sheet — individual plans, elevations and sections on paper">Sheet</button>
     <button id="bPdf" class="editorOnly" title="Save the drawing as a PDF">PDF</button>
     <div class="grp sec units viewTools">
     <div class="seg2" id="unitTog">
@@ -4486,7 +4486,7 @@ function paint3d(){
 }
 
 /* =====================================================================
-   Drawing sheet — the elevations, on paper
+   Drawing sheet — the isolated item views, on paper
    A sheet is millimetres of paper, so the plan's own pan/zoom drives it: `view` holds mm
    instead of metres while the sheet is up, and every dimension is the same renderDimension
    the plan and the 3D view draw.
@@ -4505,6 +4505,43 @@ function sheetFences(){
    at every zoom — and the same ones will be in the PDF. */
 const ANNOT_MM = 3.1;          // font size on paper; ~2.2 mm cap height, ISO-ish for A4
 const annotScale = () => ANNOT_MM*view.s/12;
+/* A fence's plan on the sheet is deliberately not the application's site plan. It is one
+   item's real XY geometry, with the same post placement and material end rules used by the
+   elevation, 3D scene and take-off. Keeping this as data first makes fitting and painting
+   independent of the rest of the drawing: no buildings or neighbouring runs can leak in. */
+function sheetPlanGeometry(polys, idx){
+  const pl = polys[idx], mat = pl.mat || state.mat, spacing = Math.max(0.1, mat.spacing);
+  const ends = materialPostEndFlags(polys, idx, mat), segments = [], posts = [], angles = [];
+  const addPost = (q, shape) => {
+    const old = posts.find(p => Math.hypot(p.x-q.x, p.y-q.y) < FENCE_JOIN_TOL);
+    if (old){ if (shape === 'round') old.shape = 'round'; return; }
+    posts.push({x:q.x, y:q.y, shape});
+  };
+  const runSegs = segsOf(pl);
+  for (const [i, a, b] of runSegs){
+    const L = segLen(a,b);
+    segments.push({ i, a, b, len:L, gate:!!a.gateAfter });
+    if (L < 1e-9) continue;
+    const segmentPosts = postsAlong(a, b, spacing, !!a.gateAfter);
+    segmentPosts.forEach((q, k) => {
+      if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
+      if (!pl.closed && i === runSegs.length-1 && k === segmentPosts.length-1 && !ends.end) return;
+      addPost(q, postShapeAt(polys, q, mat));
+    });
+  }
+  for (let i = 0; i < pl.pts.length; i++){
+    if (!pl.closed && (i === 0 || i === pl.pts.length-1)) continue;
+    const m = cornerAngleAt(pl, i);
+    if (m) angles.push({ i, point:pl.pts[i], degrees:m.degrees, signed:m.signed });
+  }
+  const size = postSizeOf(mat), pad = Math.max(size*0.75, 0.08);
+  const all = pl.pts.concat(posts), xs = all.map(q => q.x), ys = all.map(q => q.y);
+  const loX = Math.min(...xs) - pad, hiX = Math.max(...xs) + pad;
+  const loY = Math.min(...ys) - pad, hiY = Math.max(...ys) + pad;
+  return { pl, mat, segments, posts, angles, postSize:size,
+           bounds:{loX, hiX, loY, hiY, width:Math.max(hiX-loX, 0.1),
+                   height:Math.max(hiY-loY, 0.1)} };
+}
 /* One elevation per page, at the largest standard scale that fits it. A run's fine build-up
    cannot share that page: a 75 mm rail against a 10.5 m fence is 1.5 mm of paper at 1:50,
    and no arrangement makes that legible. It gets a section page of its own, drawn at a scale
@@ -4519,6 +4556,16 @@ function sheetLayout(){
     pages.push(page);
   };
   for (const i of sheetFences()){
+    // The first page for each item is its isolated top-down plan. Sheet opens on this page,
+    // so the paper sequence reads the same way as the drawing: plan, elevation, section.
+    const plan = sheetPlanGeometry(state.polys, i), pb = plan.bounds;
+    const planFits = d => pb.width*(1000/d) <= room.w*0.78 &&
+                         pb.height*(1000/d) <= room.h*0.70;
+    const pden = SCALES.find(planFits) ?? SCALES[SCALES.length-1], pk = 1000/pden;
+    place({ kind:'plan', i, plan, den:pden, k:pk,
+            x: SHEET.margin + 8 + Math.max(0, (room.w - pb.width*pk)/2),
+            base: SHEET.margin + 8 + (room.h + pb.height*pk)/2 });
+
     const ev = elevationParts(state.polys, i);
     let den = SCALES[SCALES.length-1];
     for (const d of SCALES){
@@ -4570,6 +4617,87 @@ function sheetRect(x, y, w, h, fill, off){                    // paper mm rectan
   ctx.fill(); ctx.stroke();
   ctx.restore();
 }
+function sheetPlanPost(p, at, plan, pg){
+  const S = at(p), r = Math.max(1.5, plan.postSize*pg.k*view.s/2), off = plan.pl.excludeMaterials;
+  ctx.save();
+  ctx.fillStyle = off ? '#ffffff' : '#cbd5e1';
+  ctx.strokeStyle = off ? SHEET_LINE : SHEET_INK; ctx.lineWidth = 1;
+  if (off) ctx.setLineDash([3,2]);
+  if (p.shape === 'round'){
+    ctx.beginPath(); ctx.arc(S.x, S.y, r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.rect(S.x-r, S.y-r, r*2, r*2); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+/* Plan angle notes use the same paper ink, font and arrow primitive as linear dimensions. The
+   geometry is transformed before it gets here, so the arc follows the item's actual bend and
+   never asks the overall drawing (or a neighbouring fence) for context. */
+function sheetPlanAngle(pg, angle, at, scale){
+  const pts = pg.plan.pl.pts, V = at(angle.point);
+  const prev = at(pts[(angle.i-1+pts.length)%pts.length]), next = at(pts[(angle.i+1)%pts.length]);
+  const b1 = Math.atan2(prev.y-V.y, prev.x-V.x), b2 = Math.atan2(next.y-V.y, next.x-V.x);
+  let sweep = b2-b1;
+  while (sweep <= -Math.PI) sweep += Math.PI*2;
+  while (sweep > Math.PI) sweep -= Math.PI*2;
+  const leg = Math.min(Math.hypot(prev.x-V.x, prev.y-V.y), Math.hypot(next.x-V.x, next.y-V.y));
+  const radius = Math.max(7*view.s, Math.min(14*view.s, leg*0.30));
+  ctx.save();
+  ctx.strokeStyle = dimInk(); ctx.fillStyle = dimInk(); ctx.lineWidth = Math.max(1, scale);
+  ctx.beginPath(); ctx.arc(V.x, V.y, radius, b1, b1+sweep, sweep < 0); ctx.stroke();
+  const dir = sweep < 0 ? -1 : 1;
+  for (const [b, way] of [[b1,1],[b1+sweep,-1]]){
+    const tx = -Math.sin(b)*dir*way, ty = Math.cos(b)*dir*way;
+    dimArrow(V.x+Math.cos(b)*radius, V.y+Math.sin(b)*radius, tx, ty, scale);
+  }
+  const mid = b1+sweep/2, T = {x:V.x+Math.cos(mid)*radius, y:V.y+Math.sin(mid)*radius};
+  const txt = formatFenceAngle(angle.degrees);
+  ctx.translate(T.x, T.y); ctx.font = dimFont(scale); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const wide = ctx.measureText(txt).width;
+  if (dimStyle.mask){
+    ctx.fillStyle = dimHalo();
+    ctx.fillRect(-wide/2-1.6*scale, -6.2*scale, wide+3.2*scale, 12.4*scale);
+  }
+  ctx.fillStyle = dimInk(); ctx.fillText(txt, 0, 0);
+  ctx.restore();
+}
+function paintPlan(pg, u, scale){
+  const { plan, x, base } = pg, b = plan.bounds, mm = v => v*pg.k;
+  const top = base - mm(b.height);
+  // The interactive plan's S2W uses canvas Y-down coordinates. Keep that chirality on paper:
+  // a larger state Y lands lower on the page, rather than mirroring a bent run vertically.
+  const at = q => P2S(x + mm(q.x-b.loX), top + mm(q.y-b.loY));
+  // Dimensions work in the same paper coordinate system as P2S; P2S is applied once by the
+  // projector passed to dimAt, rather than converting a screen point back into paper space.
+  const toScreen = p => P2S(p[0], p[1]);
+  const paperPoint = q => [x + mm(q.x-b.loX), top + mm(q.y-b.loY)];
+  ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`; ctx.fillStyle = SHEET_INK;
+  ctx.fillText(`Plan — ${fenceName(plan.pl, pg.i)}  1:${pg.den}`, P2S(x, top-4).x, P2S(x, top-4).y);
+  if (plan.pl.excludeMaterials){
+    ctx.save(); ctx.font = `${(ANNOT_MM*view.s*0.9).toFixed(2)}px ${PAPER_DIM.font}`;
+    ctx.fillStyle = SHEET_LINE; ctx.fillText('Dashed: fence not included in BOM', P2S(x, top-7.4).x, P2S(x, top-7.4).y); ctx.restore();
+  }
+  // The centreline is the item's actual XY path. Gates retain the plan's dashed convention;
+  // no other item is visited here, so this is an isolated run rather than a site overview.
+  for (const seg of plan.segments){
+    const A = at(seg.a), B = at(seg.b);
+    ctx.save();
+    ctx.strokeStyle = plan.pl.excludeMaterials ? SHEET_LINE : seg.gate ? '#475569' : SHEET_INK;
+    ctx.lineWidth = 1.5; ctx.setLineDash(seg.gate || plan.pl.excludeMaterials ? [8,5] : []);
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke(); ctx.restore();
+    const mid = {x:(A.x+B.x)/2, y:(A.y+B.y)/2};
+    dimAt(toScreen, paperPoint(seg.a), paperPoint(seg.b),
+          (seg.gate ? 'Gate ' : '') + fmtLen(seg.len, u), CHAIN_OFF*scale*1.35,
+          paperPoint({x:(b.loX+b.hiX)/2, y:(b.loY+b.hiY)/2}), scale);
+    // A short gate label makes the dashed bay unambiguous when its dimension is crowded.
+    if (seg.gate && Math.hypot(B.x-A.x, B.y-A.y) > 36){
+      ctx.save(); ctx.font = `${(ANNOT_MM*view.s*0.85).toFixed(2)}px ${PAPER_DIM.font}`;
+      ctx.fillStyle = SHEET_INK; ctx.textAlign = 'center'; ctx.fillText('GATE', mid.x, mid.y-5*view.s); ctx.restore();
+    }
+  }
+  for (const post of plan.posts) sheetPlanPost(post, at, plan, pg);
+  for (const angle of plan.angles) sheetPlanAngle(pg, angle, at, scale);
+}
 function paintSheet(){
   const u = state.unit, k = annotScale();
   for (const pg of sheetLayout().pages) paintSheetPage(pg, u, k);
@@ -4584,7 +4712,9 @@ function paintSheetPageInk(pg, u, k){
   const m = SHEET.margin/2;
   const b0 = P2S(m, pg.top + m), b1 = P2S(SHEET.w - m, pg.top + SHEET.h - m);
   ctx.strokeRect(b0.x, b0.y, b1.x-b0.x, b1.y-b0.y);           // border frame
-  if (pg.kind === 'section') paintSection(pg, u, k); else paintElevation(pg, u, k);
+  if (pg.kind === 'section') paintSection(pg, u, k);
+  else if (pg.kind === 'plan') paintPlan(pg, u, k);
+  else paintElevation(pg, u, k);
   // the two things a drawing is worthless without: what it is, and what scale it is at
   const foot = P2S(SHEET.w - m - 2, pg.top + SHEET.h - m - 3);
   ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`;
@@ -4676,7 +4806,7 @@ function exportSheetPdf(){
     return { jpeg: jpegBytes(canvas), w: px, h: py };
   });
   const blob = new Blob([buildPdf(rendered, SHEET.w, SHEET.h)], {type:'application/pdf'});
-  const name = `${bkCurrent || 'fence-drawing'}-elevations.pdf`;
+  const name = `${bkCurrent || 'fence-drawing'}-sheets.pdf`;
   const url = URL.createObjectURL(blob), link = document.createElement('a');
   link.href = url; link.download = name; link.rel = 'noopener';
   document.body.appendChild(link); link.click(); link.remove();
@@ -5733,8 +5863,8 @@ window.addEventListener('keydown', e => {
 function hintText(drawing){
   const phone = onPhone();
   if (modeSheet)
-    return phone ? 'Elevations · drag to move · pinch to zoom'
-                 : 'Elevations of every fence at true length · drag to move the sheet · scroll or pinch to zoom.';
+    return phone ? 'Plans · elevations · sections · drag to move'
+                 : 'Individual plans, elevations and sections at true scale · drag to move the sheet · scroll or pinch to zoom.';
   if (mode3d)
     return phone
       ? 'Drag to orbit · two fingers to move · pinch to zoom'

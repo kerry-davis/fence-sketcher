@@ -20,7 +20,7 @@ test('the drawing sheet is its own view, and does not collide with the phone she
   assert.match(html, /if \(on\)\{ planView = \{\.\.\.view\}; fitSheet\(\); \}\s*\n\s*else if \(planView\)\{ view = planView; planView = null; \}/);
 });
 
-test('one page per fence, each at the largest standard scale that fits it', () => {
+test('three pages per fence, each at the largest standard scale that fits it', () => {
   assert.match(html, /const SCALES = \[5,10,20,25,50,100,200,500,1000,2000\];/);
   assert.match(html, /if \(ev\.len\*k <= room\.w && ev\.height\*k <= room\.h\*0\.62\)\{ den = d; break; \}/);
   // a page is laid out page-relative, then dropped onto its own sheet
@@ -32,6 +32,74 @@ test('one page per fence, each at the largest standard scale that fits it', () =
   // and a fence gets a section page beside its elevation
   assert.match(html, /place\(\{ kind:'section', i, ev, bounds, bay, win, den:sden, k:sk,/);
   assert.match(html, /SCALES\.find\(d => fits\(d\) && tightest\*\(1000\/d\) >= SECTION_MIN_MM\)\s*\n?\s*\?\? SCALES\.find\(fits\)/);
+  const start = html.indexOf('function sheetLayout(){');
+  const end = html.indexOf('/* A section is taken through a full bay', start);
+  const layout = html.slice(start, end);
+  const pages = [...layout.matchAll(/place\(\{ kind:'(plan|elevation|section)'/g)].map(m => m[1]);
+  assert.deepEqual(pages, ['plan', 'elevation', 'section']);
+});
+
+test('each item gets an isolated, dimensioned plan page', () => {
+  assert.match(html, /function sheetPlanGeometry\(polys, idx\)\{/);
+  assert.match(html, /const plan = sheetPlanGeometry\(state\.polys, i\), pb = plan\.bounds;/);
+  assert.match(html, /place\(\{ kind:'plan', i, plan, den:pden, k:pk,/);
+  assert.match(html, /else if \(pg\.kind === 'plan'\) paintPlan\(pg, u, k\);/);
+  assert.match(html, /for \(const seg of plan\.segments\)\{/);
+  assert.match(html, /dimAt\(toScreen, paperPoint\(seg\.a\), paperPoint\(seg\.b\)/);
+  assert.match(html, /for \(const angle of plan\.angles\) sheetPlanAngle\(pg, angle, at, scale\);/);
+  // State and canvas coordinates are both Y-down. Increasing state Y must therefore move
+  // down the isolated paper plan, preserving the run's chirality rather than mirroring it.
+  assert.match(html, /const top = base - mm\(b\.height\);\s*\/\/ The interactive plan's S2W uses canvas Y-down/);
+  assert.match(html, /const at = q => P2S\(x \+ mm\(q\.x-b\.loX\), top \+ mm\(q\.y-b\.loY\)\);/);
+  assert.match(html, /const paperPoint = q => \[x \+ mm\(q\.x-b\.loX\), top \+ mm\(q\.y-b\.loY\)\];/);
+  assert.doesNotMatch(html, /const at = q => P2S\(x \+ mm\(q\.x-b\.loX\), base - mm\(q\.y-b\.loY\)\);/);
+  // The item painter only consumes the plan data; buildings and neighbouring runs are never
+  // traversed while a plan page is painted.
+  const start = html.indexOf('function paintPlan('), end = html.indexOf('function paintSheet(){', start);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(html.slice(start, end), /state\.builds|state\.polys\.forEach/);
+});
+
+test('the item plan keeps XY bends, stations, gate flags and angles', () => {
+  const start = html.indexOf('function sheetPlanGeometry(');
+  const end = html.indexOf('/* One elevation per page', start);
+  assert.ok(start >= 0 && end > start);
+  const context = {
+    Math, FENCE_JOIN_TOL:1e-4,
+    state:{mat:{}},
+  };
+  const helpers = `
+    const segLen=(a,b)=>Math.hypot(b.x-a.x,b.y-a.y);
+    const segsOf=pl=>{const n=pl.closed?pl.pts.length:pl.pts.length-1;
+      return Array.from({length:n},(_,i)=>[i,pl.pts[i],pl.pts[(i+1)%pl.pts.length]]);};
+    const postsAlong=(a,b,sp,gate)=>{const L=segLen(a,b),n=gate?1:Math.max(1,Math.ceil(L/sp-1e-9)),o=[];
+      for(let k=0;k<=n;k++){const d=gate?L*k:Math.min(L,sp*k),t=L?d/L:0;
+        o.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});}return o;};
+    const materialPostEndFlags=()=>({start:true,end:true});
+    const postShapeAt=()=> 'square';
+    const postSizeOf=m=>m.postSize??0.1;
+    const cornerAngleAt=(pl,k)=>{const V=pl.pts[k],A=pl.pts[k-1],B=pl.pts[k+1];
+      const a1=Math.atan2(A.y-V.y,A.x-V.x),a2=Math.atan2(B.y-V.y,B.x-V.x);
+      let d=a2-a1;while(d<=-Math.PI)d+=2*Math.PI;while(d>Math.PI)d-=2*Math.PI;
+      return {signed:d,degrees:Math.abs(d)*180/Math.PI};};
+  `;
+  vm.createContext(context);
+  vm.runInContext(helpers + html.slice(start, end), context);
+  const mat = {spacing:2.4, postSize:0.1};
+  const plan = context.sheetPlanGeometry([
+    {pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],closed:false,mat}
+  ], 0);
+  assert.deepEqual(Array.from(plan.segments).map(s => +s.len.toFixed(4)), [3,4]);
+  assert.deepEqual(Array.from(plan.posts).map(p => [+p.x.toFixed(4),+p.y.toFixed(4)]),
+                   [[0,0],[2.4,0],[3,0],[3,2.4],[3,4]]);
+  assert.equal(plan.angles.length, 1);
+  assert.equal(+plan.angles[0].degrees.toFixed(4), 90);
+
+  const gate = context.sheetPlanGeometry([
+    {pts:[{x:0,y:0,gateAfter:true},{x:1.8,y:0}],closed:false,mat}
+  ], 0);
+  assert.equal(gate.segments[0].gate, true);
+  assert.equal(gate.posts.length, 2);
 });
 
 test('the sheet draws dimensions with the same renderer as the plan and 3D', () => {

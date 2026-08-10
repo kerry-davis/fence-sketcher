@@ -237,9 +237,9 @@ follows, but a value you typed always wins.
 ## The drawing sheet
 
 **Sheet** in the toolbar swaps the plan for a set of A4 pages — the drawing you take to
-site. One page per fence, each carrying a **developed elevation**: the run unrolled onto a
-vertical plane, so a corner is a fold rather than a break and every length on the page is a
-true length.
+site. Each fence or gate run gets three pages: an isolated **plan view** from directly above,
+a **developed elevation** unrolled onto a vertical plane, and a section through a representative
+bay. The plan belongs to that item alone, not to the overall app/site plan.
 
 Each page carries the fence at the largest standard scale that fits it — `1:5` through
 `1:2000` — so a 1.5 m gate is drawn at `1:20` while a 10.5 m run beside it is `1:50`, each
@@ -249,6 +249,12 @@ foot of every page, because a drawing without them cannot be read.
 Each elevation reads the way the plan reads, left to right: a run whose first point is its
 right-hand end is developed from the other end, so the drawing is never a mirror of the
 plan and the 3D view.
+
+The item plan preserves the run's actual XY shape: every segment keeps its direction and
+length, gates remain dashed, posts are placed at the same stations as the model, and each
+internal bend carries its measured corner angle. It is fitted independently to a standard
+`1:5`–`1:2000` scale, so a short gate and a long fence do not share a forced scale. Only that
+item is painted — neighbouring fences, buildings and the rest of the site are absent.
 
 On the page: posts at their true stations, rails per bay, palings at their pitch, gate
 leaves clear of the ground, the handrail cap, and a dashed fold line at each corner. Below
@@ -276,7 +282,7 @@ an `opts.scale` and serves both.
 
 Because of that, a dimension has to *fit the paper*, and a run's fine build-up cannot fit
 its own elevation: a 75 mm rail against a 10.5 m fence is 1.5 mm of paper at 1:50. So each
-fence gets a **section page** after its elevation — the same elevation cropped to one whole
+fence gets a **section page** after its plan and elevation — the same elevation cropped to one whole
 bay, post to post, blown up to the largest scale where its tightest step still has room
 (typically 1:10 or 1:20). It carries the ground gap, every rail, every gap between them and
 the handrail up one post, the fence height outside that, and the bay span underneath. The
@@ -286,10 +292,10 @@ gate opening wide enough to be the widest bay is sectioned as a leaf even though
 around it is ordinary fence. The elevation keeps the lengths; the section says how
 it goes together.
 
-The geometry comes from `elevationParts()`, which reads `postsAlong()`, `railYs()`,
-`gateLeafBuild()` and `materialPostEndFlags()` — the same helpers the plan, the 3D scene and
-the materials take-off use. An elevation therefore cannot show a fence that the model,
-the scene and the quantities do not agree on.
+The geometry comes from `sheetPlanGeometry()` and `elevationParts()`. They read
+`postsAlong()`, `railYs()`, `gateLeafBuild()` and `materialPostEndFlags()` — the same helpers
+the app plan, the 3D scene and the materials take-off use. A sheet view therefore cannot show
+a fence that the model, the scene and the quantities do not agree on.
 
 **The BOM exclusions are part of the drawing.** Whatever `Include rails in BOM`,
 `Include palings in BOM` or the whole-fence materials tick leaves out is drawn **dashed and
@@ -319,7 +325,7 @@ ponytail: the pages are raster. Vector would mean redrawing the whole sheet thro
 device, and is only worth it if someone needs selectable text or to zoom past 200 dpi in the
 file itself.
 
-Not there yet: a title block, a plan view on the sheet, and a BOM table with balloons.
+Not there yet: a title block and a BOM table with balloons.
 
 ## The 3D view
 
