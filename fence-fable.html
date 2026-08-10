@@ -4589,6 +4589,21 @@ function sheetPlanElevationScale(ev, plan, room){
   const den = SCALES.find(fits) ?? SCALES[SCALES.length-1];
   return { den, k:1000/den };
 }
+// Convert developed chainage back to the physical point in plan. The elevation uses this
+// point's paper X coordinate, so every post centre falls on the same vertical projector on
+// the two adjacent pages. Values just beyond an end support the drawn post's half-width.
+function sheetPlanPointAtStation(plan, station){
+  let run = 0;
+  for (let n = 0; n < plan.segments.length; n++){
+    const seg = plan.segments[n], last = n === plan.segments.length-1;
+    if (station <= run+seg.len || last){
+      const t = seg.len > 1e-9 ? (station-run)/seg.len : 0;
+      return { x:seg.a.x+(seg.b.x-seg.a.x)*t, y:seg.a.y+(seg.b.y-seg.a.y)*t };
+    }
+    run += seg.len;
+  }
+  return plan.pl.pts[0];
+}
 /* One plan/elevation pair per item, at the largest common standard scale that fits both. A
    run's fine build-up cannot share that pair: a 75 mm rail against a 10.5 m fence is 1.5 mm of
    paper at 1:50, and no arrangement makes that legible. It gets a section page of its own,
@@ -4609,11 +4624,17 @@ function sheetLayout(){
     const plan = sheetPlanGeometry(state.polys, i), pb = plan.bounds;
     const ev = elevationParts(state.polys, i);
     const paired = sheetPlanElevationScale(ev, plan, room);
-    place({ kind:'plan', i, plan, ev, den:paired.den, k:paired.k,
-            x: SHEET.margin + 8 + Math.max(0, (room.w - pb.width*paired.k)/2),
-            base: SHEET.margin + 8 + (room.h + pb.height*paired.k)/2 });
+    const planPage = { kind:'plan', i, plan, ev, den:paired.den, k:paired.k,
+      x: SHEET.margin + 8 + Math.max(0, (room.w - pb.width*paired.k)/2),
+      base: SHEET.margin + 8 + (room.h + pb.height*paired.k)/2 };
+    place(planPage);
+    const stationX = station => {
+      const physical = ev.flipped ? ev.len-station : station;
+      const q = sheetPlanPointAtStation(plan, physical);
+      return planPage.x + (q.x-pb.loX)*paired.k;
+    };
     place({ kind:'elevation', i, ev, den:paired.den, k:paired.k,
-            x: SHEET.margin + 8 + Math.max(0, (room.w - ev.len*paired.k)/2),
+            x:stationX(0), stationX,
             base: SHEET.margin + 8 + (room.h + ev.height*paired.k)/2 });
     // the section is through one bay, so it is that bay's build-up — a gate opening in an
     // otherwise ordinary run is still a leaf, and a leaf has none of the panel's rails
@@ -4864,27 +4885,29 @@ function exportSheetPdf(){
 }
 function paintElevation(bl, u, k){
   const { ev, x, base } = bl, mm = v => v*bl.k;
+  const xAt = bl.stationX || (station => x+mm(station));
   const fill = { post:'#cbd5e1', rail:'#e2e8f0', board:'#eef2f6', cap:'#cbd5e1', gate:'#f1f5f9' };
-  const at = (px, py) => [x + mm(px), base - mm(py)];         // metres → paper mm, y up
+  const at = (px, py) => [xAt(px), base - mm(py)];           // chainage → aligned paper X, y up
   const toScreen = p => P2S(p[0], p[1]);
   for (const p of ev.parts){                                  // boards first, posts last
     if (p.k === 'corner' || p.k === 'gate') continue;
-    sheetRect(x + mm(p.x), base - mm(p.y), mm(p.w), mm(p.h), fill[p.k] || '#e2e8f0', p.off);
+    sheetRect(xAt(p.x), base - mm(p.y), xAt(p.x+p.w)-xAt(p.x), mm(p.h),
+              fill[p.k] || '#e2e8f0', p.off);
   }
   for (const p of ev.parts){
     if (p.k === 'gate'){
-      sheetRect(x + mm(p.x), base - mm(p.y), mm(p.w), mm(p.h), fill.gate, p.off);
+      sheetRect(xAt(p.x), base - mm(p.y), xAt(p.x+p.w)-xAt(p.x), mm(p.h), fill.gate, p.off);
       for (const ry of p.rails)
-        sheetRect(x + mm(p.x), base - mm(ry - p.railW/2), mm(p.w), mm(p.railW), fill.rail,
+        sheetRect(xAt(p.x), base - mm(ry - p.railW/2), xAt(p.x+p.w)-xAt(p.x), mm(p.railW), fill.rail,
                   p.off || p.railsOff);
     }
     if (p.k === 'corner'){                                    // a fold in the developed view
-      const a = P2S(x + mm(p.x), base), b = P2S(x + mm(p.x), base - mm(ev.height) - 2);
+      const a = P2S(xAt(p.x), base), b = P2S(xAt(p.x), base - mm(ev.height) - 2);
       ctx.save(); ctx.setLineDash([3,3]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
     }
   }
-  const ground = P2S(x - 3, base), groundEnd = P2S(x + mm(ev.len) + 3, base);
+  const ground = P2S(xAt(0) - 3, base), groundEnd = P2S(xAt(ev.len) + 3, base);
   ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(ground.x, ground.y); ctx.lineTo(groundEnd.x, groundEnd.y); ctx.stroke();
   // post spacing along the bottom, with the whole run standing clear beneath it

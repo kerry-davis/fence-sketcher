@@ -26,7 +26,7 @@ test('three pages per fence, with plan and elevation at one fitted scale', () =>
   assert.match(html, /ev\.len\*k <= room\.w && ev\.height\*k <= room\.h\*0\.62/);
   assert.match(html, /b\.width\*k <= room\.w && b\.height\*k <= room\.h\*0\.70/);
   assert.match(html, /const paired = sheetPlanElevationScale\(ev, plan, room\);/);
-  assert.match(html, /place\(\{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
+  assert.match(html, /const planPage = \{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
   assert.match(html, /place\(\{ kind:'elevation', i, ev, den:paired\.den, k:paired\.k,/);
   // a page is laid out page-relative, then dropped onto its own sheet
   assert.match(html, /page\.top = pages\.length\*\(SHEET\.h \+ SHEET\.gap\*2\);\s*\n\s*page\.base \+= page\.top;/);
@@ -40,8 +40,8 @@ test('three pages per fence, with plan and elevation at one fitted scale', () =>
   const start = html.indexOf('function sheetLayout(){');
   const end = html.indexOf('/* A section is taken through a full bay', start);
   const layout = html.slice(start, end);
-  const pages = [...layout.matchAll(/place\(\{ kind:'(plan|elevation|section)'/g)].map(m => m[1]);
-  assert.deepEqual(pages, ['plan', 'elevation', 'section']);
+  assert.ok(layout.indexOf("kind:'plan'") < layout.indexOf("kind:'elevation'"));
+  assert.ok(layout.indexOf("kind:'elevation'") < layout.indexOf("kind:'section'"));
 });
 
 test('paired plan and elevation scales fit together', () => {
@@ -65,10 +65,19 @@ test('paired plan and elevation scales fit together', () => {
   assert.equal(vertical.den, 100);
 });
 
+test('elevation post centres use the exact paper X coordinates from plan', () => {
+  assert.match(html, /function sheetPlanPointAtStation\(plan, station\)\{/);
+  assert.match(html, /const stationX = station => \{/);
+  assert.match(html, /const physical = ev\.flipped \? ev\.len-station : station/);
+  assert.match(html, /x:stationX\(0\), stationX,/);
+  assert.match(html, /const xAt = bl\.stationX \|\| \(station => x\+mm\(station\)\)/);
+  assert.match(html, /const at = \(px, py\) => \[xAt\(px\), base - mm\(py\)\]/);
+});
+
 test('each item gets an isolated, dimensioned plan page', () => {
   assert.match(html, /function sheetPlanGeometry\(polys, idx\)\{/);
   assert.match(html, /const plan = sheetPlanGeometry\(state\.polys, i\), pb = plan\.bounds;/);
-  assert.match(html, /place\(\{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
+  assert.match(html, /const planPage = \{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
   assert.match(html, /else if \(pg\.kind === 'plan'\) paintPlan\(pg, u, k\);/);
   assert.match(html, /for \(const seg of plan\.segments\)\{/);
   assert.match(html, /const dimItems = seg\.bays\.length > 1\s*\n\s*\? seg\.bays\.map\(bay =>/);

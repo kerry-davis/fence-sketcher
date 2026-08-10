@@ -248,6 +248,10 @@ pages; a vertical or tightly bent plan can make the pair step down to `1:100` to
 section keeps its own larger detail scale. The scale, the fence name and the drawing name are
 printed at the foot of every page, because a drawing without them cannot be read.
 
+The elevation uses the plan's paper X coordinate at every chainage rather than centring an
+independent straight strip. Corresponding post centres therefore sit on the same vertical
+projector on the adjacent plan and elevation pages, including intermediate and corner posts.
+
 Each elevation reads the way the plan reads, left to right: a run whose first point is its
 right-hand end is developed from the other end, so the drawing is never a mirror of the
 plan and the 3D view.
