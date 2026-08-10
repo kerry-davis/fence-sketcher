@@ -4336,7 +4336,7 @@ function dimChain(to, items, avoid, k = 1){
     const A = to(it.p), Bs = to(it.q);
     if (!A || !Bs) continue;
     const span = Math.hypot(Bs.x-A.x, Bs.y-A.y);
-    if (span >= MIN_CHAIN_PX*k) drawn.push({ A, Bs, span, txt: it.txt });
+    if (it.force || span >= MIN_CHAIN_PX*k) drawn.push({ A, Bs, span, txt: it.txt });
   }
   if (!drawn.length) return CHAIN_OFF*k;
   ctx.font = dimFont(k);
@@ -4997,7 +4997,10 @@ function paintSection(pg, u, k){
   // the build-up up the right-hand post, the height outside it, the span underneath
   const inside = at((bay.a+bay.b)/2, top/2);
   const rungs = bounds.slice(0,-1).flatMap((y, n) => bounds[n+1] - y > 1e-6
-    ? [{ p: at(win.hi, y), q: at(win.hi, bounds[n+1]), txt: fmtSmall(bounds[n+1]-y, u) }] : []);
+    ? [{ p: at(win.hi, y), q: at(win.hi, bounds[n+1]), txt: fmtSmall(bounds[n+1]-y, u),
+         // The handrail thickness is a required construction dimension even when its
+         // short paper span would normally be suppressed by the general clutter filter.
+         force: y >= ev.fenceHeight-1e-6 }] : []);
   const up = dimChain(toScreen, rungs, inside, k);
   dimAt(toScreen, at(win.hi, 0), at(win.hi, ev.fenceHeight), fmtLen(ev.fenceHeight, u),
         up + CHAIN_OFF*k*1.6, inside, k);

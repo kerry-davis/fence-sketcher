@@ -62,7 +62,7 @@ test('a tight chain staggers into columns instead of dropping its small values',
   assert.match(html, /const cols = Math\.max\(1, Math\.min\(3, Math\.ceil\(widest \/ tightest\)\)\);/);
   assert.match(html, /CHAIN_OFF\*k \* \(1 \+ \(n % cols\)\*COL_STEP\) \* dimSide3\(d\.A, d\.Bs, away\), \{scale:k\}\)\);/);
   // a chain step only needs room for its arrows; a lone dimension must fit its own value
-  assert.match(html, /if \(span >= MIN_CHAIN_PX\*k\) drawn\.push/);
+  assert.match(html, /if \(it\.force \|\| span >= MIN_CHAIN_PX\*k\) drawn\.push/);
   assert.match(html, /Math\.hypot\(Bs\.x-A\.x, Bs\.y-A\.y\) < Math\.max\(MIN_DIM_PX\*k, ctx\.measureText\(txt\)\.width \+ 10\*k\)\) return;/);
   // and the chain reports its reach so nothing lands on top of it
   assert.match(html, /return CHAIN_OFF\*k \* \(1 \+ \(cols-1\)\*COL_STEP\);/);

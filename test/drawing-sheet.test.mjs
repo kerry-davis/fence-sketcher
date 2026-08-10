@@ -347,6 +347,8 @@ test('enabled handrail is visible in plan, elevation and section', () => {
   assert.match(html, /for \(const p of ev\.parts\.filter\(part => part\.k === 'cap'\)\)/);
   assert.match(html, /The handrail sits on the post tops/);
   assert.match(html, /As in elevation, the cap is on top of the posts/);
+  assert.match(html, /force: y >= ev\.fenceHeight-1e-6/);
+  assert.match(html, /The handrail thickness is a required construction dimension/);
 });
 
 test('the sheet carries the whole section, from the same definition 3D uses', () => {
