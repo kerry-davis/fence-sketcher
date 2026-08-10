@@ -4512,6 +4512,8 @@ function sheetHeaderPosition(pg){
   // A header is a paper coordinate, never derived from any view's bounds or dimensions.
   return { x:SHEET.margin + 8, y:pg.top + SHEET.margin + 8 };
 }
+const sheetKindName = kind => kind === 'elevation' ? 'Developed elevation'
+  : kind[0].toUpperCase() + kind.slice(1);
 function paintSheetHeader(pg){
   const h = sheetHeaderPosition(pg);
   const clear0 = P2S(SHEET.margin + 7, pg.top + SHEET.margin + 3);
@@ -4521,7 +4523,7 @@ function paintSheetHeader(pg){
   // geometry can cross either header line, even for an unusual bent run.
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(clear0.x, clear0.y, clear1.x-clear0.x, clear1.y-clear0.y);
-  const H = P2S(h.x, h.y), kind = pg.kind[0].toUpperCase() + pg.kind.slice(1);
+  const H = P2S(h.x, h.y), kind = sheetKindName(pg.kind);
   ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`;
   ctx.fillStyle = SHEET_INK; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   ctx.fillText(`${kind} — ${fenceName(state.polys[pg.i], pg.i)}  1:${pg.den}`, H.x, H.y);
@@ -4540,12 +4542,18 @@ function paintSheetHeader(pg){
 function sheetPlanGeometry(polys, idx){
   const pl = polys[idx], mat = pl.mat || state.mat, spacing = Math.max(0.1, mat.spacing);
   const ends = materialPostEndFlags(polys, idx, mat), segments = [], posts = [], angles = [];
-  const addPost = (q, shape) => {
+  const addPost = (q, shape, station) => {
     const old = posts.find(p => Math.hypot(p.x-q.x, p.y-q.y) < FENCE_JOIN_TOL);
-    if (old){ if (shape === 'round') old.shape = 'round'; return; }
-    posts.push({x:q.x, y:q.y, shape});
+    if (old){
+      if (shape === 'round') old.shape = 'round';
+      if (!old.stations.some(value => Math.abs(value-station) < FENCE_JOIN_TOL))
+        old.stations.push(station);
+      return;
+    }
+    posts.push({x:q.x, y:q.y, shape, stations:[station]});
   };
   const runSegs = segsOf(pl);
+  let runStation = 0;
   for (const [i, a, b] of runSegs){
     const L = segLen(a,b);
     const segment = { i, a, b, len:L, gate:!!a.gateAfter, stations:[], bays:[] };
@@ -4560,8 +4568,9 @@ function sheetPlanGeometry(polys, idx){
     segmentPosts.forEach((q, k) => {
       if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
       if (!pl.closed && i === runSegs.length-1 && k === segmentPosts.length-1 && !ends.end) return;
-      addPost(q, postShapeAt(polys, q, mat));
+      addPost(q, postShapeAt(polys, q, mat), runStation + segLen(a,q));
     });
+    runStation += L;
   }
   for (let i = 0; i < pl.pts.length; i++){
     if (!pl.closed && (i === 0 || i === pl.pts.length-1)) continue;
@@ -4576,9 +4585,24 @@ function sheetPlanGeometry(polys, idx){
            bounds:{loX, hiX, loY, hiY, width:Math.max(hiX-loX, 0.1),
                    height:Math.max(hiY-loY, 0.1)} };
 }
-/* Plan and elevation are a paired set: their paper geometry must use one denominator so a
-   post station or the end of a straight run lines up visually between adjacent pages. A bent
-   or vertical plan can therefore make both views step down to the next coarser scale. */
+/* A true plan and a developed elevation cannot share X coordinates around a bend. Stable post
+   marks are the drafting link instead: number physical posts in the elevation's reading order,
+   then carry those marks back to the same XY points in plan. Closed runs repeat P1 at the far
+   end of the development rather than inventing a second physical post. */
+function linkSheetPostReferences(plan, ev){
+  const displayStation = value => ev.flipped ? ev.len-value : value;
+  const ordered = plan.posts.slice().sort((a,b) =>
+    Math.min(...a.stations.map(displayStation)) - Math.min(...b.stations.map(displayStation)));
+  ordered.forEach((post, i) => { post.id = `P${i+1}`; });
+  ev.postRefs = ordered.flatMap(post => post.stations.map(station => ({
+    id:post.id, station:displayStation(station), post,
+  }))).sort((a,b) => a.station-b.station);
+  plan.postRefs = ordered;
+  return ev.postRefs;
+}
+/* Plan and elevation are a paired set: their paper geometry uses one denominator so a straight
+   run aligns visually between adjacent pages. A bent or vertical plan can therefore make both
+   views step down together; post marks, not false projection, coordinate its developed view. */
 function sheetPlanElevationScale(ev, plan, room){
   const b = plan.bounds;
   const fits = d => {
@@ -4608,6 +4632,7 @@ function sheetLayout(){
     // so the paper sequence reads the same way as the drawing: plan, elevation, section.
     const plan = sheetPlanGeometry(state.polys, i), pb = plan.bounds;
     const ev = elevationParts(state.polys, i);
+    linkSheetPostReferences(plan, ev);
     const paired = sheetPlanElevationScale(ev, plan, room);
     place({ kind:'plan', i, plan, ev, den:paired.den, k:paired.k,
             x: SHEET.margin + 8 + Math.max(0, (room.w - pb.width*paired.k)/2),
@@ -4656,6 +4681,19 @@ function sheetRect(x, y, w, h, fill, off){                    // paper mm rectan
   ctx.fill(); ctx.stroke();
   ctx.restore();
 }
+function sheetPaperLabel(text, point, opts={}){
+  const size = (opts.size || ANNOT_MM*0.82)*view.s, pad = 1.1*view.s;
+  ctx.save();
+  ctx.font = `${opts.weight || 600} ${size.toFixed(2)}px ${PAPER_DIM.font}`;
+  ctx.textAlign = opts.align || 'center'; ctx.textBaseline = 'middle';
+  const wide = ctx.measureText(text).width;
+  const left = ctx.textAlign === 'left' ? point.x : ctx.textAlign === 'right' ? point.x-wide : point.x-wide/2;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(left-pad, point.y-size*0.72, wide+pad*2, size*1.44);
+  ctx.fillStyle = SHEET_INK; ctx.fillText(text, point.x, point.y);
+  ctx.restore();
+  return wide;
+}
 function sheetPlanPost(p, at, plan, pg){
   const S = at(p), r = Math.max(1.5, plan.postSize*pg.k*view.s/2), off = plan.pl.excludeMaterials;
   ctx.save();
@@ -4668,6 +4706,7 @@ function sheetPlanPost(p, at, plan, pg){
     ctx.beginPath(); ctx.rect(S.x-r, S.y-r, r*2, r*2); ctx.fill(); ctx.stroke();
   }
   ctx.restore();
+  if (p.id) sheetPaperLabel(p.id, {x:S.x+3.2*view.s, y:S.y-3.2*view.s}, {align:'left'});
 }
 /* Plan angle notes use the same paper ink, font and arrow primitive as linear dimensions. The
    geometry is transformed before it gets here, so the arc follows the item's actual bend and
@@ -4769,7 +4808,7 @@ function paintSheetPageInk(pg, u, k){
   ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`;
   ctx.textAlign = 'right'; ctx.fillStyle = SHEET_INK;
   ctx.fillText(`${bkCurrent || 'Fence drawing'} · ${fenceName(state.polys[pg.i], pg.i)}` +
-               ` · ${pg.kind} 1:${pg.den} at A4 · ${u === 'm' ? 'metres' : 'feet'}`,
+               ` · ${sheetKindName(pg.kind).toLowerCase()} 1:${pg.den} at A4 · ${u === 'm' ? 'metres' : 'feet'}`,
                foot.x, foot.y);
   ctx.textAlign = 'left';
 }
@@ -4891,7 +4930,8 @@ function paintElevation(bl, u, k){
   const bays = ev.stations.slice(0,-1).map((st, j) => ({
     p: at(st, 0), q: at(ev.stations[j+1], 0), txt: fmtLen(ev.stations[j+1]-st, u) }));
   const reach = ev.stations.length > 2 ? dimChain(toScreen, bays, at(0, ev.height/2), k) : CHAIN_OFF*k;
-  dimAt(toScreen, at(0,0), at(ev.len,0), fmtLen(ev.len, u), reach + CHAIN_OFF*k*1.6,
+  const overallOff = reach + CHAIN_OFF*k*1.6;
+  dimAt(toScreen, at(0,0), at(ev.len,0), fmtLen(ev.len, u), overallOff,
         at(0, ev.height/2), k);
   // the height at the far end; the build-up behind it is dimensioned on the section page
   dimAt(toScreen, at(ev.len, 0), at(ev.len, ev.fenceHeight), fmtLen(ev.fenceHeight, u),
@@ -4905,6 +4945,27 @@ function paintElevation(bl, u, k){
                    txt: fmtSmall(boards[1].x - boards[0].x - boards[0].w, u) });
     dimChain(toScreen, items, at(boards[0].x, 0), k);
   }
+  paintElevationPostReferences(bl, u, overallOff);
+}
+function paintElevationPostReferences(bl, u, overallOff){
+  const { ev, x, base } = bl;
+  if (!ev.postRefs || !ev.postRefs.length) return;
+  const mm = value => value*bl.k, size = ANNOT_MM*0.76, rows = [-Infinity,-Infinity,-Infinity];
+  ctx.save(); ctx.font = `400 ${(size*view.s).toFixed(2)}px ${PAPER_DIM.font}`;
+  for (const ref of ev.postRefs){
+    const sx = P2S(x+mm(ref.station), base).x;
+    const top = P2S(x+mm(ref.station), base-mm(ev.height)-3.4);
+    sheetPaperLabel(ref.id, top, {size:ANNOT_MM*0.82});
+
+    const station = u === 'm' ? `STA ${+ref.station.toFixed(2)} m` : `STA ${ftStr(ref.station)}`;
+    const wide = ctx.measureText(station).width, half = wide/2, gap = 1.8*view.s;
+    let level = rows.findIndex(right => sx-half > right+gap);
+    if (level < 0) level = ev.postRefs.indexOf(ref)%rows.length;
+    rows[level] = sx+half;
+    const y = base + overallOff/view.s + 7 + level*4.2;
+    sheetPaperLabel(station, P2S(x+mm(ref.station), y), {size, weight:400});
+  }
+  ctx.restore();
 }
 /* The build-up, drawn large enough to dimension: one post with its rails and cap, and the
    whole vertical chain beside it. The elevation says how long the fence is; this says how

@@ -33,7 +33,7 @@ test('three pages per fence, with plan and elevation at one fitted scale', () =>
   // a hidden fence is off the sheet, as it is out of the 3D scene
   assert.match(html, /!state\.polys\[i\]\.hidden3d && state\.polys\[i\]\.pts\.length > 1/);
   // every page states what it is and what scale it is at
-  assert.match(html, /\$\{pg\.kind\} 1:\$\{pg\.den\} at A4/);
+  assert.match(html, /\$\{sheetKindName\(pg\.kind\)\.toLowerCase\(\)\} 1:\$\{pg\.den\} at A4/);
   // and a fence gets a section page beside its elevation
   assert.match(html, /place\(\{ kind:'section', i, ev, bounds, bay, win, den:sden, k:sk,/);
   assert.match(html, /SCALES\.find\(d => fits\(d\) && tightest\*\(1000\/d\) >= SECTION_MIN_MM\)\s*\n?\s*\?\? SCALES\.find\(fits\)/);
@@ -126,6 +126,19 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
                    [[2.4,0.6],[2.4,1.6]]);
   assert.equal(plan.angles.length, 1);
   assert.equal(+plan.angles[0].degrees.toFixed(4), 90);
+  assert.deepEqual(Array.from(plan.posts).map(p => Array.from(p.stations).map(v => +v.toFixed(4))),
+                   [[0],[2.4],[3],[5.4],[7]]);
+  const refs = context.linkSheetPostReferences(plan, {flipped:false,len:7});
+  assert.deepEqual(Array.from(refs).map(ref => [ref.id,+ref.station.toFixed(4)]),
+                   [['P1',0],['P2',2.4],['P3',3],['P4',5.4],['P5',7]]);
+  assert.deepEqual(Array.from(plan.posts).map(p => p.id), ['P1','P2','P3','P4','P5']);
+
+  const reversedPlan = context.sheetPlanGeometry([
+    {pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],closed:false,mat}
+  ], 0);
+  const reversed = context.linkSheetPostReferences(reversedPlan, {flipped:true,len:7});
+  assert.deepEqual(Array.from(reversed).map(ref => [ref.id,+ref.station.toFixed(4)]),
+                   [['P1',0],['P2',1.6],['P3',4],['P4',4.6],['P5',7]]);
 
   const tenFive = context.sheetPlanGeometry([
     {pts:[{x:0,y:0},{x:10.5,y:0}],closed:false,mat:{...mat, spacing:1.5}}
@@ -158,6 +171,7 @@ test('all sheet views use one fixed page header independent of dimensions', () =
   assert.equal(second.x, first.x);
   assert.equal(second.y-first.y, 420);
   assert.match(html, /function paintSheetHeader\(pg\)\{/);
+  assert.match(html, /const sheetKindName = kind => kind === 'elevation' \? 'Developed elevation'/);
   assert.match(html, /ctx\.fillText\(`\$\{kind\} — \$\{fenceName\(state\.polys\[pg\.i\], pg\.i\)\}  1:\$\{pg\.den\}`/);
   assert.match(html, /else paintElevation\(pg, u, k\);\s*\n\s*paintSheetHeader\(pg\);/);
   assert.doesNotMatch(html, /function sheetPlanHeader|function sheetNotIncluded/);
@@ -167,6 +181,16 @@ test('all sheet views use one fixed page header independent of dimensions', () =
   assert.doesNotMatch(planPaint, /Plan —|notIncluded|sheetHeader/);
   assert.doesNotMatch(elevationPaint, /Elevation —|notIncluded|sheetHeader/);
   assert.doesNotMatch(sectionPaint, /Section —|notIncluded|sheetHeader/);
+});
+
+test('true plan and developed elevation share post marks and cumulative stations', () => {
+  assert.match(html, /function linkSheetPostReferences\(plan, ev\)\{/);
+  assert.match(html, /linkSheetPostReferences\(plan, ev\);/);
+  assert.match(html, /if \(p\.id\) sheetPaperLabel\(p\.id,/);
+  assert.match(html, /function paintElevationPostReferences\(bl, u, overallOff\)\{/);
+  assert.match(html, /sheetPaperLabel\(ref\.id, top,/);
+  assert.match(html, /`STA \$\{\+ref\.station\.toFixed\(2\)\} m`/);
+  assert.match(html, /paintElevationPostReferences\(bl, u, overallOff\);/);
 });
 
 test('the sheet draws dimensions with the same renderer as the plan and 3D', () => {
