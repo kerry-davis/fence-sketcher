@@ -4550,15 +4550,16 @@ function paintSheetHeader(pg){
 function sheetPlanGeometry(polys, idx){
   const pl = polys[idx], mat = pl.mat || state.mat, spacing = Math.max(0.1, mat.spacing);
   const ends = materialPostEndFlags(polys, idx, mat), segments = [], posts = [], angles = [];
-  const addPost = (q, shape) => {
+  const addPost = (q, shape, angle) => {
     const old = posts.find(p => Math.hypot(p.x-q.x, p.y-q.y) < FENCE_JOIN_TOL);
     if (old){ if (shape === 'round') old.shape = 'round'; return; }
-    posts.push({x:q.x, y:q.y, shape});
+    posts.push({x:q.x, y:q.y, shape, angle});
   };
   const runSegs = segsOf(pl);
   for (const [i, a, b] of runSegs){
     const L = segLen(a,b);
-    const segment = { i, a, b, len:L, gate:!!a.gateAfter, stations:[], bays:[] };
+    const angle = Math.atan2(b.y-a.y, b.x-a.x);
+    const segment = { i, a, b, len:L, angle, gate:!!a.gateAfter, stations:[], bays:[] };
     segments.push(segment);
     if (L < 1e-9) continue;
     const segmentPosts = postsAlong(a, b, spacing, !!a.gateAfter);
@@ -4570,7 +4571,7 @@ function sheetPlanGeometry(polys, idx){
     segmentPosts.forEach((q, k) => {
       if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
       if (!pl.closed && i === runSegs.length-1 && k === segmentPosts.length-1 && !ends.end) return;
-      addPost(q, postShapeAt(polys, q, mat));
+      addPost(q, postShapeAt(polys, q, mat), angle);
     });
   }
   for (let i = 0; i < pl.pts.length; i++){
@@ -4582,7 +4583,7 @@ function sheetPlanGeometry(polys, idx){
   const all = pl.pts.concat(posts), xs = all.map(q => q.x), ys = all.map(q => q.y);
   const loX = Math.min(...xs) - pad, hiX = Math.max(...xs) + pad;
   const loY = Math.min(...ys) - pad, hiY = Math.max(...ys) + pad;
-  return { pl, mat, segments, posts, angles, postSize:size, ends,
+  return { pl, mat, segments, posts, angles, postSize:size, postDepth:postTOf(mat), ends,
            bounds:{loX, hiX, loY, hiY, width:Math.max(hiX-loX, 0.1),
                    height:Math.max(hiY-loY, 0.1)} };
 }
@@ -4695,16 +4696,17 @@ function sheetPlanPostUnderHandrail(p, plan){
   });
 }
 function sheetPlanPost(p, at, plan, pg){
-  const S = at(p), r = Math.max(1.5, plan.postSize*pg.k*view.s/2);
+  const S = at(p), halfW = Math.max(1.5, plan.postSize*pg.k*view.s/2);
+  const halfD = Math.max(1.5, plan.postDepth*pg.k*view.s/2);
   const off = plan.pl.excludeMaterials, covered = sheetPlanPostUnderHandrail(p, plan);
-  ctx.save();
+  ctx.save(); ctx.translate(S.x,S.y); ctx.rotate(p.angle || 0);
   ctx.fillStyle = off ? '#ffffff' : '#cbd5e1';
   ctx.strokeStyle = off || covered ? SHEET_LINE : SHEET_INK; ctx.lineWidth = 1;
   if (off || covered) ctx.setLineDash([3,2]);
   if (p.shape === 'round'){
-    ctx.beginPath(); ctx.arc(S.x, S.y, r, 0, Math.PI*2);
+    ctx.beginPath(); ctx.arc(0, 0, halfW, 0, Math.PI*2);
   } else {
-    ctx.beginPath(); ctx.rect(S.x-r, S.y-r, r*2, r*2);
+    ctx.beginPath(); ctx.rect(-halfW, -halfD, halfW*2, halfD*2);
   }
   if (!covered) ctx.fill();
   ctx.stroke();

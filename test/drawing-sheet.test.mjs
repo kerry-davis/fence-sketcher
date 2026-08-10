@@ -132,6 +132,7 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
     const materialPostEndFlags=()=>({start:true,end:true});
     const postShapeAt=()=> 'square';
     const postSizeOf=m=>m.postSize??0.1;
+    const postTOf=m=>m.postT??m.postSize??0.1;
     const cornerAngleAt=(pl,k)=>{const V=pl.pts[k],A=pl.pts[k-1],B=pl.pts[k+1];
       const a1=Math.atan2(A.y-V.y,A.x-V.x),a2=Math.atan2(B.y-V.y,B.x-V.x);
       let d=a2-a1;while(d<=-Math.PI)d+=2*Math.PI;while(d>Math.PI)d-=2*Math.PI;
@@ -146,6 +147,9 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
   assert.deepEqual(Array.from(plan.segments).map(s => +s.len.toFixed(4)), [3,4]);
   assert.deepEqual(Array.from(plan.posts).map(p => [+p.x.toFixed(4),+p.y.toFixed(4)]),
                    [[0,0],[2.4,0],[3,0],[3,2.4],[3,4]]);
+  assert.deepEqual(Array.from(plan.posts).map(p => +p.angle.toFixed(4)),
+                   [0,0,0,+((Math.PI/2).toFixed(4)),+((Math.PI/2).toFixed(4))]);
+  assert.equal(plan.postDepth, 0.1);
   assert.deepEqual(Array.from(plan.segments).map(seg => Array.from(seg.bays).map(b => +b.len.toFixed(4))),
                    [[2.4,0.6],[2.4,1.6]]);
   assert.equal(plan.angles.length, 1);
@@ -362,6 +366,13 @@ test('enabled handrail is visible in plan, elevation and section', () => {
   assert.match(html, /handrail thickness, then the total ground-to-top height/);
   assert.match(html, /q:at\(ev\.len,ev\.height\), txt:fmtSmall\(hr\.t,u\), force:true/);
   assert.match(html, /at\(ev\.len,ev\.height\), fmtLen\(ev\.height,u\)/);
+});
+
+test('sheet posts use their segment orientation and true rectangular section', () => {
+  assert.match(html, /posts\.push\(\{x:q\.x, y:q\.y, shape, angle\}\);/);
+  assert.match(html, /postDepth:postTOf\(mat\)/);
+  assert.match(html, /ctx\.save\(\); ctx\.translate\(S\.x,S\.y\); ctx\.rotate\(p\.angle \|\| 0\);/);
+  assert.match(html, /ctx\.rect\(-halfW, -halfD, halfW\*2, halfD\*2\);/);
 });
 
 test('the sheet carries the whole section, from the same definition 3D uses', () => {
