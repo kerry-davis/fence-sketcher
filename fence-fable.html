@@ -4798,10 +4798,14 @@ function paintPlan(pg, u, scale){
   // no other item is visited here, so this is an isolated run rather than a site overview.
   for (const seg of plan.segments){
     const A = at(seg.a), B = at(seg.b);
-    ctx.save();
-    ctx.strokeStyle = plan.pl.excludeMaterials ? SHEET_LINE : seg.gate ? '#475569' : SHEET_INK;
-    ctx.lineWidth = 1.5; ctx.setLineDash(seg.gate || plan.pl.excludeMaterials ? [8,5] : []);
-    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke(); ctx.restore();
+    // A handrail is the visible top surface. Its construction centreline is underneath it
+    // and must not read as a real groove; gate openings retain their dashed path reference.
+    if (seg.gate || !hrOf(plan.mat).on){
+      ctx.save();
+      ctx.strokeStyle = plan.pl.excludeMaterials ? SHEET_LINE : seg.gate ? '#475569' : SHEET_INK;
+      ctx.lineWidth = 1.5; ctx.setLineDash(seg.gate || plan.pl.excludeMaterials ? [8,5] : []);
+      ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke(); ctx.restore();
+    }
     const mid = {x:(A.x+B.x)/2, y:(A.y+B.y)/2};
     // A single bay is already the segment overall (not a second identical label). Longer
     // segments get the post-to-post chain plus their farther overall dimension.
@@ -4976,9 +4980,20 @@ function paintElevation(bl, u, k){
   const reach = ev.stations.length > 2 ? dimChain(toScreen, bays, at(0, ev.height/2), k) : CHAIN_OFF*k;
   dimAt(toScreen, at(0,0), at(ev.len,0), fmtLen(ev.len, u), reach + CHAIN_OFF*k*1.6,
         at(0, ev.height/2), k);
-  // the height at the far end; the build-up behind it is dimensioned on the section page
-  dimAt(toScreen, at(ev.len, 0), at(ev.len, ev.fenceHeight), fmtLen(ev.fenceHeight, u),
-        CHAIN_OFF*k, at(ev.len/2, ev.fenceHeight/2), k);
+  // At a capped fence the elevation must state both the specified fence height and the
+  // handrail thickness, then the total ground-to-top height outside that chain.
+  const heightAvoid = at(ev.len/2, ev.fenceHeight/2), hr = hrOf(ev.mat);
+  if (hr.on){
+    const heightReach = dimChain(toScreen, [
+      {p:at(ev.len,0), q:at(ev.len,ev.fenceHeight), txt:fmtLen(ev.fenceHeight,u)},
+      {p:at(ev.len,ev.fenceHeight), q:at(ev.len,ev.height), txt:fmtSmall(hr.t,u), force:true},
+    ], heightAvoid, k);
+    dimAt(toScreen, at(ev.len,0), at(ev.len,ev.height), fmtLen(ev.height,u),
+          heightReach + CHAIN_OFF*k*1.6, heightAvoid, k);
+  } else {
+    dimAt(toScreen, at(ev.len,0), at(ev.len,ev.fenceHeight), fmtLen(ev.fenceHeight,u),
+          CHAIN_OFF*k, heightAvoid, k);
+  }
   const boards = ev.parts.filter(p => p.k === 'board').sort((a2,b2) => a2.x-b2.x).slice(0,2);
   if (boards.length){                                          // the two boards actually drawn
     const top = ev.fenceHeight, items = [

@@ -350,12 +350,17 @@ test('enabled handrail is visible in plan, elevation and section', () => {
   assert.match(html, /function sheetPlanPostUnderHandrail\(p, plan\)\{/);
   assert.match(html, /if \(off \|\| covered\) ctx\.setLineDash\(\[3,2\]\);/);
   assert.match(html, /if \(!covered\) ctx\.fill\(\);/);
+  assert.match(html, /if \(seg\.gate \|\| !hrOf\(plan\.mat\)\.on\)\{/);
+  assert.match(html, /A handrail is the visible top surface/);
   assert.match(html, /if \(seg\.gate \|\| !hrOf\(plan\.mat\)\.on/);
   assert.match(html, /for \(const p of ev\.parts\.filter\(part => part\.k === 'cap'\)\)/);
   assert.match(html, /The handrail sits on the post tops/);
   assert.match(html, /As in elevation, the cap is on top of the posts/);
   assert.match(html, /force: y >= ev\.fenceHeight-1e-6/);
   assert.match(html, /The handrail thickness is a required construction dimension/);
+  assert.match(html, /handrail thickness, then the total ground-to-top height/);
+  assert.match(html, /q:at\(ev\.len,ev\.height\), txt:fmtSmall\(hr\.t,u\), force:true/);
+  assert.match(html, /at\(ev\.len,ev\.height\), fmtLen\(ev\.height,u\)/);
 });
 
 test('the sheet carries the whole section, from the same definition 3D uses', () => {
