@@ -242,12 +242,11 @@ a **developed elevation** unrolled onto a vertical plane, and a section through 
 bay. The plan belongs to that item alone, not to the overall app/site plan.
 
 The plan and developed elevation are a paired set: both use the same largest standard scale
-that fits both views — `1:5` through `1:2000`. A 10.5 m horizontal run therefore stays `1:50`
-on both pages; a vertical or tightly bent plan can make the pair step down to `1:100` together.
-Straight runs align directly at that common scale. Bent runs retain their true plan geometry,
-while matching `P1`, `P2`, … post marks and cumulative `STA` values connect each physical post
-to its place in the developed elevation. The section keeps its own larger detail scale. The
-scale, fence name and drawing name are printed at the foot of every page.
+that fits both views — `1:5` through `1:2000` — so their post stations and longitudinal extent
+correspond across the adjacent pages. A 10.5 m horizontal run therefore stays `1:50` on both
+pages; a vertical or tightly bent plan can make the pair step down to `1:100` together. The
+section keeps its own larger detail scale. The scale, the fence name and the drawing name are
+printed at the foot of every page, because a drawing without them cannot be read.
 
 Each elevation reads the way the plan reads, left to right: a run whose first point is its
 right-hand end is developed from the other end, so the drawing is never a mirror of the
@@ -265,12 +264,6 @@ comes first, and its segment/overall length is placed farther out. A 10.5 m run 
 spacing therefore shows seven `1.5 m` bays plus the `10.5 m` overall; a gate remains one whole
 bay. Plan, elevation and section all use the same fixed two-line page header: view/name/scale,
 then any dashed-work BOM note. Its white paper band stays clear of every dimension.
-
-The second page is labelled **Developed elevation**, not simply Elevation: bends have been
-unrolled there. Post marks are numbered in that page's left-to-right reading order and repeated
-beside the same posts in plan. Beneath the developed elevation each mark carries its cumulative
-station from the left-hand datum, so correspondence stays unambiguous without flattening or
-otherwise falsifying the true plan.
 
 On the page: posts at their true stations, rails per bay, palings at their pitch, gate
 leaves clear of the ground, the handrail cap, and a dashed fold line at each corner. Below
