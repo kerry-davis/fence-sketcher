@@ -4508,6 +4508,10 @@ const SHEET = { w:297, h:210, margin:10, gap:6 };            // A4 landscape, in
 const SCALES = [5,10,20,25,50,100,200,500,1000,2000];        // 1:n, smallest that fits wins
 const SHEET_INK = '#111827', SHEET_LINE = '#9ca3af';
 const SECTION_MIN_MM = 3.2;   // paper a chain step needs before its arrows are worth drawing
+// Fixed paper space for the elevation's vertical chain and its outer overall dimension.
+// This is part of the paired plan/elevation envelope, rather than whitespace added after
+// scaling, so the drawing remains as large as the page permits without clipping annotations.
+const ELEVATION_RIGHT_GUTTER = 34;
 const P2S = (x, y) => ({ x:(x - view.x)*view.s, y:(y - view.y)*view.s });
 function sheetFences(){
   return state.polys.map((pl, i) => i).filter(i =>
@@ -4592,8 +4596,9 @@ function sheetPlanGeometry(polys, idx){
    without wasting the page by jumping to the next coarse preset (for example 1:25 → 1:50). */
 function sheetPlanElevationScale(ev, plan, room){
   const b = plan.bounds;
-  const maxK = Math.min(room.w/ev.len, room.h*0.78/ev.height,
-                        room.w/b.width, room.h*0.82/b.height);
+  const drawingWidth = Math.max(1, room.w-ELEVATION_RIGHT_GUTTER);
+  const maxK = Math.min(drawingWidth/ev.len, room.h*0.78/ev.height,
+                        drawingWidth/b.width, room.h*0.82/b.height);
   const den = Math.max(5, Math.ceil(1000/maxK));
   return { den, k:1000/den };
 }
@@ -4632,8 +4637,12 @@ function sheetLayout(){
     const plan = sheetPlanGeometry(state.polys, i), pb = plan.bounds;
     const ev = elevationParts(state.polys, i);
     const paired = sheetPlanElevationScale(ev, plan, room);
+    const endStation = ev.flipped ? 0 : ev.len;
+    const endPoint = sheetPlanPointAtStation(plan, endStation);
+    const endOffset = (endPoint.x-pb.loX)*paired.k;
+    const pairedWidth = Math.max(pb.width*paired.k, endOffset+ELEVATION_RIGHT_GUTTER);
     const planPage = { kind:'plan', i, plan, ev, den:paired.den, k:paired.k,
-      x: SHEET.margin + 8 + Math.max(0, (room.w - pb.width*paired.k)/2),
+      x: SHEET.margin + 8 + Math.max(0, (room.w - pairedWidth)/2),
       base: SHEET.margin + 8 + (room.h + pb.height*paired.k)/2 };
     place(planPage);
     const stationX = station => {
