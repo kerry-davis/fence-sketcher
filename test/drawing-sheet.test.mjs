@@ -14,6 +14,8 @@ test('the drawing sheet is its own view, and does not collide with the phone she
   // the three views are exclusive
   assert.match(html, /function setSheetView\(on\)\{\s*\n\s*if \(on === modeSheet\) return;\s*\n\s*if \(on && mode3d\) set3d\(false\);/);
   assert.match(html, /if \(on && modeSheet\) setSheetView\(false\);\s*\n\s*mode3d = on;/);
+  // an inline plan-dimension editor must not remain stranded outside the paper
+  assert.match(html, /dimEdit = null;\s*\n\s*const input = \$\('dimin'\);\s*\n\s*input\.style\.display = 'none';/);
   // paper, not a drawing surface: a press moves the sheet instead of editing the fence
   assert.match(html, /if \(modeSheet\)\{ drag = \{ t:'pan' \}; return; \}/);
   // and the plan's own view is parked, not clobbered
@@ -34,12 +36,16 @@ test('desktop wheel scrolls through sheet pages while modified wheel still zooms
 
 test('three pages per fence, with plan and elevation at one fitted scale', () => {
   assert.match(html, /const SCALES = \[5,10,20,25,50,100,200,500,1000,2000\];/);
+  assert.match(html, /const ELEVATION_RIGHT_GUTTER = 34;/);
   assert.match(html, /function sheetPlanElevationScale\(ev, plan, room\)\{/);
-  assert.match(html, /const maxK = Math\.min\(room\.w\/ev\.len, room\.h\*0\.78\/ev\.height,/);
-  assert.match(html, /room\.w\/b\.width, room\.h\*0\.82\/b\.height\);/);
+  assert.match(html, /const drawingWidth = Math\.max\(1, room\.w-ELEVATION_RIGHT_GUTTER\);/);
+  assert.match(html, /const maxK = Math\.min\(drawingWidth\/ev\.len, room\.h\*0\.78\/ev\.height,/);
+  assert.match(html, /drawingWidth\/b\.width, room\.h\*0\.82\/b\.height\);/);
   assert.match(html, /const den = Math\.max\(5, Math\.ceil\(1000\/maxK\)\);/);
   assert.match(html, /const paired = sheetPlanElevationScale\(ev, plan, room\);/);
   assert.match(html, /const planPage = \{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
+  assert.match(html, /const rightFitX = plotLeft \+ room\.w - ELEVATION_RIGHT_GUTTER - endOffset;/);
+  assert.match(html, /x: Math\.max\(plotLeft, Math\.min\(centredX, rightFitX\)\),/);
   assert.match(html, /place\(\{ kind:'elevation', i, ev, den:paired\.den, k:paired\.k,/);
   // a page is laid out page-relative, then dropped onto its own sheet
   assert.match(html, /page\.top = pages\.length\*\(SHEET\.h \+ SHEET\.gap\*2\);\s*\n\s*page\.base \+= page\.top;/);
@@ -64,7 +70,7 @@ test('paired plan and elevation scales fit together', () => {
   const start = html.indexOf('function sheetPlanElevationScale(');
   const end = html.indexOf('/* One plan/elevation pair per item', start);
   assert.ok(start >= 0 && end > start);
-  const context = { Math };
+  const context = { Math, ELEVATION_RIGHT_GUTTER: 34 };
   vm.createContext(context);
   vm.runInContext(html.slice(start, end), context);
   const room = { w:261, h:174 };
@@ -72,8 +78,8 @@ test('paired plan and elevation scales fit together', () => {
   // The pair uses the page closely instead of discarding space at the next coarse preset.
   const horizontal = context.sheetPlanElevationScale(elevation,
     {bounds:{width:10.6,height:0.1}}, room);
-  assert.equal(horizontal.den, 41);
-  assert.equal(horizontal.k, 1000/41);
+  assert.equal(horizontal.den, 47);
+  assert.equal(horizontal.k, 1000/47);
   // Turning that same run vertically makes height the limiting constraint, without rotation.
   const vertical = context.sheetPlanElevationScale(elevation,
     {bounds:{width:0.1,height:10.6}}, room);
