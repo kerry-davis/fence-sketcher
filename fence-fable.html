@@ -4508,6 +4508,7 @@ const SHEET = { w:297, h:210, margin:10, gap:6 };            // A4 landscape, in
 const SCALES = [5,10,20,25,50,100,200,500,1000,2000];        // 1:n, smallest that fits wins
 const SHEET_INK = '#111827', SHEET_LINE = '#9ca3af';
 const SECTION_MIN_MM = 3.2;   // paper a chain step needs before its arrows are worth drawing
+const ELEVATION_RIGHT_GUTTER = 34; // vertical chain + outer height dimension, in paper mm
 const P2S = (x, y) => ({ x:(x - view.x)*view.s, y:(y - view.y)*view.s });
 function sheetFences(){
   return state.polys.map((pl, i) => i).filter(i =>
@@ -4550,15 +4551,16 @@ function paintSheetHeader(pg){
 function sheetPlanGeometry(polys, idx){
   const pl = polys[idx], mat = pl.mat || state.mat, spacing = Math.max(0.1, mat.spacing);
   const ends = materialPostEndFlags(polys, idx, mat), segments = [], posts = [], angles = [];
-  const addPost = (q, shape) => {
+  const addPost = (q, shape, angle) => {
     const old = posts.find(p => Math.hypot(p.x-q.x, p.y-q.y) < FENCE_JOIN_TOL);
     if (old){ if (shape === 'round') old.shape = 'round'; return; }
-    posts.push({x:q.x, y:q.y, shape});
+    posts.push({x:q.x, y:q.y, shape, angle});
   };
   const runSegs = segsOf(pl);
   for (const [i, a, b] of runSegs){
     const L = segLen(a,b);
-    const segment = { i, a, b, len:L, gate:!!a.gateAfter, stations:[], bays:[] };
+    const angle = Math.atan2(b.y-a.y, b.x-a.x);
+    const segment = { i, a, b, len:L, angle, gate:!!a.gateAfter, stations:[], bays:[] };
     segments.push(segment);
     if (L < 1e-9) continue;
     const segmentPosts = postsAlong(a, b, spacing, !!a.gateAfter);
@@ -4570,7 +4572,7 @@ function sheetPlanGeometry(polys, idx){
     segmentPosts.forEach((q, k) => {
       if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
       if (!pl.closed && i === runSegs.length-1 && k === segmentPosts.length-1 && !ends.end) return;
-      addPost(q, postShapeAt(polys, q, mat));
+      addPost(q, postShapeAt(polys, q, mat), angle);
     });
   }
   for (let i = 0; i < pl.pts.length; i++){
@@ -4582,7 +4584,7 @@ function sheetPlanGeometry(polys, idx){
   const all = pl.pts.concat(posts), xs = all.map(q => q.x), ys = all.map(q => q.y);
   const loX = Math.min(...xs) - pad, hiX = Math.max(...xs) + pad;
   const loY = Math.min(...ys) - pad, hiY = Math.max(...ys) + pad;
-  return { pl, mat, segments, posts, angles, postSize:size, ends,
+  return { pl, mat, segments, posts, angles, postSize:size, postDepth:postTOf(mat), ends,
            bounds:{loX, hiX, loY, hiY, width:Math.max(hiX-loX, 0.1),
                    height:Math.max(hiY-loY, 0.1)} };
 }
@@ -4591,8 +4593,9 @@ function sheetPlanGeometry(polys, idx){
    without wasting the page by jumping to the next coarse preset (for example 1:25 → 1:50). */
 function sheetPlanElevationScale(ev, plan, room){
   const b = plan.bounds;
-  const maxK = Math.min(room.w/ev.len, room.h*0.78/ev.height,
-                        room.w/b.width, room.h*0.82/b.height);
+  const drawingWidth = Math.max(1, room.w-ELEVATION_RIGHT_GUTTER);
+  const maxK = Math.min(drawingWidth/ev.len, room.h*0.78/ev.height,
+                        drawingWidth/b.width, room.h*0.82/b.height);
   const den = Math.max(5, Math.ceil(1000/maxK));
   return { den, k:1000/den };
 }
@@ -4631,8 +4634,16 @@ function sheetLayout(){
     const plan = sheetPlanGeometry(state.polys, i), pb = plan.bounds;
     const ev = elevationParts(state.polys, i);
     const paired = sheetPlanElevationScale(ev, plan, room);
+    const plotLeft = SHEET.margin + 8;
+    const centredX = plotLeft + Math.max(0, (room.w - pb.width*paired.k)/2);
+    const endStation = ev.flipped ? 0 : ev.len;
+    const endPoint = sheetPlanPointAtStation(plan, endStation);
+    const endOffset = (endPoint.x-pb.loX)*paired.k;
+    // Plan and elevation retain identical post projectors. Shift that paired drawing as one
+    // object when necessary so the elevation's full right-hand dimension stack stays on paper.
+    const rightFitX = plotLeft + room.w - ELEVATION_RIGHT_GUTTER - endOffset;
     const planPage = { kind:'plan', i, plan, ev, den:paired.den, k:paired.k,
-      x: SHEET.margin + 8 + Math.max(0, (room.w - pb.width*paired.k)/2),
+      x: Math.max(plotLeft, Math.min(centredX, rightFitX)),
       base: SHEET.margin + 8 + (room.h + pb.height*paired.k)/2 };
     place(planPage);
     const stationX = station => {
@@ -4695,16 +4706,17 @@ function sheetPlanPostUnderHandrail(p, plan){
   });
 }
 function sheetPlanPost(p, at, plan, pg){
-  const S = at(p), r = Math.max(1.5, plan.postSize*pg.k*view.s/2);
+  const S = at(p), halfW = Math.max(1.5, plan.postSize*pg.k*view.s/2);
+  const halfD = Math.max(1.5, plan.postDepth*pg.k*view.s/2);
   const off = plan.pl.excludeMaterials, covered = sheetPlanPostUnderHandrail(p, plan);
-  ctx.save();
+  ctx.save(); ctx.translate(S.x,S.y); ctx.rotate(p.angle || 0);
   ctx.fillStyle = off ? '#ffffff' : '#cbd5e1';
   ctx.strokeStyle = off || covered ? SHEET_LINE : SHEET_INK; ctx.lineWidth = 1;
   if (off || covered) ctx.setLineDash([3,2]);
   if (p.shape === 'round'){
-    ctx.beginPath(); ctx.arc(S.x, S.y, r, 0, Math.PI*2);
+    ctx.beginPath(); ctx.arc(0, 0, halfW, 0, Math.PI*2);
   } else {
-    ctx.beginPath(); ctx.rect(S.x-r, S.y-r, r*2, r*2);
+    ctx.beginPath(); ctx.rect(-halfW, -halfD, halfW*2, halfD*2);
   }
   if (!covered) ctx.fill();
   ctx.stroke();
@@ -5179,6 +5191,15 @@ function fitSheet(){                       // frame the first page; the rest are
 function setSheetView(on){
   if (on === modeSheet) return;
   if (on && mode3d) set3d(false);
+  if (on){
+    // The inline plan-dimension editor is an HTML overlay, not sheet content. A pending
+    // blur normally closes it, but Sheet must also clear it synchronously so it can never
+    // remain stranded beyond the paper edge while the canvas changes coordinate systems.
+    dimEdit = null;
+    const input = $('dimin');
+    input.style.display = 'none';
+    if (document.activeElement === input) input.blur();
+  }
   modeSheet = on;
   document.body.classList.toggle('sheetview', on);
   $('bSheet').classList.toggle('primary', on);

@@ -14,6 +14,8 @@ test('the drawing sheet is its own view, and does not collide with the phone she
   // the three views are exclusive
   assert.match(html, /function setSheetView\(on\)\{\s*\n\s*if \(on === modeSheet\) return;\s*\n\s*if \(on && mode3d\) set3d\(false\);/);
   assert.match(html, /if \(on && modeSheet\) setSheetView\(false\);\s*\n\s*mode3d = on;/);
+  // an inline plan-dimension editor must not remain stranded outside the paper
+  assert.match(html, /dimEdit = null;\s*\n\s*const input = \$\('dimin'\);\s*\n\s*input\.style\.display = 'none';/);
   // paper, not a drawing surface: a press moves the sheet instead of editing the fence
   assert.match(html, /if \(modeSheet\)\{ drag = \{ t:'pan' \}; return; \}/);
   // and the plan's own view is parked, not clobbered
@@ -34,12 +36,16 @@ test('desktop wheel scrolls through sheet pages while modified wheel still zooms
 
 test('three pages per fence, with plan and elevation at one fitted scale', () => {
   assert.match(html, /const SCALES = \[5,10,20,25,50,100,200,500,1000,2000\];/);
+  assert.match(html, /const ELEVATION_RIGHT_GUTTER = 34;/);
   assert.match(html, /function sheetPlanElevationScale\(ev, plan, room\)\{/);
-  assert.match(html, /const maxK = Math\.min\(room\.w\/ev\.len, room\.h\*0\.78\/ev\.height,/);
-  assert.match(html, /room\.w\/b\.width, room\.h\*0\.82\/b\.height\);/);
+  assert.match(html, /const drawingWidth = Math\.max\(1, room\.w-ELEVATION_RIGHT_GUTTER\);/);
+  assert.match(html, /const maxK = Math\.min\(drawingWidth\/ev\.len, room\.h\*0\.78\/ev\.height,/);
+  assert.match(html, /drawingWidth\/b\.width, room\.h\*0\.82\/b\.height\);/);
   assert.match(html, /const den = Math\.max\(5, Math\.ceil\(1000\/maxK\)\);/);
   assert.match(html, /const paired = sheetPlanElevationScale\(ev, plan, room\);/);
   assert.match(html, /const planPage = \{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
+  assert.match(html, /const rightFitX = plotLeft \+ room\.w - ELEVATION_RIGHT_GUTTER - endOffset;/);
+  assert.match(html, /x: Math\.max\(plotLeft, Math\.min\(centredX, rightFitX\)\),/);
   assert.match(html, /place\(\{ kind:'elevation', i, ev, den:paired\.den, k:paired\.k,/);
   // a page is laid out page-relative, then dropped onto its own sheet
   assert.match(html, /page\.top = pages\.length\*\(SHEET\.h \+ SHEET\.gap\*2\);\s*\n\s*page\.base \+= page\.top;/);
@@ -64,7 +70,7 @@ test('paired plan and elevation scales fit together', () => {
   const start = html.indexOf('function sheetPlanElevationScale(');
   const end = html.indexOf('/* One plan/elevation pair per item', start);
   assert.ok(start >= 0 && end > start);
-  const context = { Math };
+  const context = { Math, ELEVATION_RIGHT_GUTTER: 34 };
   vm.createContext(context);
   vm.runInContext(html.slice(start, end), context);
   const room = { w:261, h:174 };
@@ -72,8 +78,8 @@ test('paired plan and elevation scales fit together', () => {
   // The pair uses the page closely instead of discarding space at the next coarse preset.
   const horizontal = context.sheetPlanElevationScale(elevation,
     {bounds:{width:10.6,height:0.1}}, room);
-  assert.equal(horizontal.den, 41);
-  assert.equal(horizontal.k, 1000/41);
+  assert.equal(horizontal.den, 47);
+  assert.equal(horizontal.k, 1000/47);
   // Turning that same run vertically makes height the limiting constraint, without rotation.
   const vertical = context.sheetPlanElevationScale(elevation,
     {bounds:{width:0.1,height:10.6}}, room);
@@ -132,6 +138,7 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
     const materialPostEndFlags=()=>({start:true,end:true});
     const postShapeAt=()=> 'square';
     const postSizeOf=m=>m.postSize??0.1;
+    const postTOf=m=>m.postT??m.postSize??0.1;
     const cornerAngleAt=(pl,k)=>{const V=pl.pts[k],A=pl.pts[k-1],B=pl.pts[k+1];
       const a1=Math.atan2(A.y-V.y,A.x-V.x),a2=Math.atan2(B.y-V.y,B.x-V.x);
       let d=a2-a1;while(d<=-Math.PI)d+=2*Math.PI;while(d>Math.PI)d-=2*Math.PI;
@@ -146,6 +153,9 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
   assert.deepEqual(Array.from(plan.segments).map(s => +s.len.toFixed(4)), [3,4]);
   assert.deepEqual(Array.from(plan.posts).map(p => [+p.x.toFixed(4),+p.y.toFixed(4)]),
                    [[0,0],[2.4,0],[3,0],[3,2.4],[3,4]]);
+  assert.deepEqual(Array.from(plan.posts).map(p => +p.angle.toFixed(4)),
+                   [0,0,0,+((Math.PI/2).toFixed(4)),+((Math.PI/2).toFixed(4))]);
+  assert.equal(plan.postDepth, 0.1);
   assert.deepEqual(Array.from(plan.segments).map(seg => Array.from(seg.bays).map(b => +b.len.toFixed(4))),
                    [[2.4,0.6],[2.4,1.6]]);
   assert.equal(plan.angles.length, 1);
@@ -362,6 +372,13 @@ test('enabled handrail is visible in plan, elevation and section', () => {
   assert.match(html, /handrail thickness, then the total ground-to-top height/);
   assert.match(html, /q:at\(ev\.len,ev\.height\), txt:fmtSmall\(hr\.t,u\), force:true/);
   assert.match(html, /at\(ev\.len,ev\.height\), fmtLen\(ev\.height,u\)/);
+});
+
+test('sheet posts use their segment orientation and true rectangular section', () => {
+  assert.match(html, /posts\.push\(\{x:q\.x, y:q\.y, shape, angle\}\);/);
+  assert.match(html, /postDepth:postTOf\(mat\)/);
+  assert.match(html, /ctx\.save\(\); ctx\.translate\(S\.x,S\.y\); ctx\.rotate\(p\.angle \|\| 0\);/);
+  assert.match(html, /ctx\.rect\(-halfW, -halfD, halfW\*2, halfD\*2\);/);
 });
 
 test('the sheet carries the whole section, from the same definition 3D uses', () => {
