@@ -484,18 +484,28 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   const start = html.indexOf('const CORNER_MAX_DEG');
   const end = html.indexOf('function elevationParts(', start);
   assert.ok(start >= 0 && end > start);
+  const segLen = (a,b) => Math.hypot(b.x-a.x, b.y-a.y);
   const context = { Math, state:{ mat:{} },
     railSideOf: m => (m && m.railSide === 'right' ? 'right' : 'left'),
-    railTOf: () => 0.045, postTOf: () => 0.1, postSizeOf: () => 0.1 };
+    railTOf: () => 0.045, postTOf: () => 0.1, postSizeOf: () => 0.1,
+    segLen,
+    postsAlong: (a,b,sp,gate) => { const L = segLen(a,b),
+        n = gate ? 1 : Math.max(1, Math.ceil(L/sp - 1e-9)), o = [];
+      for (let k2 = 0; k2 <= n; k2++){ const d = gate ? L*k2 : Math.min(L, sp*k2), t = L ? d/L : 0;
+        o.push({ x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t }); } return o; } };
   vm.createContext(context);
   vm.runInContext(html.slice(start, end), context);
-  const mat = { railSide:'left' };
+  const mat = { railSide:'left', spacing:2.4 };
 
   // a square corner mitres at 45; the reference drawing's 131.2 corner at 24.4
   const L = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}], closed:false, mat }], 0);
   assert.equal(L.length, 1);
   assert.equal(+L[0].theta.toFixed(1), 90);
   assert.equal(+L[0].mitre.toFixed(1), 45);
+  // postsAlong spaces from each run's start with the remainder at its end, so a 3 m leg
+  // at 2.4 m spacing has its nearest post 0.6 m before the corner, the 4 m leg 2.4 m after
+  assert.equal(+L[0].legIn.toFixed(4), 0.6);
+  assert.equal(+L[0].legOut.toFixed(4), 2.4);
   const a = 131.2*Math.PI/180;
   const ref = context.fenceCorners([{ pts:[
     {x:0,y:0},{x:2.4,y:0},{x:2.4 - 1.8*Math.cos(a), y: -1.8*Math.sin(a)}], closed:false, mat }], 0);
@@ -518,12 +528,23 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
 
   // the drawing draws the joint on the fence's own rail side
   const right = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],
-    closed:false, mat:{ railSide:'right' } }], 0);
+    closed:false, mat:{ railSide:'right', spacing:2.4 } }], 0);
   assert.equal(right[0].side, 'right');
   assert.equal(+right[0].off.toFixed(4), 0.0725);           // postT/2 + railT/2
 
   // and the page exists, after the section
-  assert.match(html, /place\(\{ kind:'corners', i, ev, corners, den:10, k:100, base:0, x:0 \}\);/);
+  // the grid follows the corner count, one standard scale fits the worst cell, centred
+  assert.match(html, /place\(\{ kind:'corners', i, ev, corners: shown, extra, cols, rows,/);
+  assert.match(html, /const cden = SCALES\.find\(fitsC\) \?\? SCALES\[SCALES\.length - 1\];/);
+  assert.match(html, /const cols = shown\.length === 1 \? 1 : shown\.length === 2 \? 2 : shown\.length <= 4 \? 2 : 3;/);
+  assert.match(html, /\(col \+ 0\.5\)\*cellW - pg\.k\*\(c\.box\.loX \+ c\.box\.hiX\)\/2;/);
+  // annotation clearances are paper millimetres, so a 1:50 grid cell reads like a 1:20 page
+  assert.match(html, /const paper = mmOnPaper => mmOnPaper\/kMM;/);
+  assert.match(html, /const arcM = Math\.min\(paper\(8\), 0\.6\*Math\.min\(c\.legIn, c\.legOut\)\);/);
+  assert.match(html, /const lmitre = at\(move\(X, seam, -\(half \+ paper\(7\)\)\)\);/);
+  // posts either side, and the bay lengths post to post
+  assert.match(html, /postAt\(pIn, c\.d1\); postAt\(pOut, c\.d2\);/);
+  assert.match(html, /dimAt\(toS, pIn, c\.v, fmtLen\(c\.legIn, u\), CHAIN_OFF\*k, inside, k\);/);
   assert.match(html, /else if \(pg\.kind === 'corners'\) paintCorners\(pg, u, k\);/);
   assert.match(html, /`mitre \$\{\+c\.mitre\.toFixed\(1\)\}°`/);
 });

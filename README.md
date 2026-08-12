@@ -304,13 +304,18 @@ nothing about how the fence is built — and the chain follows **that bay's** bu
 gate opening wide enough to be the widest bay is sectioned as a leaf even though the run
 around it is ordinary fence.
 
-A fence with corners also gets a **corner details page**: each fold drawn in plan at 1:10 —
-the post, both rails on the face the fence's *Rail side* setting actually hangs them on, the
-mitre seam between them, the interior angle, and the cut called out as the saw setting:
+A fence with corners also gets a **corner details page**: each fold drawn in plan — the
+corner post, the rails running to their **real neighbouring posts** (the same posts
+`postsAlong()` places, so the bay context explains the joint), both on the face the fence's
+*Rail side* setting actually hangs them on, the mitre seam, the bay length along each leg,
+the interior angle, and the cut called out as the saw setting:
 two rails meeting at plan angle θ are each cut **(180° − θ)/2** off square, so a 131.2°
 corner reads `mitre 24.4°`. Which face the rails are on decides whether the joint closes on
 the inside or the outside of the corner, which is why the detail is drawn from the model's
-own offsets rather than as a schematic. Corners against a gate have no rail joint, and a
+own offsets rather than as a schematic. The grid follows the corner count — one corner
+takes the whole page, four sit two-by-two — at the largest standard scale that fits the
+worst cell, and the arcs, labels and clearances are sized in paper millimetres so a 1:50
+grid cell reads exactly like a 1:20 lone corner. Corners against a gate have no rail joint, and a
 fold within a few degrees of straight is cut square in practice; both are left off the page. The elevation keeps the lengths; the section says how
 it goes together.
 

@@ -3901,7 +3901,14 @@ function fenceCorners(polys, idx){
     const dot = Math.max(-1, Math.min(1, -d1.x*d2.x - d1.y*d2.y));
     const theta = Math.acos(dot) * 180/Math.PI;           // interior angle, 0..180
     if (theta > CORNER_MAX_DEG) continue;
+    // each leg runs to the nearest post of its own bay — the same posts the model places —
+    // so the detail shows the corner in its context, not two floating stubs
+    const spacing = Math.max(0.1, mat.spacing);
+    const inPosts = postsAlong(A, V, spacing, false);
+    const outPosts = postsAlong(V, B, spacing, false);
     out.push({ v: V, d1, d2, theta, mitre: (180 - theta)/2,
+               legIn: segLen(A, V) - segLen(A, inPosts[inPosts.length - 2]),
+               legOut: segLen(V, outPosts[1]),
                side: railSideOf(mat), railT: railTOf(mat),
                off: postTOf(mat)/2 + railTOf(mat)/2, postW: postSizeOf(mat),
                postT: postTOf(mat) });
@@ -4711,8 +4718,25 @@ function sheetLayout(){
             x: SHEET.margin + 8 + Math.max(0, (room.w - wide*sk)/2),
             base: SHEET.margin + 8 + (room.h + tall*sk)/2 });
     const corners = fenceCorners(state.polys, i);
-    if (corners.length)
-      place({ kind:'corners', i, ev, corners, den:10, k:100, base:0, x:0 });
+    if (corners.length){
+      // the grid follows the corner count, and one standard scale serves the whole page:
+      // as large as the worst-fitting detail allows, so a lone corner fills the paper
+      const shown = corners.slice(0, 6), extra = corners.length - shown.length;
+      const cols = shown.length === 1 ? 1 : shown.length === 2 ? 2 : shown.length <= 4 ? 2 : 3;
+      const rows = Math.ceil(shown.length / cols);
+      const cellW = (room.w - 4)/cols, cellH = (room.h - 14)/rows, PAD = 0.5;
+      for (const c of shown){
+        const xs = [0, -c.d1.x*c.legIn, c.d2.x*c.legOut];
+        const ys = [0, -c.d1.y*c.legIn, c.d2.y*c.legOut];
+        c.box = { loX: Math.min(...xs) - PAD, hiX: Math.max(...xs) + PAD,
+                  loY: Math.min(...ys) - PAD, hiY: Math.max(...ys) + PAD };
+      }
+      const fitsC = d => shown.every(c =>
+        (c.box.hiX - c.box.loX)*(1000/d) <= cellW && (c.box.hiY - c.box.loY)*(1000/d) <= cellH);
+      const cden = SCALES.find(fitsC) ?? SCALES[SCALES.length - 1];
+      place({ kind:'corners', i, ev, corners: shown, extra, cols, rows,
+              den: cden, k: 1000/cden, base:0, x:0 });
+    }
   }
   return { pages };
 }
@@ -5067,10 +5091,18 @@ function paintElevation(bl, u, k){
 /* The build-up, drawn large enough to dimension: one post with its rails and cap, and the
    whole vertical chain beside it. The elevation says how long the fence is; this says how
    it goes together. */
-/* Corner details: each fold in plan at 1:10 — the post, both rails on their true face, the
-   mitre seam between them, the interior angle and the saw setting. Up to six per page. */
+/* Corner details: each fold in plan — the corner post, the rails running to their real
+   neighbouring posts, the mitre seam, the interior angle and the saw setting. The grid
+   follows the corner count and each detail is centred in its cell. */
 function paintCorners(pg, u, k){
-  const mm = v => v*pg.k, LEG = 0.42;                       // metres of each rail leg drawn
+  const room = { w: SHEET.w - 2*SHEET.margin - 16, h: SHEET.h - 2*SHEET.margin - 16 };
+  const cellW = (room.w - 4)/pg.cols, cellH = (room.h - 14)/pg.rows;
+  pg.corners.forEach((c, n) => {
+    const col = n % pg.cols, row = (n / pg.cols) | 0;
+    const cx = SHEET.margin + 10 + (col + 0.5)*cellW - pg.k*(c.box.loX + c.box.hiX)/2;
+    const cy = pg.top + SHEET.margin + 16 + (row + 0.5)*cellH - pg.k*(c.box.loY + c.box.hiY)/2;
+    paintCornerDetail(c, cx, cy, pg.k, u, k);
+  });
   // the page header names the view; this note, at the foot, says which face the joints
   // are drawn on and what the mitre figure is for
   const note = P2S(SHEET.margin + 8, pg.top + SHEET.h - SHEET.margin - 6);
@@ -5078,22 +5110,16 @@ function paintCorners(pg, u, k){
   ctx.fillStyle = SHEET_LINE;
   ctx.fillText(`rails ${railSideLabel(state.polys[pg.i].mat || state.mat).toLowerCase()}` +
                ' · mitre is the saw setting for each rail end', note.x, note.y);
-  pg.corners.slice(0, 6).forEach((c, n) => {
-    const col = n % 3, row = (n / 3) | 0;
-    const cx = SHEET.margin + 8 + (col + 0.5)*((SHEET.w - 2*SHEET.margin - 16)/3);
-    const cy = pg.top + SHEET.margin + 22 + (row + 0.5)*((SHEET.h - 2*SHEET.margin - 30)/2);
-    paintCornerDetail(c, cx, cy, pg.k, u, k);
-  });
-  if (pg.corners.length > 6){
+  if (pg.extra > 0){
     const more = P2S(SHEET.margin + 8, pg.top + SHEET.h - SHEET.margin - 11);
     ctx.fillStyle = SHEET_LINE;
-    ctx.fillText(`… and ${pg.corners.length - 6} more corner${pg.corners.length === 7 ? '' : 's'}`,
-                 more.x, more.y);
+    ctx.fillText(`… and ${pg.extra} more corner${pg.extra === 1 ? '' : 's'}`, more.x, more.y);
   }
 }
 function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
-  const mm = v => v*kMM, LEG = 0.42;
+  const mm = v => v*kMM;
   const at = q => P2S(cxMM + mm(q.x - c.v.x), cyMM + mm(q.y - c.v.y));   // plan orientation
+  const toS = q => at(q);
   const move = (q, d, t) => ({ x: q.x + d.x*t, y: q.y + d.y*t });
   const poly = (pts2, fill) => {
     ctx.beginPath();
@@ -5102,49 +5128,60 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
     ctx.fillStyle = fill; ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1;
     ctx.fill(); ctx.stroke();
   };
-  // the two rail strips on their attached face, cut against the mitre seam
-  const n1 = sideNormal(c.d1, c.side), n2 = sideNormal(c.d2, c.side);
-  const q1 = move(c.v, n1, c.off), q2 = move(c.v, n2, c.off);      // offset centrelines
-  const X = lineCross(q1, c.d1, q2, c.d2);
-  if (!X) return;
-  const seam = norm2({ x: -c.d1.x + c.d2.x, y: -c.d1.y + c.d2.y }) ||
-               sideNormal(c.d1, 'left');                          // 180° fallback never hits
-  const rail = (dir, nrm, back) => {
-    const eA = move(q1 === undefined ? null : c.v, nrm, c.off - c.railT/2),
-          eB = move(c.v, nrm, c.off + c.railT/2);
-    const cutA = lineCross(eA, dir, X, seam), cutB = lineCross(eB, dir, X, seam);
-    const farA = move(cutA, dir, -back), farB = move(cutB, dir, -back);
-    return [farA, cutA, cutB, farB];
+  const postAt = (q, d) => {
+    const pv = sideNormal(d, 'left');
+    poly([ move(move(q, d, -c.postW/2), pv, -c.postT/2),
+           move(move(q, d,  c.postW/2), pv, -c.postT/2),
+           move(move(q, d,  c.postW/2), pv,  c.postT/2),
+           move(move(q, d, -c.postW/2), pv,  c.postT/2) ], '#cbd5e1');
   };
-  poly(rail(c.d1, n1, LEG), '#e2e8f0');
-  poly(rail({ x:-c.d2.x, y:-c.d2.y }, n2, LEG), '#e2e8f0');
-  // the post under the joint, square to the incoming run
-  const pu = c.d1, pv = sideNormal(c.d1, 'left');
-  poly([ move(move(c.v, pu, -c.postW/2), pv, -c.postT/2),
-         move(move(c.v, pu,  c.postW/2), pv, -c.postT/2),
-         move(move(c.v, pu,  c.postW/2), pv,  c.postT/2),
-         move(move(c.v, pu, -c.postW/2), pv,  c.postT/2) ], '#cbd5e1');
-  // seam drawn over the joint
-  const s0 = at(move(X, seam, -c.railT*1.4)), s1 = at(move(X, seam, c.railT*1.4));
+  // rails on their attached face, cut against the mitre seam, running to the neighbour post
+  const n1 = sideNormal(c.d1, c.side), n2 = sideNormal(c.d2, c.side);
+  const X = lineCross(move(c.v, n1, c.off), c.d1, move(c.v, n2, c.off), c.d2);
+  if (!X) return;
+  const seam = norm2({ x: -c.d1.x + c.d2.x, y: -c.d1.y + c.d2.y }) || sideNormal(c.d1, 'left');
+  const rail = (dir, nrm, back) => {
+    const eA = move(c.v, nrm, c.off - c.railT/2), eB = move(c.v, nrm, c.off + c.railT/2);
+    const cutA = lineCross(eA, dir, X, seam), cutB = lineCross(eB, dir, X, seam);
+    if (!cutA || !cutB) return;
+    poly([ move(cutA, dir, -back), cutA, cutB, move(cutB, dir, -back) ], '#e2e8f0');
+  };
+  const pIn = move(c.v, c.d1, -c.legIn), pOut = move(c.v, c.d2, c.legOut);
+  rail(c.d1, n1, c.legIn - c.postW/2);                     // stop at the neighbour's face
+  rail({ x:-c.d2.x, y:-c.d2.y }, n2, c.legOut - c.postW/2);
+  postAt(pIn, c.d1); postAt(pOut, c.d2);                   // the posts either side
+  postAt(c.v, c.d1);                                       // the corner post over the joint
+  /* Annotation geometry is sized in paper millimetres, like every other annotation on the
+     sheet: a 1:50 grid cell and a 1:20 lone corner get the same arc and the same clearances,
+     so labels cannot crowd each other as the scale drops. */
+  const paper = mmOnPaper => mmOnPaper/kMM;                 // paper mm -> metres at this scale
+  const half = Math.max(c.railT*1.4, paper(3));
+  const s0 = at(move(X, seam, -half)), s1 = at(move(X, seam, half));
   ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(s0.x, s0.y); ctx.lineTo(s1.x, s1.y); ctx.stroke();
-  // interior angle arc at the post
+  // interior angle arc at the post, held inside the legs
   const a1 = Math.atan2(-c.d1.y, -c.d1.x), a2 = Math.atan2(c.d2.y, c.d2.x);
-  const r = at(move(c.v, c.d1, 0.26)), ctr = at(c.v), rad = Math.hypot(r.x-ctr.x, r.y-ctr.y);
+  const arcM = Math.min(paper(8), 0.6*Math.min(c.legIn, c.legOut));
+  const ctr = at(c.v);
+  const rpx = Math.hypot(at(move(c.v, c.d1, arcM)).x - ctr.x,
+                         at(move(c.v, c.d1, arcM)).y - ctr.y);
   ctx.strokeStyle = dimInk(); ctx.lineWidth = 1;
   ctx.beginPath();
   const sweep = ((a2 - a1) % (2*Math.PI) + 2*Math.PI) % (2*Math.PI) <= Math.PI;
-  ctx.arc(ctr.x, ctr.y, rad, a1, a2, !sweep);
+  ctx.arc(ctr.x, ctr.y, rpx, a1, a2, !sweep);
   ctx.stroke();
-  // labels: the corner itself, and the saw setting at the seam
+  // the corner reads inside the angle; the saw setting sits outside the joint, past the seam
   ctx.font = dimFont(k); ctx.fillStyle = dimInk();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const bis = norm2({ x: -c.d1.x + c.d2.x, y: -c.d1.y + c.d2.y }) || { x:0, y:0 };
-  const langle = at(move(c.v, bis, 0.36));
+  const langle = at(move(c.v, bis, arcM + paper(4.5)));
   ctx.fillText(`${+c.theta.toFixed(1)}°`, langle.x, langle.y);
-  const lmitre = at(move(move(X, seam, c.railT*1.4), bis, 0.1));
+  const lmitre = at(move(X, seam, -(half + paper(7))));
   ctx.fillText(`mitre ${+c.mitre.toFixed(1)}°`, lmitre.x, lmitre.y);
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const inside = move(c.v, bis, arcM);
+  dimAt(toS, pIn, c.v, fmtLen(c.legIn, u), CHAIN_OFF*k, inside, k);
+  dimAt(toS, c.v, pOut, fmtLen(c.legOut, u), CHAIN_OFF*k, inside, k);
 }
 function paintSection(pg, u, k){
   const { ev, bounds, bay, win, x, base } = pg, mm = v => v*pg.k;
