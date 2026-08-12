@@ -5109,7 +5109,8 @@ function paintCorners(pg, u, k){
   ctx.font = `${(ANNOT_MM*view.s*0.9).toFixed(2)}px ${PAPER_DIM.font}`;
   ctx.fillStyle = SHEET_LINE;
   ctx.fillText(`rails ${railSideLabel(state.polys[pg.i].mat || state.mat).toLowerCase()}` +
-               ' · mitre is the saw setting for each rail end', note.x, note.y);
+               ' · mitre is the saw setting · rail lengths run long point to post centre',
+               note.x, note.y);
   if (pg.extra > 0){
     const more = P2S(SHEET.margin + 8, pg.top + SHEET.h - SHEET.margin - 11);
     ctx.fillStyle = SHEET_LINE;
@@ -5145,12 +5146,13 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
   const rail = (dir, nrm, back) => {
     const eA = move(c.v, nrm, c.off - c.railT/2), eB = move(c.v, nrm, c.off + c.railT/2);
     const cutA = lineCross(eA, dir, X, seam), cutB = lineCross(eB, dir, X, seam);
-    if (!cutA || !cutB) return;
+    if (!cutA || !cutB) return null;
     poly([ move(eA, dir, -back), cutA, cutB, move(eB, dir, -back) ], '#e2e8f0');
+    return { cutA, cutB };
   };
   const pIn = move(c.v, c.d1, -c.legIn), pOut = move(c.v, c.d2, c.legOut);
-  rail(c.d1, n1, c.legIn - c.postW/2);                     // stop at the neighbour's face
-  rail({ x:-c.d2.x, y:-c.d2.y }, n2, c.legOut - c.postW/2);
+  const r1 = rail(c.d1, n1, c.legIn - c.postW/2);          // stop at the neighbour's face
+  const r2 = rail({ x:-c.d2.x, y:-c.d2.y }, n2, c.legOut - c.postW/2);
   postAt(pIn, c.d1); postAt(pOut, c.d2);                   // the posts either side
   postAt(c.v, c.d1);                                       // the corner post over the joint
   /* Annotation geometry is sized in paper millimetres, like every other annotation on the
@@ -5183,8 +5185,19 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
   ctx.fillText(`mitre ${+c.mitre.toFixed(1)}°`, lmitre.x, lmitre.y);
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   const inside = move(c.v, bis, arcM);
-  dimAt(toS, pIn, c.v, fmtLen(c.legIn, u), CHAIN_OFF*k, inside, k);
-  dimAt(toS, c.v, pOut, fmtLen(c.legOut, u), CHAIN_OFF*k, inside, k);
+  /* The number a builder cuts to: the rail's long-point length, from the far tip of the
+     mitre back to the neighbouring post centre, measured along the rail. The long point is
+     laterally offset from the centreline, so it lies exactly on the witness line of an
+     axial dimension taken from the post centre — the arrow lands on the visible tip. */
+  const dot2 = (a2, b2) => a2.x*b2.x + a2.y*b2.y;
+  const railDim = (r, from, toward) => {
+    if (!r) return;
+    const len = Math.max(dot2({ x:r.cutA.x-from.x, y:r.cutA.y-from.y }, toward),
+                         dot2({ x:r.cutB.x-from.x, y:r.cutB.y-from.y }, toward));
+    dimAt(toS, from, move(from, toward, len), fmtLen(len, u), CHAIN_OFF*k, inside, k);
+  };
+  railDim(r1, pIn, c.d1);
+  railDim(r2, pOut, { x:-c.d2.x, y:-c.d2.y });
 }
 function paintSection(pg, u, k){
   const { ev, bounds, bay, win, x, base } = pg, mm = v => v*pg.k;

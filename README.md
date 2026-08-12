@@ -307,8 +307,10 @@ around it is ordinary fence.
 A fence with corners also gets a **corner details page**: each fold drawn in plan — the
 corner post, the rails running to their **real neighbouring posts** (the same posts
 `postsAlong()` places, so the bay context explains the joint), both on the face the fence's
-*Rail side* setting actually hangs them on, the mitre seam, the bay length along each leg,
-the interior angle, and the cut called out as the saw setting:
+*Rail side* setting actually hangs them on, the mitre seam, each rail's **cut length** —
+long point of the mitre back to the neighbouring post centre, measured along the rail, with
+the witness line landing on the visible tip — the interior angle, and the cut called out as
+the saw setting:
 two rails meeting at plan angle θ are each cut **(180° − θ)/2** off square, so a 131.2°
 corner reads `mitre 24.4°`. Which face the rails are on decides whether the joint closes on
 the inside or the outside of the corner, which is why the detail is drawn from the model's

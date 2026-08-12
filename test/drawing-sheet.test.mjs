@@ -546,7 +546,13 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   assert.match(html, /poly\(\[ move\(eA, dir, -back\), cutA, cutB, move\(eB, dir, -back\) \], '#e2e8f0'\);/);
   // posts either side, and the bay lengths post to post
   assert.match(html, /postAt\(pIn, c\.d1\); postAt\(pOut, c\.d2\);/);
-  assert.match(html, /dimAt\(toS, pIn, c\.v, fmtLen\(c\.legIn, u\), CHAIN_OFF\*k, inside, k\);/);
+  // the dimension is the rail's cut length: mitre long point back to the post centre,
+  // measured along the rail so the witness line lands on the visible tip
+  assert.match(html, /const len = Math\.max\(dot2\(\{ x:r\.cutA\.x-from\.x, y:r\.cutA\.y-from\.y \}, toward\),/);
+  assert.match(html, /dimAt\(toS, from, move\(from, toward, len\), fmtLen\(len, u\), CHAIN_OFF\*k, inside, k\);/);
+  assert.match(html, /railDim\(r1, pIn, c\.d1\);/);
+  assert.match(html, /railDim\(r2, pOut, \{ x:-c\.d2\.x, y:-c\.d2\.y \}\);/);
+  assert.doesNotMatch(html, /dimAt\(toS, pIn, c\.v, fmtLen\(c\.legIn/);   // not the bay
   assert.match(html, /else if \(pg\.kind === 'corners'\) paintCorners\(pg, u, k\);/);
   assert.match(html, /`mitre \$\{\+c\.mitre\.toFixed\(1\)\}°`/);
 });
