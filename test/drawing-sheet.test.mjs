@@ -541,7 +541,9 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   // annotation clearances are paper millimetres, so a 1:50 grid cell reads like a 1:20 page
   assert.match(html, /const paper = mmOnPaper => mmOnPaper\/kMM;/);
   assert.match(html, /const arcM = Math\.min\(paper\(8\), 0\.6\*Math\.min\(c\.legIn, c\.legOut\)\);/);
-  assert.match(html, /const lmitre = at\(move\(X, seam, -\(half \+ paper\(7\)\)\)\);/);
+  assert.match(html, /const lmitre = at\(move\(X, seam, -\(half \+ paper\(CHAIN_OFF\*ANNOT_MM\/12 \+ 7\)\)\)\);/);
+  // mitred at the joint only — the far end of each rail is square
+  assert.match(html, /poly\(\[ move\(eA, dir, -back\), cutA, cutB, move\(eB, dir, -back\) \], '#e2e8f0'\);/);
   // posts either side, and the bay lengths post to post
   assert.match(html, /postAt\(pIn, c\.d1\); postAt\(pOut, c\.d2\);/);
   assert.match(html, /dimAt\(toS, pIn, c\.v, fmtLen\(c\.legIn, u\), CHAIN_OFF\*k, inside, k\);/);

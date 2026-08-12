@@ -5140,11 +5140,13 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
   const X = lineCross(move(c.v, n1, c.off), c.d1, move(c.v, n2, c.off), c.d2);
   if (!X) return;
   const seam = norm2({ x: -c.d1.x + c.d2.x, y: -c.d1.y + c.d2.y }) || sideNormal(c.d1, 'left');
+  // mitred at the joint, square at the far end: the far corners sit at one distance from
+  // the vertex, so only the corner end carries the cut
   const rail = (dir, nrm, back) => {
     const eA = move(c.v, nrm, c.off - c.railT/2), eB = move(c.v, nrm, c.off + c.railT/2);
     const cutA = lineCross(eA, dir, X, seam), cutB = lineCross(eB, dir, X, seam);
     if (!cutA || !cutB) return;
-    poly([ move(cutA, dir, -back), cutA, cutB, move(cutB, dir, -back) ], '#e2e8f0');
+    poly([ move(eA, dir, -back), cutA, cutB, move(eB, dir, -back) ], '#e2e8f0');
   };
   const pIn = move(c.v, c.d1, -c.legIn), pOut = move(c.v, c.d2, c.legOut);
   rail(c.d1, n1, c.legIn - c.postW/2);                     // stop at the neighbour's face
@@ -5176,7 +5178,8 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
   const bis = norm2({ x: -c.d1.x + c.d2.x, y: -c.d1.y + c.d2.y }) || { x:0, y:0 };
   const langle = at(move(c.v, bis, arcM + paper(4.5)));
   ctx.fillText(`${+c.theta.toFixed(1)}°`, langle.x, langle.y);
-  const lmitre = at(move(X, seam, -(half + paper(7))));
+  // the leg dimensions sit CHAIN_OFF outside the fence line; the saw setting goes past them
+  const lmitre = at(move(X, seam, -(half + paper(CHAIN_OFF*ANNOT_MM/12 + 7))));
   ctx.fillText(`mitre ${+c.mitre.toFixed(1)}°`, lmitre.x, lmitre.y);
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   const inside = move(c.v, bis, arcM);
