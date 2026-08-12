@@ -65,9 +65,14 @@ screens.
 ### Features
 
 - **Two fence styles** — palings (boards) or post-and-rail.
+- **Five rail positions.** `Left of line` and `Right of line` retain the original
+  face-mounted rails. `Between posts — left`, `Between posts — centre` and
+  `Between posts — right` put rails between the real post faces at the selected
+  lateral position. Changing the position or a construction size updates the
+  plan, 3D model, drawing sheet and quantities from the same geometry.
 - **Per-fence settings.** Every fence line follows the shared defaults until you
   tick "This fence has its own settings", then it can keep its own name,
-  spacing, style, height, rail side, post shapes, end-post rule, handrail and
+  spacing, style, height, rail position, post shapes, end-post rule, handrail and
   materials inclusion. Its 3D and drawing-sheet visibility can be controlled
   independently. Totals aggregate across all included fences.
 - **Gates.** Mark any segment as a gate: its opening is excluded from fence length
@@ -305,21 +310,29 @@ gate opening wide enough to be the widest bay is sectioned as a leaf even though
 around it is ordinary fence.
 
 A fence with corners also gets a **corner details page**: each fold drawn in plan — the
-corner post, the rails running to their **real neighbouring posts** (the same posts
-`postsAlong()` places, so the bay context explains the joint), both on the face the fence's
-*Rail side* setting actually hangs them on, the mitre seam, each rail's **cut length** —
-long point of the mitre back to the neighbouring post centre, measured along the rail, with
-the witness line landing on the visible tip — the interior angle, and the cut called out as
-the saw setting:
+corner post and the rails running to their **real neighbouring posts** (the same posts
+`postsAlong()` places, so the bay context explains the joint). `Left of line` and `Right of
+line` retain the face-mounted detail: the rails meet over the post, and each **cut length**
+runs from the long point of the mitre back to the neighbouring post centre, with the witness
+line landing on the visible tip. `Between posts — left/centre/right` instead draws each rail
+ending against the actual post footprint. Its face-to-face fabrication length is the longer
+rail edge. A perpendicular post face is a flush square butt and needs no corner callout. An
+angled rectangular post face carries the required mitre saw setting plus a usable site
+set-out: the distance **along the struck post face from its bottom physical corner to the
+rail's long-point contact**. The sheet marks that bottom corner and leads the note to the
+contact point; it never asks a builder to find the concealed post centre. The corner page is
+fabrication-only, so it does not repeat the general fence angle already shown on the plan.
+For the face-mounted joint:
 two rails meeting at plan angle θ are each cut **(180° − θ)/2** off square, so a 131.2°
 corner reads `mitre 24.4°`. Which face the rails are on decides whether the joint closes on
 the inside or the outside of the corner, which is why the detail is drawn from the model's
 own offsets rather than as a schematic. The grid follows the corner count — one corner
 takes the whole page, four sit two-by-two — at the largest standard scale that fits the
 worst cell, and the arcs, labels and clearances are sized in paper millimetres so a 1:50
-grid cell reads exactly like a 1:20 lone corner. Corners against a gate have no rail joint, and a
-fold within a few degrees of straight is cut square in practice; both are left off the page. The elevation keeps the lengths; the section says how
-it goes together.
+grid cell reads exactly like a 1:20 lone corner. A gate is a hard break: face-mounted corner
+details omit corners beside a gate, while a between-post detail can still show the fence rail
+terminating on the other available post face. A fold within a few degrees of straight is
+omitted. The elevation keeps the lengths; the section says how it goes together.
 
 The geometry comes from `sheetPlanGeometry()` and `elevationParts()`. They read
 `postsAlong()`, `railYs()`, `gateLeafBuild()` and `materialPostEndFlags()` — the same helpers
@@ -407,13 +420,25 @@ against the near plane, then sort far-to-near.
   drawing.
 - On a phone the orbit controls sit under the labels chip and the zoom controls
   at the foot, so a short landscape canvas never squeezes them together.
-- Rails are built per bay on the chosen left/right face, so interior bays meet
-  at post centres and only the first/last outer bays extend to the outside face
-  of their end posts. Gate leaves use the same fence face.
+- Face-mounted rails are built per bay on the chosen left/right face, so interior bays meet
+  at post centres and only the first/last outer bays extend to the outside face of their end
+  posts. Between-post rails terminate against actual post faces, with left/centre/right
+  controlling their lateral position and angled rectangular faces producing mitre cuts.
+  Gate placement is stored independently from rail position.
 
 Known simplifications, all marked `ponytail:` in the source: handrail corners
 butt rather than mitre, and the handrail adds its thickness above the fence
 height.
+
+Deferred construction controls:
+
+- **Round-post between-rail joints.** Between-post rails butt square against the post's tangent
+  face for now, and no square/flush corner set-out is printed. A scribed or concave rail end
+  that follows the post is separate future work.
+- **Gate attachment face.** A gate attaches independently to an available opposite or
+  adjacent face of its support post; it does not inherit the fence rail position. Gate
+  placement keeps its current behaviour for now. A per-gate attachment-face control is
+  separate future work.
 
 Constraints settle by relaxation: each pass satisfies every dimension in turn
 and disturbs its neighbours less than the last, repeating until nothing moves

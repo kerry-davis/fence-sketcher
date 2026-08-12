@@ -140,6 +140,16 @@ test('copy summary renders a consolidated store-ready BOM', () => {
   assert.match(statusPlan, /1 × 2400 mm post centre-to-centre \(fits post centre-to-centre\)/);
   assert.match(statusPlan, /1 × 1500 mm post centre-to-centre \(900 mm overlap\)/);
 
+  const betweenRows = context.copyBomRows([{
+    name:'Angled inside corner', rails:1,
+    railCuts:[{length:2.75, centres:3, fit:'between', startMitre:0, endMitre:40}],
+    mat:{style:'rail', railSide:'inside-middle', rails:1, railLength:3,
+         railW:.1, height:1.8, postDepth:.6},
+  }], 'm');
+  const betweenPlan = context.copyBomCutPlan(betweenRows, 'm').join('\n');
+  assert.match(betweenPlan,
+    /1 × 2750 mm face-to-face long-edge cut \(start square; end 40° mitre; 250 mm offcut\)/);
+
   const handrailRows = context.copyBomRows([{
     handrail:10.86,
     handrailCuts:[

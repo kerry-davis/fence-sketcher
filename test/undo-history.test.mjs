@@ -67,3 +67,34 @@ test('material controls record individual history entries', () => {
   assert.ok((controls.match(/commitEdit\(/g) || []).length >= 7);
   assert.match(html, /\$\('iLock'\)\.addEventListener\('change',[\s\S]*?pushUndo\(\);/);
 });
+
+test('construction fields live-preview through every renderer as one undo operation', () => {
+  assert.match(html, /input\.addEventListener\('input', e => \{/);
+  assert.match(html, /previewMaterialEdit\(input, \(\) => edit\(curMat\(\), value\)\);/);
+  assert.match(html, /\['iRailT','railT'\]/);
+  assert.match(html, /liveMaterialInput\('iHeight'/);
+
+  const start=html.indexOf('const liveMaterialEdits = new WeakMap();');
+  const end=html.indexOf('function liveMaterialInput(',start);
+  const context={
+    WeakMap,JSON,readOnly:false,
+    state:{unit:'m',polys:[],builds:[],mat:{height:1.2}},
+    undoStack:[],redoStack:[],
+    historySnapshot:null,
+    junctionGroups:()=>[],reapplyConstraints(){},
+    pushHistory:null,
+    updates:0,updateAll:null,
+  };
+  context.historySnapshot=()=>JSON.stringify(context.state);
+  context.pushHistory=snapshot=>{context.undoStack.push(snapshot);context.redoStack=[];};
+  context.updateAll=()=>{context.updates++;};
+  vm.createContext(context);
+  vm.runInContext(html.slice(start,end)+';this.previewMaterialEdit=previewMaterialEdit;',context);
+  const field={};
+  context.previewMaterialEdit(field,()=>context.state.mat.height=1.3);
+  context.previewMaterialEdit(field,()=>context.state.mat.height=1.4);
+  assert.equal(context.state.mat.height,1.4);
+  assert.equal(context.updates,2);
+  assert.equal(context.undoStack.length,1);
+  assert.equal(JSON.parse(context.undoStack[0]).mat.height,1.2);
+});

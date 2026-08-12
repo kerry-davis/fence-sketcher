@@ -20,6 +20,30 @@ test('the drawing sheet is its own view, and does not collide with the phone she
   assert.match(html, /if \(modeSheet\)\{ drag = \{ t:'pan' \}; return; \}/);
   // and the plan's own view is parked, not clobbered
   assert.match(html, /if \(on\)\{ planView = \{\.\.\.view\}; fitSheet\(\); \}\s*\n\s*else if \(planView\)\{ view = planView; planView = null; \}/);
+  // Sheet is inspection-only, but its settings panel must keep targeting the selected fence.
+  assert.doesNotMatch(html, /sel = on \? null : sel/);
+  assert.match(html, /Keep the logical fence selection while inspecting its sheets/);
+  assert.match(html, /const first=sheetFences\(\)\[0\];\s*\n\s*if \(first != null\) sel=\{t:'seg',p:first,i:0\};/);
+  assert.match(html, /if \(modeSheet\)\{\s*\n\s*syncVisibleSheetFence\(\);/);
+});
+
+test('scrolling sheets makes the visible fence the settings and 3D target', () => {
+  const start=html.indexOf('function syncVisibleSheetFence(){');
+  const end=html.indexOf('function setSheetView(',start);
+  assert.ok(start>=0 && end>start);
+  const context={
+    modeSheet:true,view:{y:225,s:1},ch:190,SHEET:{h:210},
+    sel:{t:'seg',p:0,i:0},
+    sheetLayout:()=>({pages:[{top:0,i:0},{top:222,i:3},{top:444,i:4}]}),
+    syncMatInputs(){},updateTotals(){},updateSelbox(){},syncReadOnlyDetails(){},
+  };
+  vm.createContext(context);vm.runInContext(html.slice(start,end),context);
+  context.syncVisibleSheetFence();
+  assert.deepEqual({...context.sel},{t:'seg',p:3,i:0});
+  // Once the right fence is targeted, repainting does not churn the panel.
+  let syncs=0;context.syncMatInputs=()=>syncs++;
+  context.syncVisibleSheetFence();
+  assert.equal(syncs,0);
 });
 
 test('desktop wheel scrolls through sheet pages while modified wheel still zooms', () => {
@@ -107,6 +131,8 @@ test('each item gets an isolated, dimensioned plan page', () => {
   assert.match(html, /reach \+ CHAIN_OFF\*scale\*1\.6/);
   assert.match(html, /dimAt\(toScreen, paperPoint\(seg\.a\), paperPoint\(seg\.b\)/);
   assert.match(html, /for \(const angle of plan\.angles\) sheetPlanAngle\(pg, angle, at, scale\);/);
+  assert.match(html, /function sheetPlanRails\(plan, at\)\{/);
+  assert.match(html, /sheetPlanRails\(plan, at\);/);
   // State and canvas coordinates are both Y-down. Increasing state Y must therefore move
   // down the isolated paper plan, preserving the run's chirality rather than mirroring it.
   assert.match(html, /const top = base - mm\(b\.height\);\s*\/\/ The interactive plan's S2W uses canvas Y-down/);
@@ -540,21 +566,36 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   assert.match(html, /\(col \+ 0\.5\)\*cellW - pg\.k\*\(c\.box\.loX \+ c\.box\.hiX\)\/2;/);
   // annotation clearances are paper millimetres, so a 1:50 grid cell reads like a 1:20 page
   assert.match(html, /const paper = mmOnPaper => mmOnPaper\/kMM;/);
-  assert.match(html, /const arcM = Math\.min\(paper\(8\), 0\.6\*Math\.min\(c\.legIn, c\.legOut\)\);/);
   assert.match(html, /const lmitre = at\(move\(X, seam, -\(half \+ paper\(CHAIN_OFF\*ANNOT_MM\/12 \+ 7\)\)\)\);/);
+  // between-post cut notes use the open corner field, with masks keeping leader/member lines
+  // out of the lettering
+  assert.match(html, /ctx\.fillRect\(s\.x-wide\/2-1\.6\*k,s\.y-lineH\*lines\.length\/2,wide\+3\.2\*k,lineH\*lines\.length\);/);
   // mitred at the joint only — the far end of each rail is square
   assert.match(html, /poly\(\[ move\(eA, dir, -back\), cutA, cutB, move\(eB, dir, -back\) \], '#e2e8f0'\);/);
   // posts either side, and the bay lengths post to post
   assert.match(html, /postAt\(pIn, c\.d1\); postAt\(pOut, c\.d2\);/);
-  // the dimension is the rail's cut length: mitre long point back to the post centre,
-  // measured along the rail so the witness line lands on the visible tip
-  assert.match(html, /const len = Math\.max\(dot2\(\{ x:r\.cutA\.x-from\.x, y:r\.cutA\.y-from\.y \}, toward\),/);
-  assert.match(html, /dimAt\(toS, from, move\(from, toward, len\), fmtLen\(len, u\), CHAIN_OFF\*k, inside, k\);/);
-  assert.match(html, /railDim\(r1, pIn, c\.d1\);/);
+  // the fabrication page has only cut length, a required mitre and the long-point setback;
+  // the general fence angle already exists on the plan page and must not be repeated here
+  const betweenPainter=html.slice(html.indexOf('function paintBetweenCornerDetail('),
+                                  html.indexOf('function paintCornerDetail('));
+  const facePainter=html.slice(html.indexOf('function paintCornerDetail('),
+                               html.indexOf('function paintSection('));
+  assert.doesNotMatch(betweenPainter,/c\.theta/);
+  assert.doesNotMatch(facePainter,/c\.theta/);
+  assert.match(html,/function sheetCornerSetout\(rail,atCorner\)/);
+  assert.match(html,/if \(saw<0\.05\) return null;/);
+  assert.match(html,/return \{cut,corner:lower,distance:Math\.hypot\(cut\.x-lower\.x,cut\.y-lower\.y\)\};/);
+  assert.match(html,/lines\.push\(`long point \$\{fmtSmall\(setout\.distance,u\)\} from bottom post corner`\);/);
+  assert.match(html,/const open=norm2\(\{x:-c\.d1\.x\+c\.d2\.x,y:-c\.d1\.y\+c\.d2\.y\}\) \|\| sideNormal\(dir,'left'\);/);
+  assert.match(html,/const noteAt=\{x:c\.v\.x\+open\.x\*paper\(30\),y:c\.v\.y\+open\.y\*paper\(30\)\};/);
+  assert.match(html,/sheetCornerDatumMark\(at,setout\.corner,k\);/);
+  assert.match(html,/function sheetCornerNote\(to,lines,point,k,leader\)/);
+  assert.match(html,/dimArrow\(tip\.x,tip\.y,dx\/L,dy\/L,k\*\.65\);/);
+  assert.match(html,/const lenA=dot2\(\{ x:r\.cutA\.x-from\.x, y:r\.cutA\.y-from\.y \},toward\);/);
   // the drawn rail ends where the dimension ends: the neighbouring post centre
   assert.match(html, /const r1 = rail\(c\.d1, n1, c\.legIn\);/);
   assert.doesNotMatch(html, /rail\(c\.d1, n1, c\.legIn - c\.postW\/2\)/);
-  assert.match(html, /railDim\(r2, pOut, \{ x:-c\.d2\.x, y:-c\.d2\.y \}\);/);
+  assert.match(html, /railDim\(r2,pOut,\{x:-c\.d2\.x,y:-c\.d2\.y\}\);/);
   assert.doesNotMatch(html, /dimAt\(toS, pIn, c\.v, fmtLen\(c\.legIn/);   // not the bay
   assert.match(html, /else if \(pg\.kind === 'corners'\) paintCorners\(pg, u, k\);/);
   assert.match(html, /`mitre \$\{\+c\.mitre\.toFixed\(1\)\}°`/);

@@ -19,7 +19,7 @@ test('round post settings render and split the materials count by shape', () => 
 
   const context = {
     Math, Map,
-    POST_SIDE:.1, PALING_T:.02, RAIL_T:.045,
+    POST_SIDE:.1, PALING_T:.02, RAIL_T:.045, FENCE_JOIN_TOL:1e-4,
     postSizeOf:mat => (mat && mat.postSize != null ? Number(mat.postSize) : .1),
     postTOf:mat => (mat && mat.postT != null ? Number(mat.postT) : .1),
     palingTOf:mat => (mat && mat.palingT != null ? Number(mat.palingT) : .02),
@@ -52,6 +52,9 @@ test('round post settings render and split the materials count by shape', () => 
   };
   vm.createContext(context);
   vm.runInContext(html.slice(helperStart, helperEnd), context);
+  context.railBetweenPosts=mat=>String(mat.railSide||'').startsWith('inside-');
+  context.railLateralOffset=mat=>mat.railSide==='inside-left'?(context.postTOf(mat)-context.railTOf(mat))/2:
+    mat.railSide==='inside-right'?-(context.postTOf(mat)-context.railTOf(mat))/2:0;
   vm.runInContext(html.slice(geometryStart, geometryEnd), context);
 
   const mat = {
@@ -91,6 +94,19 @@ test('round post settings render and split the materials count by shape', () => 
   assert.ok(Math.abs(Math.max(...xValues) - Math.min(...xValues) - 1.2) < 1e-9);
   assert.ok(Math.abs(Math.max(...zValues) - Math.min(...zValues) - .06) < 1e-9);
 
+  context.state = {
+    builds:[],
+    mat:{...mat, spacing:5, rails:1, ends:2, railSide:'inside-middle',
+         postSize:.3, postT:.2, railT:.08},
+    polys:[{closed:false,pts:[{x:0,y:0},{x:3,y:0}]}],
+  };
+  const betweenPoints=context.build3().filter(face=>face.col[0]===2).flatMap(face=>face.p);
+  const betweenX=betweenPoints.map(point=>point[0]),betweenZ=betweenPoints.map(point=>point[2]);
+  assert.ok(Math.abs(Math.min(...betweenX)-.15)<1e-9);
+  assert.ok(Math.abs(Math.max(...betweenX)-2.85)<1e-9);
+  assert.ok(Math.abs(Math.min(...betweenZ)+.04)<1e-9);
+  assert.ok(Math.abs(Math.max(...betweenZ)-.04)<1e-9);
+
   const materialStart = html.indexOf('function sharedEnds(');
   const materialEnd = html.indexOf('// Delete point i', materialStart);
   vm.runInContext(html.slice(materialStart, materialEnd), context);
@@ -100,6 +116,17 @@ test('round post settings render and split the materials count by shape', () => 
   assert.equal(materials.posts, 2);
   assert.equal(materials.squarePosts, 0);
   assert.equal(materials.roundPosts, 2);
+
+  materials = context.calcMaterials([{
+    closed:false, pts:[{x:0,y:0},{x:3,y:0},{x:3,y:3}],
+  }], {...mat, spacing:5, rails:1, ends:2, railSide:'inside-middle',
+       postSize:.3, postT:.2, railT:.08});
+  assert.deepEqual(JSON.parse(JSON.stringify(materials.per[0].railCuts.map(cut => ({
+    length:+cut.length.toFixed(4),start:+cut.startMitre.toFixed(1),end:+cut.endMitre.toFixed(1),
+  })))), [
+    {length:2.7,start:0,end:0},
+    {length:2.75,start:0,end:0},
+  ]);
 
   materials = context.calcMaterials([
     {closed:false, pts:[{x:0,y:0}, {x:1,y:0}]},
