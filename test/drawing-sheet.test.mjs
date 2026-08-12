@@ -474,8 +474,56 @@ test('paper gets paper\'s ink, not the screen theme\'s', () => {
   assert.match(html, /ctx\.fillRect\(-wide\/2 - 1\.6\*k, lift - 6\.2\*k, wide \+ 3\.2\*k, 12\.4\*k\);/);
   // one drawing face, used to measure as well as to draw, or the fit tests lie
   assert.match(html, /const dimFont = k => `\$\{\(12\*k\)\.toFixed\(2\)\}px \$\{dimStyle\.font\}`;/);
-  assert.equal((html.match(/ctx\.font = dimFont\(k\);/g) || []).length, 3);
+  assert.equal((html.match(/ctx\.font = dimFont\(k\);/g) || []).length, 4);   // dimAt, dimChain, renderDimension, corner labels
   assert.doesNotMatch(html, /px system-ui`; ctx\.textAlign/);
   // sized for A4 rather than for a screen
   assert.match(html, /const ANNOT_MM = 3\.1;/);
+});
+
+test('corner details carry the mitre cut for the rails at each fold', () => {
+  const start = html.indexOf('const CORNER_MAX_DEG');
+  const end = html.indexOf('function elevationParts(', start);
+  assert.ok(start >= 0 && end > start);
+  const context = { Math, state:{ mat:{} },
+    railSideOf: m => (m && m.railSide === 'right' ? 'right' : 'left'),
+    railTOf: () => 0.045, postTOf: () => 0.1, postSizeOf: () => 0.1 };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  const mat = { railSide:'left' };
+
+  // a square corner mitres at 45; the reference drawing's 131.2 corner at 24.4
+  const L = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}], closed:false, mat }], 0);
+  assert.equal(L.length, 1);
+  assert.equal(+L[0].theta.toFixed(1), 90);
+  assert.equal(+L[0].mitre.toFixed(1), 45);
+  const a = 131.2*Math.PI/180;
+  const ref = context.fenceCorners([{ pts:[
+    {x:0,y:0},{x:2.4,y:0},{x:2.4 - 1.8*Math.cos(a), y: -1.8*Math.sin(a)}], closed:false, mat }], 0);
+  assert.equal(+ref[0].theta.toFixed(1), 131.2);
+  assert.equal(+ref[0].mitre.toFixed(1), 24.4);
+
+  // a gate leaf never meets a rail, and a near-straight fold is cut square in practice
+  const gated = context.fenceCorners([{ pts:[
+    {x:0,y:0,gateAfter:true},{x:1.5,y:0},{x:1.5,y:3}], closed:false, mat }], 0);
+  assert.equal(gated.length, 0);
+  const straight = context.fenceCorners([{ pts:[
+    {x:0,y:0},{x:3,y:0},{x:6,y:0.1}], closed:false, mat }], 0);
+  assert.equal(straight.length, 0);
+
+  // a closed square has four corners, including the wrap at the first point
+  const loop = context.fenceCorners([{ pts:[
+    {x:0,y:0},{x:4,y:0},{x:4,y:4},{x:0,y:4}], closed:true, mat }], 0);
+  assert.equal(loop.length, 4);
+  assert.ok(loop.every(c => +c.mitre.toFixed(1) === 45));
+
+  // the drawing draws the joint on the fence's own rail side
+  const right = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],
+    closed:false, mat:{ railSide:'right' } }], 0);
+  assert.equal(right[0].side, 'right');
+  assert.equal(+right[0].off.toFixed(4), 0.0725);           // postT/2 + railT/2
+
+  // and the page exists, after the section
+  assert.match(html, /place\(\{ kind:'corners', i, ev, corners, den:10, k:100, base:0, x:0 \}\);/);
+  assert.match(html, /else if \(pg\.kind === 'corners'\) paintCorners\(pg, u, k\);/);
+  assert.match(html, /`mitre \$\{\+c\.mitre\.toFixed\(1\)\}°`/);
 });
