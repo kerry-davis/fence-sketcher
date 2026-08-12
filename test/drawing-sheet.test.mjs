@@ -551,6 +551,9 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   assert.match(html, /const len = Math\.max\(dot2\(\{ x:r\.cutA\.x-from\.x, y:r\.cutA\.y-from\.y \}, toward\),/);
   assert.match(html, /dimAt\(toS, from, move\(from, toward, len\), fmtLen\(len, u\), CHAIN_OFF\*k, inside, k\);/);
   assert.match(html, /railDim\(r1, pIn, c\.d1\);/);
+  // the drawn rail ends where the dimension ends: the neighbouring post centre
+  assert.match(html, /const r1 = rail\(c\.d1, n1, c\.legIn\);/);
+  assert.doesNotMatch(html, /rail\(c\.d1, n1, c\.legIn - c\.postW\/2\)/);
   assert.match(html, /railDim\(r2, pOut, \{ x:-c\.d2\.x, y:-c\.d2\.y \}\);/);
   assert.doesNotMatch(html, /dimAt\(toS, pIn, c\.v, fmtLen\(c\.legIn/);   // not the bay
   assert.match(html, /else if \(pg\.kind === 'corners'\) paintCorners\(pg, u, k\);/);

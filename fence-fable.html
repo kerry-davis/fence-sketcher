@@ -5151,8 +5151,10 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
     return { cutA, cutB };
   };
   const pIn = move(c.v, c.d1, -c.legIn), pOut = move(c.v, c.d2, c.legOut);
-  const r1 = rail(c.d1, n1, c.legIn - c.postW/2);          // stop at the neighbour's face
-  const r2 = rail({ x:-c.d2.x, y:-c.d2.y }, n2, c.legOut - c.postW/2);
+  // the rail runs to the neighbouring post centre — where interior rails meet, and where
+  // the cut-length dimension ends — with the post drawn over the lap
+  const r1 = rail(c.d1, n1, c.legIn);
+  const r2 = rail({ x:-c.d2.x, y:-c.d2.y }, n2, c.legOut);
   postAt(pIn, c.d1); postAt(pOut, c.d2);                   // the posts either side
   postAt(c.v, c.d1);                                       // the corner post over the joint
   /* Annotation geometry is sized in paper millimetres, like every other annotation on the
