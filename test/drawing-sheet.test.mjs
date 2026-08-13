@@ -153,9 +153,11 @@ test('each item gets an isolated, dimensioned plan page', () => {
   assert.match(html, /const planPage = \{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
   assert.match(html, /else if \(pg\.kind === 'plan'\) paintPlan\(pg, u, k\);/);
   assert.match(html, /for \(const seg of plan\.segments\)\{/);
+  assert.match(html, /seg\.gate \|\| \(!hrOf\(plan\.mat\)\.on && !plan\.railFootprints\.length\)/);
   assert.match(html, /const dimItems = seg\.bays\.length > 1\s*\n\s*\? seg\.bays\.map\(bay =>/);
   assert.match(html, /txt:\(seg\.gate \? 'Gate ' : ''\) \+ fmtLen\(bay\.len, u\) \}\)\)\s*\n\s*: \[\];/);
   assert.match(html, /const reach = dimItems\.length \? dimChain\(toScreen, dimItems, avoid, scale\) : CHAIN_OFF\*scale;/);
+  assert.match(html, /const avoid = sheetPlanDimAvoid\(plan, seg, paperPoint\);/);
   assert.match(html, /reach \+ CHAIN_OFF\*scale\*1\.6/);
   assert.match(html, /dimAt\(toScreen, paperPoint\(seg\.a\), paperPoint\(seg\.b\)/);
   assert.match(html, /for \(const angle of plan\.angles\) sheetPlanAngle\(pg, angle, at, scale\);/);
@@ -172,6 +174,42 @@ test('each item gets an isolated, dimensioned plan page', () => {
   const start = html.indexOf('function paintPlan('), end = html.indexOf('function paintSheet(){', start);
   assert.ok(start >= 0 && end > start);
   assert.doesNotMatch(html.slice(start, end), /state\.builds|state\.polys\.forEach/);
+});
+
+test('plan bend dimensions stay outside the angle annotation wedge', () => {
+  const start = html.indexOf('function sheetPlanDimAvoid(');
+  const end = html.indexOf('function paintPlan(', start);
+  assert.ok(start >= 0 && end > start);
+  const context = { Math };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  const sideStart = html.indexOf('function dimSide3(');
+  const sideEnd = html.indexOf('const CHAIN_OFF', sideStart);
+  vm.runInContext(html.slice(sideStart, sideEnd), context);
+  const pts = [{x:0,y:0},{x:1,y:1},{x:2,y:1}];
+  const plan = {pl:{pts}, angles:[{i:1,point:pts[1]}]};
+  const paperPoint = q => [q.x,q.y];
+  const incoming = context.sheetPlanDimAvoid(plan, {i:0,a:pts[0],b:pts[1]}, paperPoint);
+  const outgoing = context.sheetPlanDimAvoid(plan, {i:1,a:pts[1],b:pts[2]}, paperPoint);
+  // The minor angle is above/right of the bend. Both projected points identify that occupied
+  // side in the [x,y] form dimAt consumes; a point object would project to NaN and fail open.
+  assert.ok(incoming[0] > 0.5 && incoming[1] < 0.5);
+  assert.ok(outgoing[1] < 1);
+  assert.equal(Number.isFinite(incoming[0]) && Number.isFinite(incoming[1]), true);
+  assert.equal(Number.isFinite(outgoing[0]) && Number.isFinite(outgoing[1]), true);
+  const renderedSide = (seg, avoid) => {
+    const A={x:seg.a.x,y:seg.a.y}, B={x:seg.b.x,y:seg.b.y};
+    const L=Math.hypot(B.x-A.x,B.y-A.y), nx=-(B.y-A.y)/L, ny=(B.x-A.x)/L;
+    const V=pts[1], prev=pts[0], next=pts[2];
+    const pL=Math.hypot(prev.x-V.x,prev.y-V.y), nL=Math.hypot(next.x-V.x,next.y-V.y);
+    const bisector={x:(prev.x-V.x)/pL+(next.x-V.x)/nL,
+                    y:(prev.y-V.y)/pL+(next.y-V.y)/nL};
+    const sign=context.dimSide3(A,B,{x:avoid[0],y:avoid[1]});
+    return (nx*sign)*bisector.x + (ny*sign)*bisector.y;
+  };
+  // Negative means renderDimension's actual offset points away from the inside bisector.
+  assert.ok(renderedSide({a:pts[0],b:pts[1]}, incoming) < 0);
+  assert.ok(renderedSide({a:pts[1],b:pts[2]}, outgoing) < 0);
 });
 
 test('the item plan keeps XY bends, stations, gate flags and angles', () => {
@@ -195,6 +233,13 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
     const samePhysicalPost=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y)<FENCE_JOIN_TOL;
     const postSizeOf=m=>m.postSize??0.1;
     const postTOf=m=>m.postT??m.postSize??0.1;
+    const railTOf=m=>m.railT??0.045;
+    const railBetweenPosts=()=>false;
+    const railSideOf=m=>m.railSide==='right'?'right':'left';
+    const faceMountedRailOffset=m=>postTOf(m)/2+railTOf(m)/2;
+    const effectiveRailYs=m=>m.style==='rail'?[0.5]:[];
+    const railBayBounds=(a,b,start,end)=>{const L=segLen(a,b)||1,ux=(b.x-a.x)/L,uy=(b.y-a.y)/L;
+      return {a:{x:a.x-ux*start,y:a.y-uy*start},b:{x:b.x+ux*end,y:b.y+uy*end}};};
     const cornerAngleAt=(pl,k)=>{const V=pl.pts[k],A=pl.pts[k-1],B=pl.pts[k+1];
       const a1=Math.atan2(A.y-V.y,A.x-V.x),a2=Math.atan2(B.y-V.y,B.x-V.x);
       let d=a2-a1;while(d<=-Math.PI)d+=2*Math.PI;while(d>Math.PI)d-=2*Math.PI;
@@ -202,6 +247,9 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
   `;
   vm.createContext(context);
   vm.runInContext(helpers + html.slice(start, end), context);
+  const cornerStart=html.indexOf('const CORNER_MAX_DEG');
+  const cornerEnd=html.indexOf('function elevationParts(',cornerStart);
+  vm.runInContext(html.slice(cornerStart,cornerEnd),context);
   const mat = {spacing:2.4, postSize:0.1};
   const plan = context.sheetPlanGeometry([
     {pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],closed:false,mat}
@@ -216,6 +264,23 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
                    [[2.4,0.6],[2.4,1.6]]);
   assert.equal(plan.angles.length, 1);
   assert.equal(+plan.angles[0].degrees.toFixed(4), 90);
+  const railMat={...mat,style:'rail',railSide:'left',railT:.045,postT:.1};
+  const railPolys=[{pts:[{x:0,y:0},{x:2.4,y:0},
+    {x:2.4-1.8*Math.cos(131.2*Math.PI/180),y:-1.8*Math.sin(131.2*Math.PI/180)}],
+    closed:false,mat:railMat}];
+  const railPlan=context.sheetPlanGeometry(railPolys,0);
+  const corner=context.fenceCorners(railPolys,0)[0];
+  const joint=context.faceMountedCornerGeometry(corner);
+  const inFoot=railPlan.railFootprints.find(r=>r.segmentIndex===0 && r.bayIndex===0);
+  const outFoot=railPlan.railFootprints.find(r=>r.segmentIndex===1 && r.bayIndex===0);
+  assert.deepEqual([inFoot.points[1].x,inFoot.points[1].y],
+                   [joint.incoming.cutA.x,joint.incoming.cutA.y]);
+  assert.deepEqual([inFoot.points[2].x,inFoot.points[2].y],
+                   [joint.incoming.cutB.x,joint.incoming.cutB.y]);
+  assert.deepEqual([outFoot.points[0].x,outFoot.points[0].y],
+                   [joint.outgoing.cutA.x,joint.outgoing.cutA.y]);
+  assert.deepEqual([outFoot.points[3].x,outFoot.points[3].y],
+                   [joint.outgoing.cutB.x,joint.outgoing.cutB.y]);
   const tenFive = context.sheetPlanGeometry([
     {pts:[{x:0,y:0},{x:10.5,y:0}],closed:false,mat:{...mat, spacing:1.5}}
   ], 0);
@@ -417,9 +482,8 @@ test('enabled handrail is visible in plan, elevation and section', () => {
   assert.match(html, /function sheetPlanPostUnderHandrail\(p, plan\)\{/);
   assert.match(html, /if \(off \|\| covered\) ctx\.setLineDash\(\[3,2\]\);/);
   assert.match(html, /if \(!covered\) ctx\.fill\(\);/);
-  assert.match(html, /if \(seg\.gate \|\| !hrOf\(plan\.mat\)\.on\)\{/);
-  assert.match(html, /A handrail is the visible top surface/);
-  assert.match(html, /if \(seg\.gate \|\| !hrOf\(plan\.mat\)\.on/);
+  assert.match(html, /if \(seg\.gate \|\| \(!hrOf\(plan\.mat\)\.on && !plan\.railFootprints\.length\)\)\{/);
+  assert.match(html, /physical rail footprint already describes a rails-only run/);
   assert.match(html, /for \(const p of ev\.parts\.filter\(part => part\.k === 'cap'\)\)/);
   assert.match(html, /The handrail sits on the post tops/);
   assert.match(html, /As in elevation, the cap is on top of the posts/);
@@ -619,8 +683,21 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   // between-post cut notes use the open corner field, with masks keeping leader/member lines
   // out of the lettering
   assert.match(html, /ctx\.fillRect\(s\.x-wide\/2-1\.6\*k,s\.y-lineH\*lines\.length\/2,wide\+3\.2\*k,lineH\*lines\.length\);/);
-  // mitred at the joint only — the far end of each rail is square
-  assert.match(html, /poly\(\[ move\(eA, dir, -back\), cutA, cutB, move\(eB, dir, -back\) \], '#e2e8f0', c\.railOff\);/);
+  // One shared mitred footprint drives both this fabrication detail and the isolated plan.
+  assert.match(html, /function faceMountedCornerGeometry\(c\)\{/);
+  assert.match(html, /const joint=faceMountedCornerGeometry\(c\);/);
+  assert.match(html, /if \(r1\) poly\(r1\.polygon,'#e2e8f0',c\.railOff\);/);
+  assert.match(html, /incoming\.points\[1\]=joint\.incoming\.cutA;/);
+  assert.match(html, /incoming\.points\[2\]=joint\.incoming\.cutB;/);
+  assert.match(html, /outgoing\.points\[0\]=joint\.outgoing\.cutA;/);
+  assert.match(html, /outgoing\.points\[3\]=joint\.outgoing\.cutB;/);
+  const sharedJoint=context.faceMountedCornerGeometry(ref[0]);
+  assert.ok(sharedJoint && sharedJoint.incoming && sharedJoint.outgoing);
+  const xy=points=>Array.from(points,p=>[p.x,p.y]);
+  assert.deepEqual(xy(sharedJoint.incoming.polygon.slice(1,3)),
+                   xy([sharedJoint.incoming.cutA,sharedJoint.incoming.cutB]));
+  assert.deepEqual(xy(sharedJoint.outgoing.polygon.slice(1,3)),
+                   xy([sharedJoint.outgoing.cutA,sharedJoint.outgoing.cutB]));
   // posts either side — where the end rule places them — and the bay lengths post to post
   assert.match(html, /if \(c\.pInPost\) postAt\(pIn, postDir\(pIn, c\.d1\)\);/);
   assert.match(html, /if \(c\.pOutPost\) postAt\(pOut, postDir\(pOut, c\.d2\)\);/);
@@ -654,8 +731,8 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   assert.match(html,/dimArrow\(tip\.x,tip\.y,dx\/L,dy\/L,k\*\.65\);/);
   assert.match(html,/const lenA=dot2\(\{ x:r\.cutA\.x-from\.x, y:r\.cutA\.y-from\.y \},toward\);/);
   // the drawn rail ends where the dimension ends: the neighbouring post centre
-  assert.match(html, /const r1 = rail\(c\.d1, n1, c\.offIn, c\.legIn\);/);
-  assert.doesNotMatch(html, /rail\(c\.d1, n1, c\.offIn, c\.legIn - c\.postW\/2\)/);
+  assert.match(html, /incoming:rail\(c\.d1,n1,c\.offIn,c\.legIn\)/);
+  assert.doesNotMatch(html, /rail\(c\.d1,n1,c\.offIn,c\.legIn - c\.postW\/2\)/);
   assert.match(html, /railDim\(r2,pOut,\{x:-c\.d2\.x,y:-c\.d2\.y\}\);/);
   assert.doesNotMatch(html, /dimAt\(toS, pIn, c\.v, fmtLen\(c\.legIn/);   // not the bay
   assert.match(html, /else if \(pg\.kind === 'corners'\) paintCorners\(pg, u, k\);/);

@@ -4050,6 +4050,24 @@ function lineCross(p, d, q, e){
   const t = ((q.x - p.x)*e.y - (q.y - p.y)*e.x) / den;
   return { x: p.x + d.x*t, y: p.y + d.y*t };
 }
+// The two face-mounted footprints at a fold. This is construction geometry, not detail-view
+// decoration: the isolated plan and the fabrication corner must show these exact same cuts.
+function faceMountedCornerGeometry(c){
+  const move=(q,d,t)=>({x:q.x+d.x*t,y:q.y+d.y*t});
+  const n1=sideNormal(c.d1,c.side),n2=sideNormal(c.d2,c.side);
+  const X=lineCross(move(c.v,n1,c.offIn),c.d1,move(c.v,n2,c.offOut),c.d2);
+  if (!X) return null;
+  const seam=norm2({x:-c.d1.x+c.d2.x,y:-c.d1.y+c.d2.y}) || sideNormal(c.d1,'left');
+  const rail=(dir,nrm,off,back)=>{
+    const eA=move(c.v,nrm,off-c.railT/2),eB=move(c.v,nrm,off+c.railT/2);
+    const cutA=lineCross(eA,dir,X,seam),cutB=lineCross(eB,dir,X,seam);
+    if (!cutA || !cutB) return null;
+    return {polygon:[move(eA,dir,-back),cutA,cutB,move(eB,dir,-back)],cutA,cutB};
+  };
+  return {X,seam,n1,n2,
+          incoming:rail(c.d1,n1,c.offIn,c.legIn),
+          outgoing:rail({x:-c.d2.x,y:-c.d2.y},n2,c.offOut,c.legOut)};
+}
 function elevationParts(polys, idx){
   const pl = polys[idx], mat = pl.mat || state.mat;
   const H = fenceHeightOf(mat), hr = hrOf(mat), spacing = Math.max(0.1, mat.spacing);
@@ -5021,7 +5039,32 @@ function sheetPlanGeometry(polys, idx){
         const off=faceMountedRailOffset(mat);
         const move=(q,amount)=>({x:q.x+n.x*amount,y:q.y+n.y*amount});
         railFootprints.push({points:[move(bay.a,off-half),move(bay.b,off-half),
-                                     move(bay.b,off+half),move(bay.a,off+half)]});
+                                     move(bay.b,off+half),move(bay.a,off+half)],
+                             segmentIndex:seg.i,bayIndex:k});
+      }
+    }
+    // Replace the two rectangular bays beside every face-mounted fold with the exact mitred
+    // footprints used by the fabrication corner page. Drawing them from separate geometry is
+    // what allowed the isolated plan to show a different joint at a rotated corner post.
+    if (!between){
+      for (const c of fenceCorners(polys,idx)){
+        const joint=faceMountedCornerGeometry(c);
+        if (!joint) continue;
+        const incomingIndex=(c.pointIndex-1+pl.pts.length)%pl.pts.length;
+        const incomingSeg=segments.find(seg=>seg.i===incomingIndex);
+        const incoming=railFootprints.find(rail=>rail.segmentIndex===incomingIndex &&
+          rail.bayIndex===(incomingSeg ? incomingSeg.stations.length-2 : -1));
+        const outgoing=railFootprints.find(rail=>rail.segmentIndex===c.pointIndex && rail.bayIndex===0);
+        // Footprints run start-low, end-low, end-high, start-high. Change only this fold's
+        // endpoint so a short bay between two folds can retain both shared mitre cuts.
+        if (incoming && joint.incoming){
+          incoming.points[1]=joint.incoming.cutA;
+          incoming.points[2]=joint.incoming.cutB;
+        }
+        if (outgoing && joint.outgoing){
+          outgoing.points[0]=joint.outgoing.cutA;
+          outgoing.points[3]=joint.outgoing.cutB;
+        }
       }
     }
   }
@@ -5280,7 +5323,9 @@ function sheetPlanAngle(pg, angle, at, scale){
   while (sweep <= -Math.PI) sweep += Math.PI*2;
   while (sweep > Math.PI) sweep -= Math.PI*2;
   const leg = Math.min(Math.hypot(prev.x-V.x, prev.y-V.y), Math.hypot(next.x-V.x, next.y-V.y));
-  const radius = Math.max(7*view.s, Math.min(14*view.s, leg*0.30));
+  // Keep the bend readable without letting its arc dominate a short plan or reach the
+  // longitudinal dimension bands. Segment dimensions are placed outside this wedge below.
+  const radius = Math.max(6*view.s, Math.min(10*view.s, leg*0.18));
   ctx.save();
   ctx.strokeStyle = dimInk(); ctx.fillStyle = dimInk(); ctx.lineWidth = Math.max(1, scale);
   ctx.beginPath(); ctx.arc(V.x, V.y, radius, b1, b1+sweep, sweep < 0); ctx.stroke();
@@ -5300,6 +5345,37 @@ function sheetPlanAngle(pg, angle, at, scale){
   ctx.fillStyle = dimInk(); ctx.fillText(txt, 0, 0);
   ctx.restore();
 }
+// A bend owns the inside wedge for its angle annotation. Put a segment's longitudinal
+// dimensions on the other side instead of independently choosing a down-page side, which
+// can run a length line and its witnesses straight through the angle arc.
+function sheetPlanDimAvoid(plan, seg, paperPoint){
+  const A = paperPoint(seg.a), B = paperPoint(seg.b), dx = B[0]-A[0], dy = B[1]-A[1];
+  const L = Math.hypot(dx,dy) || 1, nx = -dy/L, ny = dx/L;
+  let inside = 0;
+  for (const angle of plan.angles){
+    const atStart = angle.i === seg.i;
+    const atEnd = angle.i === (seg.i+1)%plan.pl.pts.length;
+    if (!atStart && !atEnd) continue;
+    const V = paperPoint(angle.point);
+    const prev = paperPoint(plan.pl.pts[(angle.i-1+plan.pl.pts.length)%plan.pl.pts.length]);
+    const next = paperPoint(plan.pl.pts[(angle.i+1)%plan.pl.pts.length]);
+    const pL = Math.hypot(prev[0]-V[0],prev[1]-V[1]) || 1;
+    const nL = Math.hypot(next[0]-V[0],next[1]-V[1]) || 1;
+    const bx = (prev[0]-V[0])/pL + (next[0]-V[0])/nL;
+    const by = (prev[1]-V[1])/pL + (next[1]-V[1])/nL;
+    const side = bx*nx + by*ny;
+    if (Math.abs(side) > 1e-9) inside += Math.sign(side);
+  }
+  // Straight runs retain the established preference for keeping dimensions below the page.
+  if (!inside){
+    const down = ny >= 0 ? 1 : -1;
+    inside = -down;
+  }
+  // dimAt projects dimension inputs as [x,y]. Returning a point object here makes that
+  // projection NaN and silently leaves every segment on renderDimension's default side.
+  return [(A[0]+B[0])/2 + nx*Math.sign(inside)*100,
+          (A[1]+B[1])/2 + ny*Math.sign(inside)*100];
+}
 function paintPlan(pg, u, scale){
   const { plan, x, base } = pg, b = plan.bounds, mm = v => v*pg.k;
   const top = base - mm(b.height);
@@ -5310,20 +5386,14 @@ function paintPlan(pg, u, scale){
   // projector passed to dimAt, rather than converting a screen point back into paper space.
   const toScreen = p => P2S(p[0], p[1]);
   const paperPoint = q => [x + mm(q.x-b.loX), top + mm(q.y-b.loY)];
-  // Dimension bands use the side of each segment that runs down the page where possible;
-  // this keeps the chain and its farther overall line clear of the fixed header above.
-  const dimAvoid = seg => {
-    const A = paperPoint(seg.a), B = paperPoint(seg.b), dx = B[0]-A[0], dy = B[1]-A[1];
-    const L = Math.hypot(dx,dy) || 1, nx = -dy/L, ny = dx/L, down = ny >= 0 ? 1 : -1;
-    return {x:(A[0]+B[0])/2 - nx*down*100, y:(A[1]+B[1])/2 - ny*down*100};
-  };
   // The centreline is the item's actual XY path. Gates retain the plan's dashed convention;
   // no other item is visited here, so this is an isolated run rather than a site overview.
   for (const seg of plan.segments){
     const A = at(seg.a), B = at(seg.b);
-    // A handrail is the visible top surface. Its construction centreline is underneath it
-    // and must not read as a real groove; gate openings retain their dashed path reference.
-    if (seg.gate || !hrOf(plan.mat).on){
+    // The physical rail footprint already describes a rails-only run, so do not add a
+    // post-centre reference beside it. Keep the path only where it is the plan depiction of
+    // a paling fence, or the dashed reference through a gate opening.
+    if (seg.gate || (!hrOf(plan.mat).on && !plan.railFootprints.length)){
       ctx.save();
       ctx.strokeStyle = plan.pl.excludeMaterials ? SHEET_LINE : seg.gate ? '#475569' : SHEET_INK;
       ctx.lineWidth = 1.5; ctx.setLineDash(seg.gate || plan.pl.excludeMaterials ? [8,5] : []);
@@ -5336,7 +5406,7 @@ function paintPlan(pg, u, scale){
       ? seg.bays.map(bay => ({ p:paperPoint(bay.a), q:paperPoint(bay.b),
           txt:(seg.gate ? 'Gate ' : '') + fmtLen(bay.len, u) }))
       : [];
-    const avoid = dimAvoid(seg);
+    const avoid = sheetPlanDimAvoid(plan, seg, paperPoint);
     const reach = dimItems.length ? dimChain(toScreen, dimItems, avoid, scale) : CHAIN_OFF*scale;
     dimAt(toScreen, paperPoint(seg.a), paperPoint(seg.b),
           (seg.gate ? 'Gate ' : '') + fmtLen(seg.len, u), reach + CHAIN_OFF*scale*1.6,
@@ -5700,25 +5770,16 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
            move(move(q, d,  w/2), pv,  t/2),
            move(move(q, d, -w/2), pv,  t/2) ], '#cbd5e1', c.postOff);
   };
-  // rails on their attached face, cut against the mitre seam, running to the neighbour post
-  const n1 = sideNormal(c.d1, c.side), n2 = sideNormal(c.d2, c.side);
-  const X = lineCross(move(c.v, n1, c.offIn), c.d1, move(c.v, n2, c.offOut), c.d2);
-  if (!X) return;
-  const seam = norm2({ x: -c.d1.x + c.d2.x, y: -c.d1.y + c.d2.y }) || sideNormal(c.d1, 'left');
-  // mitred at the joint, square at the far end: the far corners sit at one distance from
-  // the vertex, so only the corner end carries the cut
-  const rail = (dir, nrm, off, back) => {
-    const eA = move(c.v, nrm, off - c.railT/2), eB = move(c.v, nrm, off + c.railT/2);
-    const cutA = lineCross(eA, dir, X, seam), cutB = lineCross(eB, dir, X, seam);
-    if (!cutA || !cutB) return null;
-    poly([ move(eA, dir, -back), cutA, cutB, move(eB, dir, -back) ], '#e2e8f0', c.railOff);
-    return { cutA, cutB };
-  };
+  // rails on their attached face, cut against the same mitre seam the isolated plan uses
+  const joint=faceMountedCornerGeometry(c);
+  if (!joint) return;
+  const {X,seam}=joint;
   const pIn = move(c.v, c.d1, -c.legIn), pOut = move(c.v, c.d2, c.legOut);
   // the rail runs to the neighbouring post centre — where interior rails meet, and where
   // the cut-length dimension ends — with the post drawn over the lap
-  const r1 = rail(c.d1, n1, c.offIn, c.legIn);
-  const r2 = rail({ x:-c.d2.x, y:-c.d2.y }, n2, c.offOut, c.legOut);
+  const r1=joint.incoming,r2=joint.outgoing;
+  if (r1) poly(r1.polygon,'#e2e8f0',c.railOff);
+  if (r2) poly(r2.polygon,'#e2e8f0',c.railOff);
   // each neighbour stands on its own orientation too, not merely square to its leg
   const postDir = (q, d) => { const a = postAngleAt(c.polys, q, Math.atan2(d.y, d.x));
                               return { x:Math.cos(a), y:Math.sin(a) }; };
