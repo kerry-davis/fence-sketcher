@@ -3968,8 +3968,10 @@ function railYs(mat){
 }
 // The rails the fence actually gets: a bottom gap or rail count that pushes a rail past the
 // fence height leaves it built by nobody, so no view may draw or set one out either.
-const effectiveRailYs = mat =>
-  railYs(mat).filter(ry => ry + mat.railW/2 <= fenceHeightOf(mat) + 1e-6);
+// declared, not assigned: calcMaterials runs before this line during the self-test
+function effectiveRailYs(mat){
+  return railYs(mat).filter(ry => ry + mat.railW/2 <= fenceHeightOf(mat) + 1e-6);
+}
 /* ---- developed elevation: the fence unrolled onto a vertical plane ----
    A corner is a fold, not a break, so the runs lay out end to end at true length — the view a
    builder sets out from. Metres in, metres out: x along the run from its start, y up from the
@@ -4014,9 +4016,12 @@ function fenceCorners(polys, idx){
     const pIn = inGate ? null : inPosts[inPosts.length - 2];
     const pOut = outGate ? null : outPosts[1];
     // a leg shorter than the spacing runs to the fence's own end, which the end rule may
-    // leave unposted — the detail then cuts and draws that leg as the model builds it
-    const pInPost = !!pIn && (k > 1 || inPosts.length > 2 || ends.start);
-    const pOutPost = !!pOut && (k < n-2 || outPosts.length > 2 || ends.end);
+    // leave unposted — the detail then cuts and draws that leg as the model builds it.
+    // Ownership only says who stands a shared junction post, so ask whether one is built.
+    const stands = (owned,point) => typeof railPostStands === 'function'
+      ? railPostStands(polys,owned,point) : owned;
+    const pInPost = !!pIn && (k > 1 || inPosts.length > 2 || stands(ends.start,pIn));
+    const pOutPost = !!pOut && (k < n-2 || outPosts.length > 2 || stands(ends.end,pOut));
     out.push({ v: V, polyIndex:idx, pointIndex:k, d1, d2, theta, mitre: (180 - theta)/2,
                pIn,pOut,pInPost,pOutPost,inGate,outGate,between,
                // the detail obeys the same BOM exclusions as the elevation: excluded work is
