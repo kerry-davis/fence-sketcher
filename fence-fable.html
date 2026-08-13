@@ -3988,6 +3988,10 @@ function fenceCorners(polys, idx){
     const pOut = outGate ? null : outPosts[1];
     out.push({ v: V, polyIndex:idx, pointIndex:k, d1, d2, theta, mitre: (180 - theta)/2,
                pIn,pOut,inGate,outGate,between,
+               // the detail obeys the same BOM exclusions as the elevation: excluded work is
+               // still built, so it is still drawn — as reference
+               postOff: !!pl.excludeMaterials,
+               railOff: !!(pl.excludeMaterials || pl.excludeRails),
                position:typeof railPositionOf === 'function' ? railPositionOf(mat) : railSideOf(mat),
                mat,polys,
                legIn: pIn ? segLen(pIn,V) : 0,
@@ -5502,20 +5506,26 @@ function sheetCornerDatumMark(to,point,k){
   ctx.beginPath();ctx.moveTo(s.x-r*1.7,s.y);ctx.lineTo(s.x+r*1.7,s.y);
   ctx.moveTo(s.x,s.y-r*1.7);ctx.lineTo(s.x,s.y+r*1.7);ctx.stroke();ctx.restore();
 }
+// Excluded work reads the same on a detail as on the plan and elevation: unfilled and dashed.
+function sheetDetailInk(fill, off){
+  ctx.fillStyle = off ? '#ffffff' : fill;
+  ctx.strokeStyle = off ? SHEET_LINE : SHEET_INK; ctx.lineWidth = 1;
+  ctx.setLineDash(off ? [3,2] : []);
+}
 function paintBetweenCornerDetail(c, cxMM, cyMM, kMM, u, k){
   const mm=v=>v*kMM;
   const at=q=>P2S(cxMM+mm(q.x-c.v.x),cyMM+mm(q.y-c.v.y));
-  const poly=(pts2,fill)=>{
-    ctx.beginPath();
+  const poly=(pts2,fill,off)=>{
+    ctx.save();ctx.beginPath();
     pts2.forEach((q,i)=>{const s=at(q);i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});
-    ctx.closePath();ctx.fillStyle=fill;ctx.strokeStyle=SHEET_INK;ctx.lineWidth=1;
-    ctx.fill();ctx.stroke();
+    ctx.closePath();sheetDetailInk(fill,off);
+    ctx.fill();ctx.stroke();ctx.restore();
   };
   const postAt=(q,angle,shape)=>{
     if (shape==='round'){
       const s=at(q),r=mm(c.postW/2)*view.s;
-      ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.closePath();
-      ctx.fillStyle='#cbd5e1';ctx.strokeStyle=SHEET_INK;ctx.lineWidth=1;ctx.fill();ctx.stroke();
+      ctx.save();ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.closePath();
+      sheetDetailInk('#cbd5e1',c.postOff);ctx.fill();ctx.stroke();ctx.restore();
       return;
     }
     const d={x:Math.cos(angle),y:Math.sin(angle)},n=sideNormal(d,'left');
@@ -5523,12 +5533,12 @@ function paintBetweenCornerDetail(c, cxMM, cyMM, kMM, u, k){
     poly([move(move(q,d,-c.postW/2),n,-c.postT/2),
           move(move(q,d, c.postW/2),n,-c.postT/2),
           move(move(q,d, c.postW/2),n, c.postT/2),
-          move(move(q,d,-c.postW/2),n, c.postT/2)],'#cbd5e1');
+          move(move(q,d,-c.postW/2),n, c.postT/2)],'#cbd5e1',c.postOff);
   };
   const incoming=c.pIn ? betweenRailGeometry(c.polys,c.mat,c.pIn,c.v) : null;
   const outgoing=c.pOut ? betweenRailGeometry(c.polys,c.mat,c.v,c.pOut) : null;
-  if (incoming) poly(incoming.polygon,'#e2e8f0');
-  if (outgoing) poly(outgoing.polygon,'#e2e8f0');
+  if (incoming) poly(incoming.polygon,'#e2e8f0',c.railOff);
+  if (outgoing) poly(outgoing.polygon,'#e2e8f0',c.railOff);
   if (c.pIn) postAt(c.pIn,postAngleAt(c.polys,c.pIn,Math.atan2(c.d1.y,c.d1.x)),
                     postShapeAt(c.polys,c.pIn,c.mat));
   if (c.pOut) postAt(c.pOut,postAngleAt(c.polys,c.pOut,Math.atan2(c.d2.y,c.d2.x)),
@@ -5571,19 +5581,26 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
   const at = q => P2S(cxMM + mm(q.x - c.v.x), cyMM + mm(q.y - c.v.y));   // plan orientation
   const toS = q => at(q);
   const move = (q, d, t) => ({ x: q.x + d.x*t, y: q.y + d.y*t });
-  const poly = (pts2, fill) => {
+  const poly = (pts2, fill, off) => {
+    ctx.save();
     ctx.beginPath();
     pts2.forEach((q, i) => { const s2 = at(q); i ? ctx.lineTo(s2.x, s2.y) : ctx.moveTo(s2.x, s2.y); });
     ctx.closePath();
-    ctx.fillStyle = fill; ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1;
-    ctx.fill(); ctx.stroke();
+    sheetDetailInk(fill, off);
+    ctx.fill(); ctx.stroke(); ctx.restore();
   };
   const postAt = (q, d) => {
+    if (postShapeAt(c.polys, q, c.mat) === 'round'){    // a round post is round on the detail too
+      const s2 = at(q), r = mm(c.postW/2)*view.s;
+      ctx.save(); ctx.beginPath(); ctx.arc(s2.x, s2.y, r, 0, 2*Math.PI); ctx.closePath();
+      sheetDetailInk('#cbd5e1', c.postOff); ctx.fill(); ctx.stroke(); ctx.restore();
+      return;
+    }
     const pv = sideNormal(d, 'left');
     poly([ move(move(q, d, -c.postW/2), pv, -c.postT/2),
            move(move(q, d,  c.postW/2), pv, -c.postT/2),
            move(move(q, d,  c.postW/2), pv,  c.postT/2),
-           move(move(q, d, -c.postW/2), pv,  c.postT/2) ], '#cbd5e1');
+           move(move(q, d, -c.postW/2), pv,  c.postT/2) ], '#cbd5e1', c.postOff);
   };
   // rails on their attached face, cut against the mitre seam, running to the neighbour post
   const n1 = sideNormal(c.d1, c.side), n2 = sideNormal(c.d2, c.side);
@@ -5596,7 +5613,7 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
     const eA = move(c.v, nrm, c.off - c.railT/2), eB = move(c.v, nrm, c.off + c.railT/2);
     const cutA = lineCross(eA, dir, X, seam), cutB = lineCross(eB, dir, X, seam);
     if (!cutA || !cutB) return null;
-    poly([ move(eA, dir, -back), cutA, cutB, move(eB, dir, -back) ], '#e2e8f0');
+    poly([ move(eA, dir, -back), cutA, cutB, move(eB, dir, -back) ], '#e2e8f0', c.railOff);
     return { cutA, cutB };
   };
   const pIn = move(c.v, c.d1, -c.legIn), pOut = move(c.v, c.d2, c.legOut);

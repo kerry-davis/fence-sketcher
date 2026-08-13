@@ -588,6 +588,18 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   assert.equal(right[0].side, 'right');
   assert.equal(+right[0].off.toFixed(4), 0.0725);           // postT/2 + railT/2
 
+  // BOM exclusions travel with the corner, so the detail can draw excluded work as reference
+  assert.equal(L[0].postOff, false);
+  assert.equal(L[0].railOff, false);
+  const railsOut = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],
+    closed:false, excludeRails:true, mat }], 0);
+  assert.equal(railsOut[0].postOff, false);
+  assert.equal(railsOut[0].railOff, true);
+  const allOut = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],
+    closed:false, excludeMaterials:true, mat }], 0);
+  assert.equal(allOut[0].postOff, true);
+  assert.equal(allOut[0].railOff, true);
+
   // ...but only for a fence that actually has rails to join
   assert.match(html, /const corners = ev\.mat\.style === 'rail' && railYs\(ev\.mat\)\.length\s*\n\s*\? fenceCorners\(state\.polys, i\) : \[\];/);
   // and the page exists, after the section
@@ -603,7 +615,7 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   // out of the lettering
   assert.match(html, /ctx\.fillRect\(s\.x-wide\/2-1\.6\*k,s\.y-lineH\*lines\.length\/2,wide\+3\.2\*k,lineH\*lines\.length\);/);
   // mitred at the joint only — the far end of each rail is square
-  assert.match(html, /poly\(\[ move\(eA, dir, -back\), cutA, cutB, move\(eB, dir, -back\) \], '#e2e8f0'\);/);
+  assert.match(html, /poly\(\[ move\(eA, dir, -back\), cutA, cutB, move\(eB, dir, -back\) \], '#e2e8f0', c\.railOff\);/);
   // posts either side, and the bay lengths post to post
   assert.match(html, /postAt\(pIn, c\.d1\); postAt\(pOut, c\.d2\);/);
   // the fabrication page has only cut length, a required mitre and the long-point setback;
@@ -614,6 +626,14 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
                                html.indexOf('function paintSection('));
   assert.doesNotMatch(betweenPainter,/c\.theta/);
   assert.doesNotMatch(facePainter,/c\.theta/);
+  // both painters draw excluded work in the plan's reference ink: unfilled and dashed
+  assert.match(html,/function sheetDetailInk\(fill, off\)\{/);
+  assert.match(html,/ctx\.setLineDash\(off \? \[3,2\] : \[\]\);/);
+  assert.match(betweenPainter,/poly\(incoming\.polygon,'#e2e8f0',c\.railOff\);/);
+  assert.match(betweenPainter,/sheetDetailInk\('#cbd5e1',c\.postOff\);/);
+  assert.match(facePainter,/sheetDetailInk\(fill, off\);/);
+  // and a round post stays round on a face-mounted detail
+  assert.match(facePainter,/if \(postShapeAt\(c\.polys, q, c\.mat\) === 'round'\)\{/);
   assert.match(html,/function sheetCornerSetout\(rail,atCorner\)/);
   assert.match(html,/if \(saw<0\.05\) return null;/);
   assert.match(html,/return \{cut,corner:lower,distance:Math\.hypot\(cut\.x-lower\.x,cut\.y-lower\.y\)\};/);
