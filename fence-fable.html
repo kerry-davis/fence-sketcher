@@ -723,6 +723,19 @@
               <option value="post:square">Square</option><option value="post:round">Round</option>
             </optgroup>
           </select></span></div>
+        <div class="row" id="postOrientWrap" style="display:none"
+             title="Sets the selected rectangular post in plan. Automatic keeps the first connected fence leg used by older drawings.">
+          <span>Post orientation</span>
+          <span><select id="iPostOrient">
+            <option value="auto">Automatic</option>
+            <option value="previous">Previous fence leg</option>
+            <option value="next">Next fence leg</option>
+            <option value="bisect">Bisect corner</option>
+            <option value="custom">Custom angle</option>
+          </select></span></div>
+        <div class="row" id="postAngleWrap" style="display:none"
+             title="Plan angle measured clockwise from the horizontal; equivalent angles repeat every 180 degrees.">
+          <span>Post angle</span><span><input id="iPostAngle" inputmode="decimal"> <span class="unit">°</span></span></div>
         <div class="row sizePair" title="Square post width × depth, or round post diameter. A 100x100 post is width 100, depth 100."><span>Post</span><span><span class="times" id="postSizePrefix" style="display:none">Ø</span><input id="iPostSize" inputmode="decimal" title="Post width"> <b class="times" id="postTimes">×</b> <input id="iPostSizeD" inputmode="decimal" title="Post depth"> <span class="unit" id="uPostSize">mm</span></span></div>
         <div class="row" title="Posts at the ends of a run. Auto skips an end already posted by another fence. One end lets you choose the physical end.">
           <span>End posts <span style="opacity:.5">ⓘ</span></span>
@@ -1029,6 +1042,8 @@ function parseSmall(s, unit){
    State. Fence = array of polylines. Each point may carry:
      gateAfter — the segment leaving this point is a gate
      lockAfter — that segment's length was typed and is locked (metres)
+     postOrient — previous | next | bisect | custom for a rectangular physical post
+     postAngle — custom post angle in radians, clockwise from plan horizontal
    Polyline flags: closed (loop), done (drawing finished, don't extend).
    ===================================================================== */
 let state = {
@@ -2021,6 +2036,10 @@ function reversePoly(pl){
       q.ang.fwd = !q.ang.fwd;                    // swing recorded against them turns with them
       if (q.ang.d) q.ang.d = -q.ang.d;
     }
+    // Reversal is a bookkeeping change, not a construction change: keep a post that followed
+    // a physical leg on that same leg after Previous and Next exchange names.
+    if (q.postOrient === 'previous') q.postOrient = 'next';
+    else if (q.postOrient === 'next') q.postOrient = 'previous';
   });
 }
 function translatePolyline(pl, start, dx, dy){
@@ -4090,15 +4109,99 @@ function railBayBounds(a, b, startOverhang, endOverhang){
   const q = { x:b.x+ux*endOverhang, y:b.y+uy*endOverhang };
   return { a:p, b:q, len:L+startOverhang+endOverhang };
 }
-// A shared rectangular post keeps the orientation of the first fence segment that placed it.
-// That is also build3()'s post rule, so between-post cuts and the timber they meet cannot drift.
+// Resolve one physical rectangular post once, then let plan, Sheet, 3D and rail cuts consume
+// that angle. Automatic retains the legacy first-segment rule. Explicit settings live on one
+// coincident vertex, but are found from any run that shares the physical post.
 function postAngleAt(polys, point, fallback=0){
+  const record=postOrientationAt(polys,point);
+  if (record){
+    if (record.mode==='custom' && Number.isFinite(record.point.postAngle))
+      return normalPostAngle(record.point.postAngle);
+    const legs=postOrientationLegs(polys,record);
+    if (record.mode==='previous') return normalPostAngle(legs.previous ?? legs.next ?? fallback);
+    if (record.mode==='next') return normalPostAngle(legs.next ?? legs.previous ?? fallback);
+    if (record.mode==='bisect'){
+      if (legs.previous != null && legs.next != null)
+        return bisectPostAngles(legs.previous,legs.next);
+      return normalPostAngle(legs.previous ?? legs.next ?? fallback);
+    }
+  }
   for (const pl of polys || []) for (const [,a,b] of segsOf(pl)){
-    if (Math.hypot(a.x-point.x,a.y-point.y) < FENCE_JOIN_TOL ||
-        Math.hypot(b.x-point.x,b.y-point.y) < FENCE_JOIN_TOL)
+    if (samePhysicalPost(a,point) || samePhysicalPost(b,point))
       return Math.atan2(b.y-a.y,b.x-a.x);
   }
   return fallback;
+}
+const POST_ORIENTATIONS=new Set(['previous','next','bisect','custom']);
+const samePhysicalPost=(a,b)=>!!a && !!b &&
+  Math.hypot(a.x-b.x,a.y-b.y)<FENCE_JOIN_TOL;
+function normalPostAngle(angle){
+  let a=angle%Math.PI;
+  if (a<0) a+=Math.PI;
+  return a;
+}
+function postOrientationAt(polys,point){
+  let found=null;
+  for (const pl of polys || []) pl.pts.forEach((q,i)=>{
+    if (!found && samePhysicalPost(q,point) && POST_ORIENTATIONS.has(q.postOrient))
+      found={mode:q.postOrient,point:q,pl,i};
+  });
+  return found;
+}
+function incidentPostAngles(polys,point){
+  const angles=[];
+  for (const pl of polys || []) for (const [,a,b] of segsOf(pl)){
+    if (segLen(a,b)<1e-9) continue;
+    if (samePhysicalPost(a,point) || samePhysicalPost(b,point)){
+      const angle=normalPostAngle(Math.atan2(b.y-a.y,b.x-a.x));
+      if (!angles.some(old=>Math.abs(postAxisDelta(old,angle))<1e-7)) angles.push(angle);
+    }
+  }
+  return angles;
+}
+function postAxisDelta(from,to){
+  let d=normalPostAngle(to)-normalPostAngle(from);
+  if (d>Math.PI/2) d-=Math.PI;
+  if (d<=-Math.PI/2) d+=Math.PI;
+  return d;
+}
+function bisectPostAngles(previous,next){
+  return normalPostAngle(previous+postAxisDelta(previous,next)/2);
+}
+function postOrientationLegs(polys,record){
+  const {pl,i,point}=record,n=pl.pts.length;
+  let previous=null,next=null;
+  if (i>0 || pl.closed){
+    const q=pl.pts[(i-1+n)%n];
+    if (segLen(q,point)>1e-9) previous=Math.atan2(point.y-q.y,point.x-q.x);
+  }
+  if (i<n-1 || pl.closed){
+    const q=pl.pts[(i+1)%n];
+    if (segLen(point,q)>1e-9) next=Math.atan2(q.y-point.y,q.x-point.x);
+  }
+  // At a junction made from separate runs, the owning endpoint supplies one leg and the
+  // other run supplies the missing one. This keeps Previous/Next useful at shared endpoints.
+  for (const angle of incidentPostAngles(polys,point)){
+    if (previous==null && (next==null || Math.abs(postAxisDelta(next,angle))>1e-7)){
+      previous=angle; continue;
+    }
+    if (next==null && (previous==null || Math.abs(postAxisDelta(previous,angle))>1e-7))
+      next=angle;
+  }
+  return {previous,next};
+}
+function clearPostOrientationAt(polys,point){
+  for (const pl of polys || []) for (const q of pl.pts)
+    if (samePhysicalPost(q,point)){
+      delete q.postOrient;
+      delete q.postAngle;
+    }
+}
+function setPostOrientationAt(polys,point,mode,angle=0){
+  clearPostOrientationAt(polys,point);
+  if (!POST_ORIENTATIONS.has(mode)) return;
+  point.postOrient=mode;
+  if (mode==='custom') point.postAngle=normalPostAngle(angle);
 }
 function railPostExit(polys, mat, centre, lineOrigin, ray, fallbackAngle, hasPost=true){
   if (!hasPost) return {x:lineOrigin.x,y:lineOrigin.y,normal:{x:ray.x,y:ray.y},distance:0};
@@ -4360,7 +4463,7 @@ function build3(){
         const shape = explicitShape || (old ? old.shape : postShapeOf(mat));
         if (!old || H > old.H){
           const size = postSizeOf(mat), t = shape === 'round' ? size : postTOf(mat);
-          posts.set(key, { q, H, ang, shape, size, t });
+          posts.set(key, { q, H, fallbackAngle:ang, shape, size, t });
         }
         else if (explicitShape) old.shape = explicitShape;
       });
@@ -4371,7 +4474,7 @@ function build3(){
           const runStart = !pl.closed && i === 0 && first && hasPost(k);
           const runEnd = !pl.closed && i === pl.pts.length-2 && last && hasPost(k+1);
           const rail = between
-            ? betweenRailGeometry(visiblePolys, mat, segmentPosts[k], segmentPosts[k+1],
+            ? betweenRailGeometry(state.polys, mat, segmentPosts[k], segmentPosts[k+1],
                                   {startPost:hasPost(k),endPost:hasPost(k+1)})
             : railBayBounds(segmentPosts[k], segmentPosts[k+1],
                             runStart ? postSizeOf(mat)/2 : 0, runEnd ? postSizeOf(mat)/2 : 0);
@@ -4408,10 +4511,11 @@ function build3(){
   });
   // Post depth is a purchase length below the ground plane; only the above-ground
   // portion is drawn so the visible fence height remains H.
-  for (const { q, H, ang, shape, size, t } of posts.values()){
+  for (const { q, H, fallbackAngle, shape, size, t } of posts.values()){
     const hw = (size || POST_SIDE)/2, hd = (t || size || POST_SIDE)/2;
     if (shape === 'round') pushCylinder(F, q.x, H/2, q.y, hw, H, WOOD.post);
-    else pushBox(F, q.x, H/2, q.y, hw, H/2, hd, ang, WOOD.post);
+    else pushBox(F, q.x, H/2, q.y, hw, H/2, hd,
+                 postAngleAt(state.polys,q,fallbackAngle), WOOD.post);
   }
   return F;
 }
@@ -4773,7 +4877,7 @@ function sheetPlanGeometry(polys, idx){
     segmentPosts.forEach((q, k) => {
       if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
       if (!pl.closed && i === runSegs.length-1 && k === segmentPosts.length-1 && !ends.end) return;
-      addPost(q, postShapeAt(polys, q, mat), angle);
+      addPost(q, postShapeAt(polys, q, mat), postAngleAt(polys,q,angle));
     });
   }
   for (let i = 0; i < pl.pts.length; i++){
@@ -5878,6 +5982,18 @@ function syncMatInputs(){
   postShapeInput.value = selectedPoint && postShapeScope === 'post'
     ? 'post:' + (ownPostShape(selectedPoint) || 'inherit')
     : 'fence:' + postShapeOf(M);
+  const selectedPostShape = selectedPoint ? postShapeAt(state.polys,selectedPoint,M) : null;
+  const postOrientRecord = selectedPoint ? postOrientationAt(state.polys,selectedPoint) : null;
+  const postOrientMode = postOrientRecord ? postOrientRecord.mode : 'auto';
+  $('postOrientWrap').style.display = selectedPoint && selectedPostShape !== 'round' ? 'flex' : 'none';
+  $('postAngleWrap').style.display = selectedPoint && selectedPostShape !== 'round' &&
+                                    postOrientMode === 'custom' ? 'flex' : 'none';
+  if (document.activeElement !== $('iPostOrient')) $('iPostOrient').value = postOrientMode;
+  if (selectedPoint && document.activeElement !== $('iPostAngle')){
+    const angle = postOrientMode === 'custom' && Number.isFinite(postOrientRecord.point.postAngle)
+      ? postOrientRecord.point.postAngle : postAngleAt(state.polys,selectedPoint,0);
+    $('iPostAngle').value = +(normalPostAngle(angle)*180/Math.PI).toFixed(1);
+  }
   set('iPaling', small(M.paling));  set('iPalingT', small(palingTOf(M)));  set('iGap', small(M.gap));
   set('iPostSize', small(postSizeOf(M)));  set('iPostSizeD', small(postTOf(M)));
   set('iRailW', small(M.railW));    set('iRailT', small(railTOf(M)));  set('iRailGap', small(M.railGap));
@@ -6806,6 +6922,15 @@ $('iPostShape').addEventListener('change', e => {
   }
   updateAll();
 });
+$('iPostOrient').addEventListener('change', e => {
+  const point = sel && sel.t === 'pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+  if (!point) return;
+  const mode = POST_ORIENTATIONS.has(e.target.value) ? e.target.value : 'auto';
+  const current = postAngleAt(state.polys,point,0);
+  commitEdit(() => setPostOrientationAt(state.polys,point,mode,current));
+  updateAll();
+  if (mode === 'custom') requestAnimationFrame(() => { $('iPostAngle').focus(); $('iPostAngle').select(); });
+});
 $('matInclude').addEventListener('change', e => {
   const sc = matScope();
   if (!sc.pl) return;
@@ -6882,6 +7007,15 @@ function liveMaterialInput(id, parse, valid, edit){
   input.addEventListener('change', finish);
   input.addEventListener('blur', finish);
 }
+$('iPostAngle').addEventListener('input', e => {
+  const degrees=parseFloat(String(e.target.value).replace(/,/g,'.'));
+  const point=sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+  if (!point || !Number.isFinite(degrees)) return;
+  previewMaterialEdit(e.currentTarget,() =>
+    setPostOrientationAt(state.polys,point,'custom',degrees*Math.PI/180));
+});
+for (const event of ['change','blur'])
+  $('iPostAngle').addEventListener(event,e => liveMaterialEdits.delete(e.currentTarget));
 const liveLength = value => parseLen(value, state.unit);
 const liveSmall = value => parseSmall(value, state.unit);
 liveMaterialInput('iSpacing', liveLength, value => value > .1,

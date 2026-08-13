@@ -76,6 +76,13 @@ test('between-post geometry cuts against actual square and round post faces', ()
   const mitred=context.betweenRailGeometry(angled,square,V,C);
   assert.equal(+mitred.startMitre.toFixed(1),40);
   assert.equal(+mitred.endMitre.toFixed(4),0);
+  context.setPostOrientationAt(angled,V,'bisect');
+  const thinSquare={...square,railT:.04};
+  const bisectedIn=context.betweenRailGeometry(angled,thinSquare,angled[0].pts[0],V);
+  const bisectedOut=context.betweenRailGeometry(angled,thinSquare,V,C);
+  assert.equal(+bisectedIn.endMitre.toFixed(1),25);
+  assert.equal(+bisectedOut.startMitre.toFixed(1),25);
+  delete V.postOrient;
 
   const setbackStart=html.indexOf('function sheetCornerSetout(');
   const setbackEnd=html.indexOf('function sheetCornerNote(',setbackStart);

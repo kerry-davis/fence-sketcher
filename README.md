@@ -83,7 +83,11 @@ screens.
   own cross-section. Counted in linear metres, and it skips gate openings.
 - **Posts.** Choose square or round posts for a complete run, then override an
   individual endpoint when a corner or shared junction needs a different
-  shape. End posts support `Auto`, `Both`, `One end` (with a physical endpoint
+  shape. A selected rectangular post can retain the automatic legacy
+  orientation, follow its previous or next fence leg, bisect the corner, or use
+  a custom plan angle. One orientation belongs to the physical shared post and
+  drives its sheet footprint, 3D timber and any between-post rail cuts against
+  it. End posts support `Auto`, `Both`, `One end` (with a physical endpoint
   choice), and `None`; the same rules drive the plan, 3D scene and materials.
 - **Buildings.** Drop a rectangle, drag it, resize from the corners, and set a
   wall height plus a flat, gable or single-pitch roof. Fences snap to building
@@ -322,6 +326,11 @@ set-out: the distance **along the struck post face from its bottom physical corn
 rail's long-point contact**. The sheet marks that bottom corner and leads the note to the
 contact point; it never asks a builder to find the concealed post centre. The corner page is
 fabrication-only, so it does not repeat the general fence angle already shown on the plan.
+The corner post uses its selected orientation — automatic, previous leg, next leg, corner
+bisector or custom angle — everywhere. Changing that one setting therefore rotates the post
+on the isolated plan and in 3D, then recomputes the rail footprint, cut length, mitre and
+bottom-corner set-out rather than merely rotating a drawing symbol. Round posts have no
+orientation control because their plan footprint is rotationally symmetric.
 For the face-mounted joint:
 two rails meeting at plan angle θ are each cut **(180° − θ)/2** off square, so a 131.2°
 corner reads `mitre 24.4°`. Which face the rails are on decides whether the joint closes on

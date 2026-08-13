@@ -163,6 +163,7 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
         o.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});}return o;};
     const materialPostEndFlags=()=>({start:true,end:true});
     const postShapeAt=()=> 'square';
+    const postAngleAt=(polys,q,fallback)=>fallback;
     const postSizeOf=m=>m.postSize??0.1;
     const postTOf=m=>m.postT??m.postSize??0.1;
     const cornerAngleAt=(pl,k)=>{const V=pl.pts[k],A=pl.pts[k-1],B=pl.pts[k+1];
