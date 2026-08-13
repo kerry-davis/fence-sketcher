@@ -4235,8 +4235,34 @@ function setPostOrientationAt(polys,point,mode,angle=0){
   point.postOrient=mode;
   if (mode==='custom') point.postAngle=normalPostAngle(angle);
 }
+// Which run stands the physical post at a point, and therefore whose section is on site.
+// Ownership follows postEndFlags — an auto junction hands the shared post to the earlier run
+// — and where joined runs differ, build3 builds the tallest one's own timber. Null where no
+// post stands. ponytail: vertices only, which is where runs join; an intermediate post is
+// always its own run's, so rails never have to ask about one.
+function standingPostAt(polys, point){
+  if (typeof postEndFlags !== 'function') return null;
+  let found = null;
+  (polys || []).forEach((pl,i) => {
+    const last = pl.pts.length-1;
+    const stands = pl.pts.some((q,k) => samePhysicalPost(q,point) &&
+      (pl.closed || (k > 0 && k < last) ||
+       postEndFlags(polys,i,pl.mat || state.mat)[k === 0 ? 'start' : 'end']));
+    if (!stands) return;
+    const mat = pl.mat || state.mat, H = fenceHeightOf(mat);
+    if (!found || H > found.H) found = { mat, H };
+  });
+  return found;
+}
+// Section of the post a rail lands on: the physical post's where one stands, otherwise the
+// rail's own fence. A rail cut against its own postT misses a joined run's different post.
+const postSectionOf = (polys, point, mat) => {
+  const post = standingPostAt(polys, point);
+  return post ? post.mat : mat;
+};
 function railPostExit(polys, mat, centre, lineOrigin, ray, fallbackAngle, hasPost=true){
   if (!hasPost) return {x:lineOrigin.x,y:lineOrigin.y,normal:{x:ray.x,y:ray.y},distance:0};
+  mat = postSectionOf(polys,centre,mat);         // the post built here, not this run's own
   const shape = postShapeAt(polys,centre,mat);
   if (shape === 'round'){
     const distance = postSizeOf(mat)/2;                    // tangent-face butt, not a scribe
@@ -4273,6 +4299,7 @@ function railPostExit(polys, mat, centre, lineOrigin, ray, fallbackAngle, hasPos
 // `across`: the room an inside-left/right rail has before it passes the face it sits on. A
 // round or re-oriented post presents a different face there than the fence's own section.
 function postHalfAcross(polys, mat, centre, across, fallbackAngle){
+  mat = postSectionOf(polys,centre,mat);         // the post built here, not this run's own
   if (postShapeAt(polys,centre,mat) === 'round') return postSizeOf(mat)/2;
   const angle=postAngleAt(polys,centre,fallbackAngle);
   const u={x:Math.cos(angle),y:Math.sin(angle)}, v=sideNormal(u,'left');
@@ -4500,6 +4527,9 @@ function build3(){
       const hasPost = (k) => pl.closed ||
         !(i === 0 && k === 0 && !ends.start) &&
         !(i === pl.pts.length-2 && k === segmentPosts.length-1 && !ends.end);
+      // Ownership only says which run draws a shared junction post. The rail still butts
+      // against the timber the other run stands there, so ask whether one is built at all.
+      const postStands = (k) => hasPost(k) || !!standingPostAt(state.polys, segmentPosts[k]);
       segmentPosts.forEach((q, k) => {
         if (!hasPost(k)) return;
         const shared = [...posts].find(([,post]) =>
@@ -4516,17 +4546,25 @@ function build3(){
       });
       if (a.gateAfter){ pushGate(F,a,b,H,mat); continue; }
       if (mat.style === 'rail'){
+        // A face-mounted rail bears on the post face that is actually there: round,
+        // re-oriented or a joined run's own section all move it off the fence's postT. The
+        // wider of the bay's two posts governs, so the rail never buries into either.
+        const faceNormal = sideNormal({x:ux,y:uy}, railSide);
+        const faceRailOff = (from,to) => railTOf(mat)/2 +
+          Math.max(postHalfAcross(state.polys,mat,from,faceNormal,ang),
+                   postHalfAcross(state.polys,mat,to,faceNormal,ang));
         for (let k = 0; k < segmentPosts.length-1; k++){
           const first = k === 0, last = k === segmentPosts.length-2;
           const runStart = !pl.closed && i === 0 && first && hasPost(k);
           const runEnd = !pl.closed && i === pl.pts.length-2 && last && hasPost(k+1);
           const rail = between
             ? betweenRailGeometry(state.polys, mat, segmentPosts[k], segmentPosts[k+1],
-                                  {startPost:hasPost(k),endPost:hasPost(k+1)})
+                                  {startPost:postStands(k),endPost:postStands(k+1)})
             : railBayBounds(segmentPosts[k], segmentPosts[k+1],
                             runStart ? postSizeOf(mat)/2 : 0, runEnd ? postSizeOf(mat)/2 : 0);
           const mid = between ? null
-            : segmentSideMid(rail.a, rail.b, postTOf(mat)/2 + railTOf(mat)/2, railSide);
+            : segmentSideMid(rail.a, rail.b,
+                             faceRailOff(segmentPosts[k], segmentPosts[k+1]), railSide);
           for (const ry of railYs(mat)){
             if (ry + mat.railW/2 > H + 1e-6) break;
             if (between) pushRailPrism(F,rail.polygon,ry,mat.railW,WOOD.rail);
@@ -4958,7 +4996,10 @@ function sheetPlanGeometry(polys, idx){
           !pl.closed && seg.i===0 && first && startPost ? postSizeOf(mat)/2 : 0,
           !pl.closed && seg.i===segments.length-1 && last && endPost ? postSizeOf(mat)/2 : 0);
         const L=segLen(bay.a,bay.b)||1,d={x:(bay.b.x-bay.a.x)/L,y:(bay.b.y-bay.a.y)/L};
-        const n=sideNormal(d,side),off=postTOf(mat)/2+railTOf(mat)/2,half=railTOf(mat)/2;
+        const n=sideNormal(d,side),half=railTOf(mat)/2;
+        // the face the 3D scene and the corner details bear on, not the fence's own postT
+        const off=half+Math.max(postHalfAcross(polys,mat,seg.stations[k],n,seg.angle),
+                                postHalfAcross(polys,mat,seg.stations[k+1],n,seg.angle));
         const move=(q,amount)=>({x:q.x+n.x*amount,y:q.y+n.y*amount});
         railFootprints.push({points:[move(bay.a,off-half),move(bay.b,off-half),
                                      move(bay.b,off+half),move(bay.a,off+half)]});
