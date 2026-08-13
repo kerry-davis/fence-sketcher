@@ -50,6 +50,30 @@ test('scrolling sheets makes the visible fence the settings and 3D target', () =
   assert.equal(syncs,0);
 });
 
+test('the sheet is inspection-only: Delete cannot mutate the fence from paper', () => {
+  const start = html.indexOf('function deleteSelected(){');
+  const end = html.indexOf('function clearAll(){', start);
+  assert.ok(start >= 0 && end > start);
+  const context = {
+    readOnly:false, mode3d:false, modeSheet:true, sel:{t:'seg',p:0,i:0}, bsel:new Set(),
+    deleted:0, state:{polys:[],builds:[]},
+    pushUndo(){}, updateAll(){},
+    deletePoint(){ context.deleted++; }, deleteSegment(){ context.deleted++; },
+    deleteBuildings(){ context.deleted++; },
+  };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  // the sheet auto-selects the visible fence, so a keystroke must not act on that selection
+  context.deleteSelected();
+  assert.equal(context.deleted, 0);
+  assert.deepEqual({...context.sel}, {t:'seg',p:0,i:0});
+  // back on the plan the same key still deletes
+  context.modeSheet = false;
+  context.deleteSelected();
+  assert.equal(context.deleted, 1);
+  assert.equal(context.sel, null);
+});
+
 test('desktop wheel scrolls through sheet pages while modified wheel still zooms', () => {
   const start = html.indexOf("cv.addEventListener('wheel'");
   const end = html.indexOf('// keyboard:', start);
@@ -564,6 +588,8 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   assert.equal(right[0].side, 'right');
   assert.equal(+right[0].off.toFixed(4), 0.0725);           // postT/2 + railT/2
 
+  // ...but only for a fence that actually has rails to join
+  assert.match(html, /const corners = ev\.mat\.style === 'rail' && railYs\(ev\.mat\)\.length\s*\n\s*\? fenceCorners\(state\.polys, i\) : \[\];/);
   // and the page exists, after the section
   // the grid follows the corner count, one standard scale fits the worst cell, centred
   assert.match(html, /place\(\{ kind:'corners', i, ev, corners: shown, extra, cols, rows,/);
