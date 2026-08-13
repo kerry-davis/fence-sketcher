@@ -3976,6 +3976,12 @@ function fenceCorners(polys, idx){
   const ends = typeof materialPostEndFlags === 'function'
     ? materialPostEndFlags(polys,idx,mat) : {start:true,end:true};
   const segGate = i => !!pts[(i + n) % n].gateAfter;      // seg i runs pts[i] -> pts[i+1]
+  // A face-mounted rail bears on the post face its own leg sees. A round post presents its
+  // radius there and a re-oriented one a projected half-section, neither of which is the
+  // fence's own postT — so ask the physical post, as the between-post rails already do.
+  const faceRailOff = (V,d) => railTOf(mat)/2 + (typeof postHalfAcross === 'function'
+    ? postHalfAcross(polys,mat,V,sideNormal(d,railSideOf(mat)),Math.atan2(d.y,d.x))
+    : postTOf(mat)/2);
   const count = pl.closed ? n : n - 2;
   for (let j = 0; j < count; j++){
     const k = pl.closed ? j : j + 1;                      // vertex between seg k-1 and seg k
@@ -4010,7 +4016,7 @@ function fenceCorners(polys, idx){
                legIn: pIn ? segLen(pIn,V) : 0,
                legOut: pOut ? segLen(V,pOut) : 0,
                side: railSideOf(mat), railT: railTOf(mat),
-               off: postTOf(mat)/2 + railTOf(mat)/2, postW: postSizeOf(mat),
+               offIn: faceRailOff(V,d1), offOut: faceRailOff(V,d2), postW: postSizeOf(mat),
                postT: postTOf(mat),
                postShape:typeof postShapeAt === 'function' ? postShapeAt(polys,V,mat) : 'square',
                postAngle:typeof postAngleAt === 'function'
@@ -5632,13 +5638,13 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
   };
   // rails on their attached face, cut against the mitre seam, running to the neighbour post
   const n1 = sideNormal(c.d1, c.side), n2 = sideNormal(c.d2, c.side);
-  const X = lineCross(move(c.v, n1, c.off), c.d1, move(c.v, n2, c.off), c.d2);
+  const X = lineCross(move(c.v, n1, c.offIn), c.d1, move(c.v, n2, c.offOut), c.d2);
   if (!X) return;
   const seam = norm2({ x: -c.d1.x + c.d2.x, y: -c.d1.y + c.d2.y }) || sideNormal(c.d1, 'left');
   // mitred at the joint, square at the far end: the far corners sit at one distance from
   // the vertex, so only the corner end carries the cut
-  const rail = (dir, nrm, back) => {
-    const eA = move(c.v, nrm, c.off - c.railT/2), eB = move(c.v, nrm, c.off + c.railT/2);
+  const rail = (dir, nrm, off, back) => {
+    const eA = move(c.v, nrm, off - c.railT/2), eB = move(c.v, nrm, off + c.railT/2);
     const cutA = lineCross(eA, dir, X, seam), cutB = lineCross(eB, dir, X, seam);
     if (!cutA || !cutB) return null;
     poly([ move(eA, dir, -back), cutA, cutB, move(eB, dir, -back) ], '#e2e8f0', c.railOff);
@@ -5647,10 +5653,13 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
   const pIn = move(c.v, c.d1, -c.legIn), pOut = move(c.v, c.d2, c.legOut);
   // the rail runs to the neighbouring post centre — where interior rails meet, and where
   // the cut-length dimension ends — with the post drawn over the lap
-  const r1 = rail(c.d1, n1, c.legIn);
-  const r2 = rail({ x:-c.d2.x, y:-c.d2.y }, n2, c.legOut);
-  if (c.pInPost) postAt(pIn, c.d1);                        // the posts either side, when the
-  if (c.pOutPost) postAt(pOut, c.d2);                      // end rule actually places them
+  const r1 = rail(c.d1, n1, c.offIn, c.legIn);
+  const r2 = rail({ x:-c.d2.x, y:-c.d2.y }, n2, c.offOut, c.legOut);
+  // each neighbour stands on its own orientation too, not merely square to its leg
+  const postDir = (q, d) => { const a = postAngleAt(c.polys, q, Math.atan2(d.y, d.x));
+                              return { x:Math.cos(a), y:Math.sin(a) }; };
+  if (c.pInPost) postAt(pIn, postDir(pIn, c.d1));          // the posts either side, when the
+  if (c.pOutPost) postAt(pOut, postDir(pOut, c.d2));       // end rule actually places them
   postAt(c.v,{x:Math.cos(c.postAngle),y:Math.sin(c.postAngle)}); // selected corner orientation
   const cornerHitRadius=mm(Math.hypot(c.postW,c.postT)/2)*view.s+3;
   recordSheetPostHit(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);

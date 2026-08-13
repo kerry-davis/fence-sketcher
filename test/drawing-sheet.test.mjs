@@ -586,7 +586,9 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   const right = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],
     closed:false, mat:{ railSide:'right', spacing:2.4 } }], 0);
   assert.equal(right[0].side, 'right');
-  assert.equal(+right[0].off.toFixed(4), 0.0725);           // postT/2 + railT/2
+  // each leg is offset by the face its own side normal meets, square posts giving both alike
+  assert.equal(+right[0].offIn.toFixed(4), 0.0725);         // postT/2 + railT/2
+  assert.equal(+right[0].offOut.toFixed(4), 0.0725);
 
   // BOM exclusions travel with the corner, so the detail can draw excluded work as reference
   assert.equal(L[0].postOff, false);
@@ -617,8 +619,8 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   // mitred at the joint only — the far end of each rail is square
   assert.match(html, /poly\(\[ move\(eA, dir, -back\), cutA, cutB, move\(eB, dir, -back\) \], '#e2e8f0', c\.railOff\);/);
   // posts either side — where the end rule places them — and the bay lengths post to post
-  assert.match(html, /if \(c\.pInPost\) postAt\(pIn, c\.d1\);/);
-  assert.match(html, /if \(c\.pOutPost\) postAt\(pOut, c\.d2\);/);
+  assert.match(html, /if \(c\.pInPost\) postAt\(pIn, postDir\(pIn, c\.d1\)\);/);
+  assert.match(html, /if \(c\.pOutPost\) postAt\(pOut, postDir\(pOut, c\.d2\)\);/);
   // the fabrication page has only cut length, a required mitre and the long-point setback;
   // the general fence angle already exists on the plan page and must not be repeated here
   const betweenPainter=html.slice(html.indexOf('function paintBetweenCornerDetail('),
@@ -646,8 +648,8 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   assert.match(html,/dimArrow\(tip\.x,tip\.y,dx\/L,dy\/L,k\*\.65\);/);
   assert.match(html,/const lenA=dot2\(\{ x:r\.cutA\.x-from\.x, y:r\.cutA\.y-from\.y \},toward\);/);
   // the drawn rail ends where the dimension ends: the neighbouring post centre
-  assert.match(html, /const r1 = rail\(c\.d1, n1, c\.legIn\);/);
-  assert.doesNotMatch(html, /rail\(c\.d1, n1, c\.legIn - c\.postW\/2\)/);
+  assert.match(html, /const r1 = rail\(c\.d1, n1, c\.offIn, c\.legIn\);/);
+  assert.doesNotMatch(html, /rail\(c\.d1, n1, c\.offIn, c\.legIn - c\.postW\/2\)/);
   assert.match(html, /railDim\(r2,pOut,\{x:-c\.d2\.x,y:-c\.d2\.y\}\);/);
   assert.doesNotMatch(html, /dimAt\(toS, pIn, c\.v, fmtLen\(c\.legIn/);   // not the bay
   assert.match(html, /else if \(pg\.kind === 'corners'\) paintCorners\(pg, u, k\);/);

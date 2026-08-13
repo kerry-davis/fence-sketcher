@@ -109,6 +109,38 @@ test('between-post geometry cuts against actual square and round post faces', ()
   assert.equal(+roundRail.endMitre.toFixed(4),0);
 });
 
+test('face-mounted corner rails offset from the post face each leg actually meets', () => {
+  const cornerStart=html.indexOf('const CORNER_MAX_DEG');
+  const cornerEnd=html.indexOf('function elevationParts(',cornerStart);
+  const geoStart=html.indexOf('function postAngleAt(');
+  const geoEnd=html.indexOf('// Gate leaf endpoints',geoStart);
+  const segLen=(a,b)=>Math.hypot(b.x-a.x,b.y-a.y);
+  const context={Math,FENCE_JOIN_TOL:.01,segLen,state:{mat:{}},
+    segsOf:pl=>pl.pts.slice(0,-1).map((a,i)=>[i,a,pl.pts[i+1]]),
+    postSizeOf:m=>m.postSize,postTOf:m=>m.postT,railTOf:m=>m.railT,
+    railSideOf:()=>'left',postShapeAt:(polys,q,m)=>m.postShape||'square',
+    postsAlong:(a,b,spacing)=>{
+      const L=segLen(a,b),n=Math.max(1,Math.ceil(L/spacing-1e-9)),out=[];
+      for(let k=0;k<=n;k++){const d=Math.min(L,spacing*k),t=L?d/L:0;
+        out.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});}
+      return out;
+    }};
+  vm.createContext(context);
+  vm.runInContext(html.slice(cornerStart,cornerEnd),context);
+  vm.runInContext(html.slice(geoStart,geoEnd),context);
+  // a round post hides its depth field, so its rails stand off the drawn radius, not postT
+  const V={x:3,y:0},square={railSide:'left',spacing:2.4,postSize:.3,postT:.2,railT:.08};
+  const corner=mat=>context.fenceCorners([{pts:[{x:0,y:0},V,{x:3,y:3}],closed:false,mat}],0)[0];
+  const round=corner({...square,postShape:'round'});
+  assert.equal(+round.offIn.toFixed(4),.19);                // postSize/2 + railT/2
+  assert.equal(+round.offOut.toFixed(4),.19);
+  // and a re-oriented square post turns a different face to each leg
+  context.setPostOrientationAt([{pts:[V]}],V,'custom',0);
+  const turned=corner(square);
+  assert.equal(+turned.offIn.toFixed(4),.14);               // postT/2 + railT/2, face square on
+  assert.equal(+turned.offOut.toFixed(4),.19);              // postSize/2 + railT/2, end on
+});
+
 test('gates preserve an independent side when rail position changes', () => {
   assert.match(html, /const side = typeof gateSideOf === 'function' \? gateSideOf\(a,mat\) : 'left'/);
   assert.match(html, /migrateGateSides\(state\.polys,state\.mat\)/);
