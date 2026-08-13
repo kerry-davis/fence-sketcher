@@ -16,14 +16,18 @@ test('the drawing sheet is its own view, and does not collide with the phone she
   assert.match(html, /if \(on && modeSheet\) setSheetView\(false\);\s*\n\s*mode3d = on;/);
   // an inline plan-dimension editor must not remain stranded outside the paper
   assert.match(html, /dimEdit = null;\s*\n\s*const input = \$\('dimin'\);\s*\n\s*input\.style\.display = 'none';/);
-  // paper, not a drawing surface: a press moves the sheet instead of editing the fence
-  assert.match(html, /if \(modeSheet\)\{ drag = \{ t:'pan' \}; return; \}/);
+  // paper remains non-editing: a tap can inspect a post, while a drag only pans the sheet
+  assert.match(html, /drag=\{t:'sheetpan',hit:e\.button===2\?null:pickSheetPost/);
+  assert.match(html, /if \(drag && drag\.t==='sheetpan'\)\{/);
+  assert.match(html, /if \(drag\.moved\)\{ view\.x-=dx\/view\.s; view\.y-=dy\/view\.s; paint\(\); \}/);
   // and the plan's own view is parked, not clobbered
-  assert.match(html, /if \(on\)\{ planView = \{\.\.\.view\}; fitSheet\(\); \}\s*\n\s*else if \(planView\)\{ view = planView; planView = null; \}/);
+  assert.match(html, /planView = \{\.\.\.view\}; fitSheet\(\);/);
+  assert.match(html, /else if \(planView\)\{ view = planView; planView = null; \}/);
   // Sheet is inspection-only, but its settings panel must keep targeting the selected fence.
   assert.doesNotMatch(html, /sel = on \? null : sel/);
   assert.match(html, /Keep the logical fence selection while inspecting its sheets/);
-  assert.match(html, /const first=sheetFences\(\)\[0\];\s*\n\s*if \(first != null\) sel=\{t:'seg',p:first,i:0\};/);
+  assert.match(html, /sheetTarget=included\.includes\(selectedFence\) \? selectedFence : included\[0\];/);
+  assert.match(html, /if \(sheetTarget != null &&\s*\n\s*\(!sel \|\| \(sel\.t!=='pt' && sel\.t!=='seg'\) \|\| sel\.p!==sheetTarget\)\)/);
   assert.match(html, /if \(modeSheet\)\{\s*\n\s*syncVisibleSheetFence\(\);/);
 });
 
@@ -164,6 +168,7 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
     const materialPostEndFlags=()=>({start:true,end:true});
     const postShapeAt=()=> 'square';
     const postAngleAt=(polys,q,fallback)=>fallback;
+    const samePhysicalPost=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y)<FENCE_JOIN_TOL;
     const postSizeOf=m=>m.postSize??0.1;
     const postTOf=m=>m.postT??m.postSize??0.1;
     const cornerAngleAt=(pl,k)=>{const V=pl.pts[k],A=pl.pts[k-1],B=pl.pts[k+1];
@@ -402,7 +407,7 @@ test('enabled handrail is visible in plan, elevation and section', () => {
 });
 
 test('sheet posts use their segment orientation and true rectangular section', () => {
-  assert.match(html, /posts\.push\(\{x:q\.x, y:q\.y, shape, angle\}\);/);
+  assert.match(html, /posts\.push\(\{x:q\.x, y:q\.y, shape, angle,/);
   assert.match(html, /postDepth:postTOf\(mat\)/);
   assert.match(html, /ctx\.save\(\); ctx\.translate\(S\.x,S\.y\); ctx\.rotate\(p\.angle \|\| 0\);/);
   assert.match(html, /ctx\.rect\(-halfW, -halfD, halfW\*2, halfD\*2\);/);

@@ -250,6 +250,10 @@ follows, but a value you typed always wins.
 site. Each fence or gate run gets three pages: an isolated **plan view** from directly above,
 a **developed elevation** unrolled onto a vertical plane, and a section through a representative
 bay. The plan belongs to that item alone, not to the overall app/site plan.
+Sheet remains an inspection drawing rather than an editing canvas, but its vertex posts are
+selectable: tap a post on an isolated plan or corner-detail page to expose that physical
+post's shape and orientation controls. Dragging still pans the paper and cannot move geometry.
+The live selection ring is not included in printed or exported sheets.
 
 The plan and developed elevation are a paired set: both use the same largest whole-denominator
 scale that fits their current orientation and leaves room for dimensions. The scale is fitted

@@ -1073,6 +1073,8 @@ let showAllTotals = false;
 let dimTool = null;                           // null | { a: ref | null }
 let dimHover = null;                          // reference under the cursor, highlighted while armed
 let dimHits = [];                             // value label boxes, captured at paint time
+let sheetPostHits = [];                       // selectable vertex posts painted on live Sheet pages
+let collectSheetPostHits = false;             // false while PDF pages paint offscreen
 let dimEdit = null;                           // { kind:'dim'|'seg', p, i } while the input is open
 let undoStack = [], redoStack = [];
 
@@ -3624,9 +3626,13 @@ function doPaint(){
   raf = 0;
   ctx.clearRect(0,0,cw,ch);
   dimHits = [];                                 // rebuilt as the dimensions draw
+  sheetPostHits = [];                           // rebuilt only from the live sheet canvas
   if (modeSheet){
     syncVisibleSheetFence();
-    fdel.style.display = fswap.style.display = 'none'; paintSheet(); return;
+    fdel.style.display = fswap.style.display = 'none';
+    collectSheetPostHits = true;
+    try { paintSheet(); } finally { collectSheetPostHits = false; }
+    return;
   }
   if (mode3d){ fdel.style.display = fswap.style.display = 'none'; paint3d(); return; }
 
@@ -3977,7 +3983,7 @@ function fenceCorners(polys, idx){
     const outPosts = outGate ? [] : postsAlong(V, B, spacing, false);
     const pIn = inGate ? null : inPosts[inPosts.length - 2];
     const pOut = outGate ? null : outPosts[1];
-    out.push({ v: V, d1, d2, theta, mitre: (180 - theta)/2,
+    out.push({ v: V, polyIndex:idx, pointIndex:k, d1, d2, theta, mitre: (180 - theta)/2,
                pIn,pOut,inGate,outGate,between,
                position:typeof railPositionOf === 'function' ? railPositionOf(mat) : railSideOf(mat),
                mat,polys,
@@ -4857,9 +4863,15 @@ function sheetPlanGeometry(polys, idx){
   const ends = materialPostEndFlags(polys, idx, mat), segments = [], posts = [], angles = [],
         railFootprints = [];
   const addPost = (q, shape, angle) => {
+    const pointIndex=pl.pts.findIndex(point=>samePhysicalPost(point,q));
     const old = posts.find(p => Math.hypot(p.x-q.x, p.y-q.y) < FENCE_JOIN_TOL);
-    if (old){ if (shape === 'round') old.shape = 'round'; return; }
-    posts.push({x:q.x, y:q.y, shape, angle});
+    if (old){
+      if (shape === 'round') old.shape = 'round';
+      if (old.pointIndex == null && pointIndex >= 0) old.pointIndex=pointIndex;
+      return;
+    }
+    posts.push({x:q.x, y:q.y, shape, angle,
+                ...(pointIndex >= 0 ? {pointIndex} : {})});
   };
   const runSegs = segsOf(pl);
   for (const [i, a, b] of runSegs){
@@ -5059,9 +5071,29 @@ function sheetPlanPostUnderHandrail(p, plan){
     return Math.hypot(p.x-(seg.a.x+vx*t), p.y-(seg.a.y+vy*t)) < FENCE_JOIN_TOL;
   });
 }
+function recordSheetPostHit(p,i,point,radius){
+  if (!collectSheetPostHits || i == null) return;
+  sheetPostHits.push({t:'pt',p,i,x:point.x,y:point.y,r:Math.max(10,radius)});
+}
+function pickSheetPost(sx,sy){
+  for (let i=sheetPostHits.length-1;i>=0;i--){
+    const hit=sheetPostHits[i];
+    if (Math.hypot(sx-hit.x,sy-hit.y)<=hit.r) return {t:'pt',p:hit.p,i:hit.i};
+  }
+  return null;
+}
+function markSelectedSheetPost(p,i,point,radius){
+  if (!collectSheetPostHits || !sel || sel.t!=='pt' || sel.p!==p || sel.i!==i) return;
+  ctx.save();
+  ctx.strokeStyle=ACCENT;ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(point.x,point.y,Math.max(9,radius),0,Math.PI*2);ctx.stroke();
+  ctx.restore();
+}
 function sheetPlanPost(p, at, plan, pg){
   const S = at(p), halfW = Math.max(1.5, plan.postSize*pg.k*view.s/2);
   const halfD = Math.max(1.5, plan.postDepth*pg.k*view.s/2);
+  const hitRadius=Math.hypot(halfW,halfD)+3;
+  recordSheetPostHit(pg.i,p.pointIndex,S,hitRadius);
   const off = plan.pl.excludeMaterials, covered = sheetPlanPostUnderHandrail(p, plan);
   ctx.save(); ctx.translate(S.x,S.y); ctx.rotate(p.angle || 0);
   ctx.fillStyle = off ? '#ffffff' : '#cbd5e1';
@@ -5075,6 +5107,7 @@ function sheetPlanPost(p, at, plan, pg){
   if (!covered) ctx.fill();
   ctx.stroke();
   ctx.restore();
+  markSelectedSheetPost(pg.i,p.pointIndex,S,hitRadius);
 }
 function sheetPlanHandrail(seg, at, plan){
   if (seg.gate || !hrOf(plan.mat).on || seg.len < 1e-9) return;
@@ -5496,6 +5529,9 @@ function paintBetweenCornerDetail(c, cxMM, cyMM, kMM, u, k){
   if (c.pOut) postAt(c.pOut,postAngleAt(c.polys,c.pOut,Math.atan2(c.d2.y,c.d2.x)),
                      postShapeAt(c.polys,c.pOut,c.mat));
   postAt(c.v,c.postAngle,c.postShape);
+  const cornerHitRadius=mm(Math.hypot(c.postW,c.postT)/2)*view.s+3;
+  recordSheetPostHit(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
+  markSelectedSheetPost(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
 
   const paper=mmOnPaper=>mmOnPaper/kMM;
   // Cut notes occupy the member itself; length dimensions remain outside it.
@@ -5564,7 +5600,10 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
   const r1 = rail(c.d1, n1, c.legIn);
   const r2 = rail({ x:-c.d2.x, y:-c.d2.y }, n2, c.legOut);
   postAt(pIn, c.d1); postAt(pOut, c.d2);                   // the posts either side
-  postAt(c.v, c.d1);                                       // the corner post over the joint
+  postAt(c.v,{x:Math.cos(c.postAngle),y:Math.sin(c.postAngle)}); // selected corner orientation
+  const cornerHitRadius=mm(Math.hypot(c.postW,c.postT)/2)*view.s+3;
+  recordSheetPostHit(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
+  markSelectedSheetPost(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
   /* Annotation geometry is sized in paper millimetres, like every other annotation on the
      sheet: a 1:50 grid cell and a 1:20 lone corner get the same arc and the same clearances,
      so labels cannot crowd each other as the scale drops. */
@@ -5782,6 +5821,7 @@ function syncVisibleSheetFence(){
 function setSheetView(on){
   if (on === modeSheet) return;
   if (on && mode3d) set3d(false);
+  let sheetTarget=null;
   if (on){
     // The inline plan-dimension editor is an HTML overlay, not sheet content. A pending
     // blur normally closes it, but Sheet must also clear it synchronously so it can never
@@ -5793,14 +5833,25 @@ function setSheetView(on){
     // If Sheet was opened without a fence selection (or from a fence excluded from Sheet),
     // target the fence on its first visible page. Otherwise the panel would edit shared
     // defaults while an own-settings fence on paper remained completely unchanged.
-    const first=sheetFences()[0];
-    if (first != null) sel={t:'seg',p:first,i:0};
+    const included=sheetFences();
+    const selectedFence=sel && (sel.t==='pt' || sel.t==='seg') ? sel.p : null;
+    sheetTarget=included.includes(selectedFence) ? selectedFence : included[0];
+    // Preserve a selected post on the fence whose sheets are opening. Its construction
+    // controls are just as relevant on paper as in 3D; only fall back to a segment when
+    // there is no usable fence/post selection.
+    if (sheetTarget != null &&
+        (!sel || (sel.t!=='pt' && sel.t!=='seg') || sel.p!==sheetTarget))
+      sel={t:'seg',p:sheetTarget,i:0};
   }
   modeSheet = on;
   document.body.classList.toggle('sheetview', on);
   $('bSheet').classList.toggle('primary', on);
   $('bSheet').textContent = on ? 'Plan' : 'Sheet';
-  if (on){ planView = {...view}; fitSheet(); }
+  if (on){
+    planView = {...view}; fitSheet();
+    const page=sheetLayout().pages.find(item=>item.i===sheetTarget);
+    if (page) view.y=page.top+SHEET.h/2-ch/(2*view.s);
+  }
   else if (planView){ view = planView; planView = null; }
   // Keep the logical fence selection while inspecting its sheets. The canvas remains
   // inspection-only in Sheet mode, but the Construction panel must continue editing the
@@ -6325,7 +6376,14 @@ cv.addEventListener('pointerdown', e => {
     pend = null; drag = null;
     return;
   }
-  if (modeSheet){ drag = { t:'pan' }; return; }   // the sheet is paper: move it, don't edit it
+  if (modeSheet){
+    // Sheet remains inspection-only, but a tap may select a vertex post so its construction
+    // settings can be changed. Crossing the normal drag threshold turns the same gesture
+    // into paper panning and never moves the post.
+    drag={t:'sheetpan',hit:e.button===2?null:pickSheetPost(e.offsetX,e.offsetY),
+          x:e.offsetX,y:e.offsetY,moved:false};
+    return;
+  }
   if (readOnly){
     pend = { hit:pick(e.offsetX,e.offsetY), x:e.offsetX, y:e.offsetY, moved:false };
     if (e.button === 2) drag = {t:'pan'};
@@ -6376,6 +6434,10 @@ cv.addEventListener('pointermove', e => {
     else orbit(dx, dy);
     paint(); return;
   }
+  if (modeSheet && !pointers.size && e.pointerType!=='touch'){
+    cv.classList.toggle('labelhit',!!pickSheetPost(e.offsetX,e.offsetY));
+    return;
+  }
   // dimension tool: preview where it would land, or what a click would grab
   if (dimTool && !pointers.size && e.pointerType !== 'touch'){
     if (dimTool.pend){ dimTool.at = { x:e.offsetX, y:e.offsetY }; paint(); return; }
@@ -6411,6 +6473,11 @@ cv.addEventListener('pointermove', e => {
     view.x = w.x - mx/view.s; view.y = w.y - my/view.s;
     pinch = { d, mx, my };
     paint(); return;
+  }
+  if (drag && drag.t==='sheetpan'){
+    if (!drag.moved && Math.hypot(e.offsetX-drag.x,e.offsetY-drag.y)>6) drag.moved=true;
+    if (drag.moved){ view.x-=dx/view.s; view.y-=dy/view.s; paint(); }
+    return;
   }
   if (readOnly && pend && !pend.moved &&
       Math.hypot(e.offsetX-pend.x,e.offsetY-pend.y) > 6){
@@ -6496,6 +6563,15 @@ function pointerEnd(e){
   if (!pointers.has(e.pointerId)) return;
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
+  if (modeSheet){
+    if (drag && drag.t==='sheetpan' && !drag.moved && drag.hit &&
+        e.type==='pointerup' && e.button!==2){
+      sel=drag.hit; bsel.clear(); showAllTotals=false; updateAll();
+    }
+    if (!pointers.size) drag=null;
+    pend=null;
+    return;
+  }
   if (mode3d){
     if (drag && drag.t === 'cube' && e.type === 'pointerup') goToFace(drag.face);
     else if (drag && drag.t === 'orbit' && !drag.moved && e.type === 'pointerup'){
@@ -6657,8 +6733,8 @@ window.addEventListener('keydown', e => {
 function hintText(drawing){
   const phone = onPhone();
   if (modeSheet)
-    return phone ? 'Plans · elevations · sections · drag to move'
-                 : 'Individual plans, elevations and sections at true scale · wheel to scroll pages · Ctrl+wheel or pinch to zoom.';
+    return phone ? 'Tap a post · drag to move · pinch to zoom'
+                 : 'Tap a post for its construction settings · drag to move · wheel to scroll pages · Ctrl+wheel or pinch to zoom.';
   if (mode3d)
     return phone
       ? 'Drag to orbit · two fingers to move · pinch to zoom'

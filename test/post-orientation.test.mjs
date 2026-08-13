@@ -85,4 +85,26 @@ test('all construction renderers consume the resolved physical post angle', () =
   assert.match(html,/addPost\(q, postShapeAt\(polys, q, mat\), postAngleAt\(polys,q,angle\)\)/);
   assert.match(html,/postAngle:typeof postAngleAt === 'function'\s*\n\s*\? postAngleAt\(polys,V,/);
   assert.match(html,/const angle = postAngleAt\(polys,centre,fallbackAngle\);/);
+  assert.match(html,/postAt\(c\.v,\{x:Math\.cos\(c\.postAngle\),y:Math\.sin\(c\.postAngle\)\}\)/);
+});
+
+test('sheet view retains and can directly select a painted corner post', () => {
+  assert.match(html,/sheetTarget=included\.includes\(selectedFence\) \? selectedFence : included\[0\]/);
+  assert.match(html,/recordSheetPostHit\(pg\.i,p\.pointIndex,S,hitRadius\)/);
+  assert.equal(html.match(/recordSheetPostHit\(c\.polyIndex,c\.pointIndex,at\(c\.v\),/g).length,2);
+  assert.match(html,/function markSelectedSheetPost\(p,i,point,radius\)\{/);
+  assert.equal(html.match(/markSelectedSheetPost\(c\.polyIndex,c\.pointIndex,at\(c\.v\),cornerHitRadius\)/g).length,2);
+  assert.match(html,/sel=drag\.hit; bsel\.clear\(\); showAllTotals=false; updateAll\(\);/);
+  assert.match(html,/Tap a post for its construction settings/);
+
+  const start=html.indexOf('function recordSheetPostHit(');
+  const end=html.indexOf('function sheetPlanPost(',start);
+  const context={Math};
+  vm.createContext(context);
+  vm.runInContext('let collectSheetPostHits=true,sheetPostHits=[];' +
+    html.slice(start,end) +
+    ';recordSheetPostHit(3,2,{x:120,y:80},6);' +
+    'this.near=pickSheetPost(127,80);this.far=pickSheetPost(140,80);',context);
+  assert.deepEqual({...context.near},{t:'pt',p:3,i:2});
+  assert.equal(context.far,null);
 });
