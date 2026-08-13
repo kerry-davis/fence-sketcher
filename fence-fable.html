@@ -1554,7 +1554,9 @@ function calcMaterials(polys, defMat){
           const startPost = pl.closed || !(i === 0 && k === 0 && !ends.start);
           const endPost = pl.closed || !(i === pl.pts.length-2 && k === n-1 && !ends.end);
           const geometry = between ? betweenRailGeometry(polys, mat,
-            segmentPosts[k], segmentPosts[k+1], {startPost,endPost}) : null;
+            segmentPosts[k], segmentPosts[k+1],
+            {startPost:railPostStands(polys,startPost,segmentPosts[k]),
+             endPost:railPostStands(polys,endPost,segmentPosts[k+1])}) : null;
           const cut = geometry
             ? {length:geometry.cutLength, centres:panelLength, fit:'between',
                startMitre:geometry.startMitre, endMitre:geometry.endMitre}
@@ -1579,7 +1581,13 @@ function calcMaterials(polys, defMat){
     // rail-style fence (or paling width 0) has no boards to count
     const fencePalings = !pl.excludePalings && mat.style !== 'rail' && mat.paling > 0.001
       ? Math.ceil(len / pw) : 0;
-    const fenceRails = pl.excludeRails ? 0 : pPanels * mat.rails;
+    // a rail the bottom gap or rail count pushes past the fence height is built by nobody,
+    // so nobody buys it either — count the rails the views actually draw. A paling fence's
+    // backing rails are not the ones railYs lays out, so they still go by the count.
+    const railsPerPanel = mat.style === 'rail' && typeof effectiveRailYs === 'function' &&
+      Number.isFinite(mat.railW + mat.railGap)   // no layout to filter by: the count stands
+      ? effectiveRailYs(mat).length : mat.rails;
+    const fenceRails = pl.excludeRails ? 0 : pPanels * railsPerPanel;
     const pRails = pGateRails + fenceRails, pPalings = pGatePalings + fencePalings;
     // handrail runs the length of the fence itself — a linear quantity, not a piece count
     const pHandrail = pHandrailCuts.reduce((sum,cut) => sum + cut.length, 0);
@@ -4077,7 +4085,9 @@ function elevationParts(polys, idx){
             const startPost = pl.closed || !(i === 0 && k === 0 && !ends.start);
             const endPost = pl.closed || !(i === pl.pts.length-2 && k === posts.length-2 && !ends.end);
             const geometry = between ? betweenRailGeometry(polys,mat,
-              segmentPosts[k],segmentPosts[k+1],{startPost,endPost}) : null;
+              segmentPosts[k],segmentPosts[k+1],
+              {startPost:railPostStands(polys,startPost,segmentPosts[k]),
+               endPost:railPostStands(polys,endPost,segmentPosts[k+1])}) : null;
             parts.push({ k:'rail',
                          x:geometry ? posts[k]+geometry.axialStart : posts[k],
                          w:geometry ? geometry.axialEnd-geometry.axialStart : posts[k+1]-posts[k],
@@ -4259,6 +4269,11 @@ function standingPostAt(polys, point){
     found = { mat, H: fenceHeightOf(mat) };
   });
   return found;
+}
+// Ownership only says which run draws a shared junction post. The rail still butts against
+// the timber the other run stands there, so ask whether one is built at all.
+function railPostStands(polys, owned, point){
+  return owned || !!standingPostAt(polys, point);
 }
 // Section of the post a rail lands on: the physical post's where one stands, otherwise the
 // rail's own fence. A rail cut against its own postT misses a joined run's different post.
@@ -4533,9 +4548,7 @@ function build3(){
       const hasPost = (k) => pl.closed ||
         !(i === 0 && k === 0 && !ends.start) &&
         !(i === pl.pts.length-2 && k === segmentPosts.length-1 && !ends.end);
-      // Ownership only says which run draws a shared junction post. The rail still butts
-      // against the timber the other run stands there, so ask whether one is built at all.
-      const postStands = (k) => hasPost(k) || !!standingPostAt(visiblePolys, segmentPosts[k]);
+      const postStands = (k) => railPostStands(visiblePolys, hasPost(k), segmentPosts[k]);
       segmentPosts.forEach((q, k) => {
         if (!hasPost(k)) return;
         const shared = [...posts].find(([,post]) =>
@@ -4996,7 +5009,8 @@ function sheetPlanGeometry(polys, idx){
         const endPost=pl.closed || !(seg.i===segments.length-1 && last && !ends.end);
         if (between){
           const rail=betweenRailGeometry(polys,mat,seg.stations[k],seg.stations[k+1],
-                                         {startPost,endPost});
+            {startPost:railPostStands(polys,startPost,seg.stations[k]),
+             endPost:railPostStands(polys,endPost,seg.stations[k+1])});
           railFootprints.push({points:rail.polygon});
           continue;
         }
@@ -7369,11 +7383,14 @@ function copyBomRows(entries,u){
     const gateRails = f.gateRails || 0, fenceRails = Math.max(0, (f.rails || 0) - gateRails);
     const railCount = M.rails == null ? DEF_RAILS : Math.max(0, M.rails|0);
     if (fenceRails){
-      const railsPerPanel = railCount || 1;
       const fallbackLength = Math.max(0.1, Number(M.spacing) || Number(DEF.m.spacing) || 2.4);
       const railCuts = (f.railCuts || f.panelLengths || [])
         .map(cut => typeof cut === 'number' ? {length:cut, centres:cut} : cut)
         .filter(cut => cut && Number.isFinite(cut.length) && cut.length > 0);
+      // one cut per panel, so the take-off's own rails say how many share each length — a
+      // rail the fence height leaves unbuilt is neither counted nor cut
+      const railsPerPanel = railCuts.length
+        ? Math.max(1, Math.round(fenceRails/railCuts.length)) : railCount || 1;
       if (!railCuts.length)
         for (let i = 0; i < Math.ceil(fenceRails/railsPerPanel); i++)
           railCuts.push({length:fallbackLength, centres:fallbackLength});
