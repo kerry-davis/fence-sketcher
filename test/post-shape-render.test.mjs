@@ -53,6 +53,9 @@ test('round post settings render and split the materials count by shape', () => 
   vm.createContext(context);
   vm.runInContext(html.slice(helperStart, helperEnd), context);
   context.railBetweenPosts=mat=>String(mat.railSide||'').startsWith('inside-');
+  context.faceMountedRailOffset=mat=>
+    ((mat.postShape||'square')==='round'?context.postSizeOf(mat):context.postTOf(mat))/2+
+    context.railTOf(mat)/2;
   context.railLateralOffset=mat=>mat.railSide==='inside-left'?(context.postTOf(mat)-context.railTOf(mat))/2:
     mat.railSide==='inside-right'?-(context.postTOf(mat)-context.railTOf(mat))/2:0;
   vm.runInContext(html.slice(geometryStart, geometryEnd), context);

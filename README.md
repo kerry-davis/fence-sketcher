@@ -435,7 +435,9 @@ against the near plane, then sort far-to-near.
   at the foot, so a short landscape canvas never squeezes them together.
 - Face-mounted rails are built per bay on the chosen left/right face, so interior bays meet
   at post centres and only the first/last outer bays extend to the outside face of their end
-  posts. Between-post rails terminate against actual post faces, with left/centre/right
+  posts. Their lateral plane stays straight along each fence leg when an individual corner
+  post is rotated; the post turns over the continuous rail joint rather than pulling the rail
+  clear of the ordinary post at the other end. Between-post rails terminate against actual post faces, with left/centre/right
   controlling their lateral position and angled rectangular faces producing mitre cuts.
   Gate placement is stored independently from rail position.
 

@@ -109,7 +109,7 @@ test('between-post geometry cuts against actual square and round post faces', ()
   assert.equal(+roundRail.endMitre.toFixed(4),0);
 });
 
-test('face-mounted corner rails offset from the post face each leg actually meets', () => {
+test('face-mounted corner rails keep one straight plane when the corner post rotates', () => {
   const cornerStart=html.indexOf('const CORNER_MAX_DEG');
   const cornerEnd=html.indexOf('function elevationParts(',cornerStart);
   const geoStart=html.indexOf('function postAngleAt(');
@@ -119,6 +119,7 @@ test('face-mounted corner rails offset from the post face each leg actually meet
     segsOf:pl=>pl.pts.slice(0,-1).map((a,i)=>[i,a,pl.pts[i+1]]),
     postSizeOf:m=>m.postSize,postTOf:m=>m.postT,railTOf:m=>m.railT,
     railSideOf:()=>'left',postShapeAt:(polys,q,m)=>m.postShape||'square',
+    faceMountedRailOffset:m=>(m.postShape==='round'?m.postSize:m.postT)/2+m.railT/2,
     postsAlong:(a,b,spacing)=>{
       const L=segLen(a,b),n=Math.max(1,Math.ceil(L/spacing-1e-9)),out=[];
       for(let k=0;k<=n;k++){const d=Math.min(L,spacing*k),t=L?d/L:0;
@@ -128,17 +129,21 @@ test('face-mounted corner rails offset from the post face each leg actually meet
   vm.createContext(context);
   vm.runInContext(html.slice(cornerStart,cornerEnd),context);
   vm.runInContext(html.slice(geoStart,geoEnd),context);
-  // a round post hides its depth field, so its rails stand off the drawn radius, not postT
+  // A round-post fence uses its radius as the one continuous mounting plane.
   const V={x:3,y:0},square={railSide:'left',spacing:2.4,postSize:.3,postT:.2,railT:.08};
   const corner=mat=>context.fenceCorners([{pts:[{x:0,y:0},V,{x:3,y:3}],closed:false,mat}],0)[0];
   const round=corner({...square,postShape:'round'});
   assert.equal(+round.offIn.toFixed(4),.19);                // postSize/2 + railT/2
   assert.equal(+round.offOut.toFixed(4),.19);
-  // and a re-oriented square post turns a different face to each leg
+  // Rotating one square corner post must not pull either straight leg sideways and leave its
+  // other end floating clear of the ordinary post.
   context.setPostOrientationAt([{pts:[V]}],V,'custom',0);
   const turned=corner(square);
-  assert.equal(+turned.offIn.toFixed(4),.14);               // postT/2 + railT/2, face square on
-  assert.equal(+turned.offOut.toFixed(4),.19);              // postSize/2 + railT/2, end on
+  assert.equal(+turned.offIn.toFixed(4),.14);
+  assert.equal(+turned.offOut.toFixed(4),.14);
+  assert.match(html,/const faceMountedRailOffset = mat =>/);
+  assert.match(html,/const faceRailOff = faceMountedRailOffset\(mat\);/);
+  assert.match(html,/const off=faceMountedRailOffset\(mat\);/);
 });
 
 test('gates preserve an independent side when rail position changes', () => {
