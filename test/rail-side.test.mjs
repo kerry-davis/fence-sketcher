@@ -141,7 +141,7 @@ test('between-post corner sheets keep fence rails beside gate breaks', () => {
   oneGate[0].pts[1].gateAfter=true;
   assert.equal(context.fenceCorners(oneGate,0).length,0);
   assert.match(html,/if \(c\.between\) paintBetweenCornerDetail\(c, cx, cy, pg\.k, u, k\)/);
-  assert.match(html,/const incoming=c\.pIn \? betweenRailGeometry\(c\.polys,c\.mat,c\.pIn,c\.v\) : null/);
+  assert.match(html,/const incoming=c\.pIn \? betweenRailGeometry\(c\.polys,c\.mat,c\.pIn,c\.v,\{startPost:c\.pInPost\}\) : null/);
   assert.match(html,/if \(saw>=0\.05\) lines\.push\(`mitre \$\{\+saw\.toFixed\(1\)\}°`\);/);
   assert.match(html,/const setout=sheetCornerSetout\(g,atCorner\);/);
   assert.match(html,/lines\.push\(`long point \$\{fmtSmall\(setout\.distance,u\)\} from bottom post corner`\);/);

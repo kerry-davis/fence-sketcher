@@ -1334,7 +1334,11 @@ function wallBands(ha, hb, cuts){
 const hrOf = mat => ({ on: !!mat.handrail, w: mat.hrW ?? DEF.m.hrW, t: mat.hrT ?? DEF.m.hrT });
 const RAIL_POSITIONS = new Set(['left','right','inside-left','inside-middle','inside-right']);
 const railPositionOf = mat => mat && RAIL_POSITIONS.has(mat.railSide) ? mat.railSide : 'left';
-const railBetweenPosts = mat => railPositionOf(mat).startsWith('inside-');
+// Only a rails-only fence fits its rails between the posts. A paling fence's backing rails
+// stay on the post face, even when an inside position is left over from a style switch —
+// the Rail side control is hidden for palings, so that stale value is never visible.
+const railBetweenPosts = mat => !!mat && mat.style === 'rail' &&
+  railPositionOf(mat).startsWith('inside-');
 const railSideOf = mat => railPositionOf(mat) === 'right' ? 'right' : 'left';
 const railSideLabel = mat => ({
   left:'Left of line', right:'Right of line',
@@ -1342,9 +1346,12 @@ const railSideLabel = mat => ({
   'inside-middle':'Between posts — centre',
   'inside-right':'Between posts — right',
 })[railPositionOf(mat)];
-const railLateralOffset = mat => {
-  const postDepth = postShapeOf(mat) === 'round' ? postSizeOf(mat) : postTOf(mat);
-  const room = (postDepth - railTOf(mat))/2;
+// halfAcross is how far the post the rail actually lands on reaches across the run. It
+// defaults to the fence's own post section; callers that know the physical post pass its
+// own, because a per-vertex shape or orientation override moves the face the rail sits on.
+const railLateralOffset = (mat, halfAcross =
+    (postShapeOf(mat) === 'round' ? postSizeOf(mat) : postTOf(mat))/2) => {
+  const room = halfAcross - railTOf(mat)/2;
   return railPositionOf(mat) === 'inside-left' ? room
        : railPositionOf(mat) === 'inside-right' ? -room : 0;
 };
@@ -3966,6 +3973,8 @@ function fenceCorners(polys, idx){
   const pl = polys[idx], mat = pl.mat || state.mat;
   const pts = pl.pts, n = pts.length, out = [];
   const between = typeof railBetweenPosts === 'function' && railBetweenPosts(mat);
+  const ends = typeof materialPostEndFlags === 'function'
+    ? materialPostEndFlags(polys,idx,mat) : {start:true,end:true};
   const segGate = i => !!pts[(i + n) % n].gateAfter;      // seg i runs pts[i] -> pts[i+1]
   const count = pl.closed ? n : n - 2;
   for (let j = 0; j < count; j++){
@@ -3986,8 +3995,12 @@ function fenceCorners(polys, idx){
     const outPosts = outGate ? [] : postsAlong(V, B, spacing, false);
     const pIn = inGate ? null : inPosts[inPosts.length - 2];
     const pOut = outGate ? null : outPosts[1];
+    // a leg shorter than the spacing runs to the fence's own end, which the end rule may
+    // leave unposted — the detail then cuts and draws that leg as the model builds it
+    const pInPost = !!pIn && (k > 1 || inPosts.length > 2 || ends.start);
+    const pOutPost = !!pOut && (k < n-2 || outPosts.length > 2 || ends.end);
     out.push({ v: V, polyIndex:idx, pointIndex:k, d1, d2, theta, mitre: (180 - theta)/2,
-               pIn,pOut,inGate,outGate,between,
+               pIn,pOut,pInPost,pOutPost,inGate,outGate,between,
                // the detail obeys the same BOM exclusions as the elevation: excluded work is
                // still built, so it is still drawn — as reference
                postOff: !!pl.excludeMaterials,
@@ -4250,12 +4263,27 @@ function railPostExit(polys, mat, centre, lineOrigin, ray, fallbackAngle, hasPos
   const hit=hits[0] || {distance:postSizeOf(mat)/2,normal:{x:ray.x,y:ray.y}};
   return {x:lineOrigin.x+ray.x*hit.distance,y:lineOrigin.y+ray.y*hit.distance,...hit};
 }
+// How far the post standing at `centre` reaches across the run, along the unit direction
+// `across`: the room an inside-left/right rail has before it passes the face it sits on. A
+// round or re-oriented post presents a different face there than the fence's own section.
+function postHalfAcross(polys, mat, centre, across, fallbackAngle){
+  if (postShapeAt(polys,centre,mat) === 'round') return postSizeOf(mat)/2;
+  const angle=postAngleAt(polys,centre,fallbackAngle);
+  const u={x:Math.cos(angle),y:Math.sin(angle)}, v=sideNormal(u,'left');
+  return postSizeOf(mat)/2*Math.abs(u.x*across.x+u.y*across.y)
+       + postTOf(mat)/2*Math.abs(v.x*across.x+v.y*across.y);
+}
 // Footprint and fabrication data for one rail fitted between two post faces. `polygon` is
 // ordered around the true mitred timber; cutLength is the longer of its two longitudinal
 // edges, exactly the edge a fabricator measures before making the two end cuts.
 function betweenRailGeometry(polys, mat, a, b, options={}){
   const L=segLen(a,b) || 1, d={x:(b.x-a.x)/L,y:(b.y-a.y)/L}, n=sideNormal(d,'left');
-  const offset=railLateralOffset(mat), half=railTOf(mat)/2, angle=Math.atan2(d.y,d.x);
+  const half=railTOf(mat)/2, angle=Math.atan2(d.y,d.x);
+  // the tighter of the two posts actually standing here, so the rail sits on a real face at
+  // one end and stays inside the footprint at the other
+  const across=[a,b].filter((q,i)=>(i ? options.endPost : options.startPost)!==false)
+                    .map(q=>postHalfAcross(polys,mat,q,n,angle));
+  const offset=railLateralOffset(mat,across.length ? Math.min(...across) : undefined);
   const origin=(q,off)=>({x:q.x+n.x*off,y:q.y+n.y*off});
   const startLow=railPostExit(polys,mat,a,origin(a,offset-half),d,angle,options.startPost!==false);
   const startHigh=railPostExit(polys,mat,a,origin(a,offset+half),d,angle,options.startPost!==false);
@@ -5535,14 +5563,14 @@ function paintBetweenCornerDetail(c, cxMM, cyMM, kMM, u, k){
           move(move(q,d, c.postW/2),n, c.postT/2),
           move(move(q,d,-c.postW/2),n, c.postT/2)],'#cbd5e1',c.postOff);
   };
-  const incoming=c.pIn ? betweenRailGeometry(c.polys,c.mat,c.pIn,c.v) : null;
-  const outgoing=c.pOut ? betweenRailGeometry(c.polys,c.mat,c.v,c.pOut) : null;
+  const incoming=c.pIn ? betweenRailGeometry(c.polys,c.mat,c.pIn,c.v,{startPost:c.pInPost}) : null;
+  const outgoing=c.pOut ? betweenRailGeometry(c.polys,c.mat,c.v,c.pOut,{endPost:c.pOutPost}) : null;
   if (incoming) poly(incoming.polygon,'#e2e8f0',c.railOff);
   if (outgoing) poly(outgoing.polygon,'#e2e8f0',c.railOff);
-  if (c.pIn) postAt(c.pIn,postAngleAt(c.polys,c.pIn,Math.atan2(c.d1.y,c.d1.x)),
-                    postShapeAt(c.polys,c.pIn,c.mat));
-  if (c.pOut) postAt(c.pOut,postAngleAt(c.polys,c.pOut,Math.atan2(c.d2.y,c.d2.x)),
-                     postShapeAt(c.polys,c.pOut,c.mat));
+  if (c.pInPost) postAt(c.pIn,postAngleAt(c.polys,c.pIn,Math.atan2(c.d1.y,c.d1.x)),
+                        postShapeAt(c.polys,c.pIn,c.mat));
+  if (c.pOutPost) postAt(c.pOut,postAngleAt(c.polys,c.pOut,Math.atan2(c.d2.y,c.d2.x)),
+                         postShapeAt(c.polys,c.pOut,c.mat));
   postAt(c.v,c.postAngle,c.postShape);
   const cornerHitRadius=mm(Math.hypot(c.postW,c.postT)/2)*view.s+3;
   recordSheetPostHit(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
@@ -5621,7 +5649,8 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
   // the cut-length dimension ends — with the post drawn over the lap
   const r1 = rail(c.d1, n1, c.legIn);
   const r2 = rail({ x:-c.d2.x, y:-c.d2.y }, n2, c.legOut);
-  postAt(pIn, c.d1); postAt(pOut, c.d2);                   // the posts either side
+  if (c.pInPost) postAt(pIn, c.d1);                        // the posts either side, when the
+  if (c.pOutPost) postAt(pOut, c.d2);                      // end rule actually places them
   postAt(c.v,{x:Math.cos(c.postAngle),y:Math.sin(c.postAngle)}); // selected corner orientation
   const cornerHitRadius=mm(Math.hypot(c.postW,c.postT)/2)*view.s+3;
   recordSheetPostHit(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);

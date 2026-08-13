@@ -616,8 +616,9 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   assert.match(html, /ctx\.fillRect\(s\.x-wide\/2-1\.6\*k,s\.y-lineH\*lines\.length\/2,wide\+3\.2\*k,lineH\*lines\.length\);/);
   // mitred at the joint only — the far end of each rail is square
   assert.match(html, /poly\(\[ move\(eA, dir, -back\), cutA, cutB, move\(eB, dir, -back\) \], '#e2e8f0', c\.railOff\);/);
-  // posts either side, and the bay lengths post to post
-  assert.match(html, /postAt\(pIn, c\.d1\); postAt\(pOut, c\.d2\);/);
+  // posts either side — where the end rule places them — and the bay lengths post to post
+  assert.match(html, /if \(c\.pInPost\) postAt\(pIn, c\.d1\);/);
+  assert.match(html, /if \(c\.pOutPost\) postAt\(pOut, c\.d2\);/);
   // the fabrication page has only cut length, a required mitre and the long-point setback;
   // the general fence angle already exists on the plan page and must not be repeated here
   const betweenPainter=html.slice(html.indexOf('function paintBetweenCornerDetail('),
