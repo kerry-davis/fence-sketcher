@@ -639,7 +639,10 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   assert.match(betweenPainter,/sheetDetailInk\('#cbd5e1',c\.postOff\);/);
   assert.match(facePainter,/sheetDetailInk\(fill, off\);/);
   // and a round post stays round on a face-mounted detail
-  assert.match(facePainter,/if \(postShapeAt\(c\.polys, q, c\.mat\) === 'round'\)\{/);
+  assert.match(facePainter,/if \(postShapeAt\(c\.polys, q, pm\) === 'round'\)\{/);
+  // and each drawn post is the section of the run that actually stands it, not this run's
+  assert.match(facePainter,/const pm = postSectionOf\(c\.polys, q, c\.mat\), w = postSizeOf\(pm\), t = postTOf\(pm\);/);
+  assert.match(betweenPainter,/const pm=postSectionOf\(c\.polys,q,c\.mat\),w=postSizeOf\(pm\),t=postTOf\(pm\);/);
   assert.match(html,/function sheetCornerSetout\(rail,atCorner\)/);
   assert.match(html,/if \(saw<0\.05\) return null;/);
   assert.match(html,/return \{cut,corner:lower,distance:Math\.hypot\(cut\.x-lower\.x,cut\.y-lower\.y\)\};/);

@@ -5625,29 +5625,29 @@ function paintBetweenCornerDetail(c, cxMM, cyMM, kMM, u, k){
     ctx.closePath();sheetDetailInk(fill,off);
     ctx.fill();ctx.stroke();ctx.restore();
   };
-  const postAt=(q,angle,shape)=>{
-    if (shape==='round'){
-      const s=at(q),r=mm(c.postW/2)*view.s;
+  // a shared junction post is the owning run's timber, in its section and shape, not this run's
+  const postAt=(q,angle)=>{
+    const pm=postSectionOf(c.polys,q,c.mat),w=postSizeOf(pm),t=postTOf(pm);
+    if (postShapeAt(c.polys,q,pm)==='round'){
+      const s=at(q),r=mm(w/2)*view.s;
       ctx.save();ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.closePath();
       sheetDetailInk('#cbd5e1',c.postOff);ctx.fill();ctx.stroke();ctx.restore();
       return;
     }
     const d={x:Math.cos(angle),y:Math.sin(angle)},n=sideNormal(d,'left');
-    const move=(p,v,t)=>({x:p.x+v.x*t,y:p.y+v.y*t});
-    poly([move(move(q,d,-c.postW/2),n,-c.postT/2),
-          move(move(q,d, c.postW/2),n,-c.postT/2),
-          move(move(q,d, c.postW/2),n, c.postT/2),
-          move(move(q,d,-c.postW/2),n, c.postT/2)],'#cbd5e1',c.postOff);
+    const move=(p,v,s)=>({x:p.x+v.x*s,y:p.y+v.y*s});
+    poly([move(move(q,d,-w/2),n,-t/2),
+          move(move(q,d, w/2),n,-t/2),
+          move(move(q,d, w/2),n, t/2),
+          move(move(q,d,-w/2),n, t/2)],'#cbd5e1',c.postOff);
   };
   const incoming=c.pIn ? betweenRailGeometry(c.polys,c.mat,c.pIn,c.v,{startPost:c.pInPost}) : null;
   const outgoing=c.pOut ? betweenRailGeometry(c.polys,c.mat,c.v,c.pOut,{endPost:c.pOutPost}) : null;
   if (incoming) poly(incoming.polygon,'#e2e8f0',c.railOff);
   if (outgoing) poly(outgoing.polygon,'#e2e8f0',c.railOff);
-  if (c.pInPost) postAt(c.pIn,postAngleAt(c.polys,c.pIn,Math.atan2(c.d1.y,c.d1.x)),
-                        postShapeAt(c.polys,c.pIn,c.mat));
-  if (c.pOutPost) postAt(c.pOut,postAngleAt(c.polys,c.pOut,Math.atan2(c.d2.y,c.d2.x)),
-                         postShapeAt(c.polys,c.pOut,c.mat));
-  postAt(c.v,c.postAngle,c.postShape);
+  if (c.pInPost) postAt(c.pIn,postAngleAt(c.polys,c.pIn,Math.atan2(c.d1.y,c.d1.x)));
+  if (c.pOutPost) postAt(c.pOut,postAngleAt(c.polys,c.pOut,Math.atan2(c.d2.y,c.d2.x)));
+  postAt(c.v,c.postAngle);
   const cornerHitRadius=mm(Math.hypot(c.postW,c.postT)/2)*view.s+3;
   recordSheetPostHit(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
   markSelectedSheetPost(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
@@ -5694,17 +5694,19 @@ function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
     ctx.fill(); ctx.stroke(); ctx.restore();
   };
   const postAt = (q, d) => {
-    if (postShapeAt(c.polys, q, c.mat) === 'round'){    // a round post is round on the detail too
-      const s2 = at(q), r = mm(c.postW/2)*view.s;
+    // a shared junction post is the owning run's timber: its section and shape, not this run's
+    const pm = postSectionOf(c.polys, q, c.mat), w = postSizeOf(pm), t = postTOf(pm);
+    if (postShapeAt(c.polys, q, pm) === 'round'){        // a round post is round on the detail too
+      const s2 = at(q), r = mm(w/2)*view.s;
       ctx.save(); ctx.beginPath(); ctx.arc(s2.x, s2.y, r, 0, 2*Math.PI); ctx.closePath();
       sheetDetailInk('#cbd5e1', c.postOff); ctx.fill(); ctx.stroke(); ctx.restore();
       return;
     }
     const pv = sideNormal(d, 'left');
-    poly([ move(move(q, d, -c.postW/2), pv, -c.postT/2),
-           move(move(q, d,  c.postW/2), pv, -c.postT/2),
-           move(move(q, d,  c.postW/2), pv,  c.postT/2),
-           move(move(q, d, -c.postW/2), pv,  c.postT/2) ], '#cbd5e1', c.postOff);
+    poly([ move(move(q, d, -w/2), pv, -t/2),
+           move(move(q, d,  w/2), pv, -t/2),
+           move(move(q, d,  w/2), pv,  t/2),
+           move(move(q, d, -w/2), pv,  t/2) ], '#cbd5e1', c.postOff);
   };
   // rails on their attached face, cut against the mitre seam, running to the neighbour post
   const n1 = sideNormal(c.d1, c.side), n2 = sideNormal(c.d2, c.side);
