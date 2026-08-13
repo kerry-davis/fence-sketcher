@@ -80,8 +80,10 @@ test('reversing a run preserves the physical leg selected for post orientation',
 });
 
 test('all construction renderers consume the resolved physical post angle', () => {
-  assert.match(html,/betweenRailGeometry\(state\.polys, mat, segmentPosts\[k\], segmentPosts\[k\+1\]/);
-  assert.match(html,/postAngleAt\(state\.polys,q,fallbackAngle\), WOOD\.post/);
+  // 3D resolves the physical post from the runs it actually draws, so a hidden run cannot
+  // move a face the scene never shows
+  assert.match(html,/betweenRailGeometry\(visiblePolys, mat, segmentPosts\[k\], segmentPosts\[k\+1\]/);
+  assert.match(html,/postAngleAt\(visiblePolys,q,fallbackAngle\), WOOD\.post/);
   assert.match(html,/addPost\(q, postShapeAt\(polys, q, mat\), postAngleAt\(polys,q,angle\)\)/);
   assert.match(html,/postAngle:typeof postAngleAt === 'function'\s*\n\s*\? postAngleAt\(polys,V,/);
   assert.match(html,/const angle = postAngleAt\(polys,centre,fallbackAngle\);/);

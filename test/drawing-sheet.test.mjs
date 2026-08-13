@@ -602,11 +602,14 @@ test('corner details carry the mitre cut for the rails at each fold', () => {
   assert.equal(allOut[0].postOff, true);
   assert.equal(allOut[0].railOff, true);
 
-  // ...but only for a fence that actually has rails to join
-  assert.match(html, /const corners = ev\.mat\.style === 'rail' && railYs\(ev\.mat\)\.length\s*\n\s*\? fenceCorners\(state\.polys, i\) : \[\];/);
-  // and the page exists, after the section
+  // ...but only for a fence that actually has rails to join, rails above the fence height
+  // being built by nobody
+  assert.match(html, /const corners = ev\.mat\.style === 'rail' && effectiveRailYs\(ev\.mat\)\.length\s*\n\s*\? fenceCorners\(state\.polys, i\) : \[\];/);
+  // and the page exists, after the section — every fold detailed, six to a page
   // the grid follows the corner count, one standard scale fits the worst cell, centred
-  assert.match(html, /place\(\{ kind:'corners', i, ev, corners: shown, extra, cols, rows,/);
+  assert.match(html, /for \(let n = 0; n < corners\.length; n \+= 6\)\{/);
+  assert.match(html, /place\(\{ kind:'corners', i, ev, corners: s\.shown, cols: s\.cols, rows: s\.rows,/);
+  assert.doesNotMatch(html, /corners\.slice\(0, 6\)/);
   assert.match(html, /const cden = SCALES\.find\(fitsC\) \?\? SCALES\[SCALES\.length - 1\];/);
   assert.match(html, /const cols = shown\.length === 1 \? 1 : shown\.length === 2 \? 2 : shown\.length <= 4 \? 2 : 3;/);
   assert.match(html, /\(col \+ 0\.5\)\*cellW - pg\.k\*\(c\.box\.loX \+ c\.box\.hiX\)\/2;/);

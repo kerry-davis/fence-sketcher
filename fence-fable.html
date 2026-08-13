@@ -3958,6 +3958,10 @@ function railYs(mat){
     ys.push((mat.botOff||0) + k*d + mat.railW/2);
   return ys;
 }
+// The rails the fence actually gets: a bottom gap or rail count that pushes a rail past the
+// fence height leaves it built by nobody, so no view may draw or set one out either.
+const effectiveRailYs = mat =>
+  railYs(mat).filter(ry => ry + mat.railW/2 <= fenceHeightOf(mat) + 1e-6);
 /* ---- developed elevation: the fence unrolled onto a vertical plane ----
    A corner is a fold, not a break, so the runs lay out end to end at true length — the view a
    builder sets out from. Metres in, metres out: x along the run from its start, y up from the
@@ -4237,20 +4241,22 @@ function setPostOrientationAt(polys,point,mode,angle=0){
 }
 // Which run stands the physical post at a point, and therefore whose section is on site.
 // Ownership follows postEndFlags — an auto junction hands the shared post to the earlier run
-// — and where joined runs differ, build3 builds the tallest one's own timber. Null where no
-// post stands. ponytail: vertices only, which is where runs join; an intermediate post is
-// always its own run's, so rails never have to ask about one.
+// — so the first run standing one there owns it, which is the post the take-off bought and
+// the post build3 draws, whatever the joined runs' heights. Null where no post stands.
+// ponytail: vertices only, which is where runs join; an intermediate post is always its own
+// run's, so rails never have to ask about one.
 function standingPostAt(polys, point){
   if (typeof postEndFlags !== 'function') return null;
   let found = null;
   (polys || []).forEach((pl,i) => {
+    if (found) return;
     const last = pl.pts.length-1;
     const stands = pl.pts.some((q,k) => samePhysicalPost(q,point) &&
       (pl.closed || (k > 0 && k < last) ||
        postEndFlags(polys,i,pl.mat || state.mat)[k === 0 ? 'start' : 'end']));
     if (!stands) return;
-    const mat = pl.mat || state.mat, H = fenceHeightOf(mat);
-    if (!found || H > found.H) found = { mat, H };
+    const mat = pl.mat || state.mat;
+    found = { mat, H: fenceHeightOf(mat) };
   });
   return found;
 }
@@ -4529,7 +4535,7 @@ function build3(){
         !(i === pl.pts.length-2 && k === segmentPosts.length-1 && !ends.end);
       // Ownership only says which run draws a shared junction post. The rail still butts
       // against the timber the other run stands there, so ask whether one is built at all.
-      const postStands = (k) => hasPost(k) || !!standingPostAt(state.polys, segmentPosts[k]);
+      const postStands = (k) => hasPost(k) || !!standingPostAt(visiblePolys, segmentPosts[k]);
       segmentPosts.forEach((q, k) => {
         if (!hasPost(k)) return;
         const shared = [...posts].find(([,post]) =>
@@ -4538,7 +4544,9 @@ function build3(){
         const old = shared && shared[1];
         const explicitShape = explicitPostShapeAt(visiblePolys,q);
         const shape = explicitShape || (old ? old.shape : postShapeOf(mat));
-        if (!old || H > old.H){
+        // the run that owns the junction, as standingPostAt and the take-off resolve it,
+        // builds it — a later run joining here does not re-cut a post already stood
+        if (!old){
           const size = postSizeOf(mat), t = shape === 'round' ? size : postTOf(mat);
           posts.set(key, { q, H, fallbackAngle:ang, shape, size, t });
         }
@@ -4551,14 +4559,14 @@ function build3(){
         // wider of the bay's two posts governs, so the rail never buries into either.
         const faceNormal = sideNormal({x:ux,y:uy}, railSide);
         const faceRailOff = (from,to) => railTOf(mat)/2 +
-          Math.max(postHalfAcross(state.polys,mat,from,faceNormal,ang),
-                   postHalfAcross(state.polys,mat,to,faceNormal,ang));
+          Math.max(postHalfAcross(visiblePolys,mat,from,faceNormal,ang),
+                   postHalfAcross(visiblePolys,mat,to,faceNormal,ang));
         for (let k = 0; k < segmentPosts.length-1; k++){
           const first = k === 0, last = k === segmentPosts.length-2;
           const runStart = !pl.closed && i === 0 && first && hasPost(k);
           const runEnd = !pl.closed && i === pl.pts.length-2 && last && hasPost(k+1);
           const rail = between
-            ? betweenRailGeometry(state.polys, mat, segmentPosts[k], segmentPosts[k+1],
+            ? betweenRailGeometry(visiblePolys, mat, segmentPosts[k], segmentPosts[k+1],
                                   {startPost:postStands(k),endPost:postStands(k+1)})
             : railBayBounds(segmentPosts[k], segmentPosts[k+1],
                             runStart ? postSizeOf(mat)/2 : 0, runEnd ? postSizeOf(mat)/2 : 0);
@@ -4600,7 +4608,7 @@ function build3(){
     const hw = (size || POST_SIDE)/2, hd = (t || size || POST_SIDE)/2;
     if (shape === 'round') pushCylinder(F, q.x, H/2, q.y, hw, H, WOOD.post);
     else pushBox(F, q.x, H/2, q.y, hw, H/2, hd,
-                 postAngleAt(state.polys,q,fallbackAngle), WOOD.post);
+                 postAngleAt(visiblePolys,q,fallbackAngle), WOOD.post);
   }
   return F;
 }
@@ -4978,7 +4986,7 @@ function sheetPlanGeometry(polys, idx){
   }
   // A sheet plan must show where the rail actually sits, not merely the fence centreline.
   // One footprint represents all vertically stacked rails because they coincide in plan.
-  if (mat.style === 'rail' && (mat.rails == null || mat.rails > 0)){
+  if (mat.style === 'rail' && effectiveRailYs(mat).length){
     const between=railBetweenPosts(mat), side=railSideOf(mat);
     for (const seg of segments){
       if (seg.gate || seg.len < 1e-9) continue;
@@ -5102,26 +5110,33 @@ function sheetLayout(){
             x: SHEET.margin + 8 + Math.max(0, (room.w - wide*sk)/2),
             base: SHEET.margin + 8 + (room.h + tall*sk)/2 });
     // a corner detail is rail joinery: a paling fence, or a rail fence set to no rails, has none
-    const corners = ev.mat.style === 'rail' && railYs(ev.mat).length
+    const corners = ev.mat.style === 'rail' && effectiveRailYs(ev.mat).length
       ? fenceCorners(state.polys, i) : [];
     if (corners.length){
-      // the grid follows the corner count, and one standard scale serves the whole page:
+      // every fold gets its detail, six to a page, and one standard scale serves them all:
       // as large as the worst-fitting detail allows, so a lone corner fills the paper
-      const shown = corners.slice(0, 6), extra = corners.length - shown.length;
-      const cols = shown.length === 1 ? 1 : shown.length === 2 ? 2 : shown.length <= 4 ? 2 : 3;
-      const rows = Math.ceil(shown.length / cols);
-      const cellW = (room.w - 4)/cols, cellH = (room.h - 14)/rows, PAD = 0.5;
-      for (const c of shown){
+      const PAD = 0.5;
+      for (const c of corners){
         const xs = [0, -c.d1.x*c.legIn, c.d2.x*c.legOut];
         const ys = [0, -c.d1.y*c.legIn, c.d2.y*c.legOut];
         c.box = { loX: Math.min(...xs) - PAD, hiX: Math.max(...xs) + PAD,
                   loY: Math.min(...ys) - PAD, hiY: Math.max(...ys) + PAD };
       }
-      const fitsC = d => shown.every(c =>
-        (c.box.hiX - c.box.loX)*(1000/d) <= cellW && (c.box.hiY - c.box.loY)*(1000/d) <= cellH);
+      const sheets = [];
+      for (let n = 0; n < corners.length; n += 6){
+        const shown = corners.slice(n, n + 6);
+        const cols = shown.length === 1 ? 1 : shown.length === 2 ? 2 : shown.length <= 4 ? 2 : 3;
+        sheets.push({ shown, cols, rows: Math.ceil(shown.length / cols) });
+      }
+      const fitsC = d => sheets.every(s => {
+        const cellW = (room.w - 4)/s.cols, cellH = (room.h - 14)/s.rows;
+        return s.shown.every(c => (c.box.hiX - c.box.loX)*(1000/d) <= cellW &&
+                                  (c.box.hiY - c.box.loY)*(1000/d) <= cellH);
+      });
       const cden = SCALES.find(fitsC) ?? SCALES[SCALES.length - 1];
-      place({ kind:'corners', i, ev, corners: shown, extra, cols, rows,
-              den: cden, k: 1000/cden, base:0, x:0 });
+      for (const s of sheets)
+        place({ kind:'corners', i, ev, corners: s.shown, cols: s.cols, rows: s.rows,
+                den: cden, k: 1000/cden, base:0, x:0 });
     }
   }
   return { pages };
@@ -5537,11 +5552,6 @@ function paintCorners(pg, u, k){
     ? ' · cuts are face-to-face long-edge lengths · square butt unless a mitre is called out'
     : ' · mitre is the saw setting · rail lengths run long point to post centre';
   ctx.fillText(`rails ${railSideLabel(mat).toLowerCase()}` + detailNote, note.x, note.y);
-  if (pg.extra > 0){
-    const more = P2S(SHEET.margin + 8, pg.top + SHEET.h - SHEET.margin - 11);
-    ctx.fillStyle = SHEET_LINE;
-    ctx.fillText(`… and ${pg.extra} more corner${pg.extra === 1 ? '' : 's'}`, more.x, more.y);
-  }
 }
 // A builder can mark a physical post corner, not its concealed centre. For a mitred end, use
 // the lower endpoint of the actual post face hit by the rail's long point and measure along
