@@ -291,6 +291,15 @@ it. Board width and gap are taken off the two boards the elevation actually drew
 dimensions are the plan's own `renderDimension()`, so the sheet, the plan and the 3D view
 share one dimension style.
 
+The developed elevation also marks every end of a sequential purchased **rail** or
+**handrail** length with a short dotted cut line through that member. The header states the
+stock interval used. Stock starts again after a gate or corner, because a board cannot bridge
+an opening or turn a bend. This makes an unsafe splice visible immediately: if a dotted line
+falls between posts, the nominal quantity may cover the total metres but the proposed pieces
+do not have support at their join. The marks use the fence's `Rail length` and `Handrail
+length` settings; older saves without the latter retain the unit-system default until it is
+entered.
+
 **Print style.** On paper the dimensions are near-black on white in a plain sans
 (`Helvetica / Arial / Liberation Sans`) at 3.1 mm, and the break where a value crosses its
 own dimension line is a *cleared box*, not a stroked halo — stroking swells every glyph, and

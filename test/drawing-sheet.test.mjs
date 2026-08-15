@@ -378,6 +378,8 @@ test('the developed elevation agrees with the model it is drawn from', () => {
   // Array.from: the vm realm's arrays are structurally equal but not reference-equal
   assert.deepEqual(Array.from(bent.stations), [0, 2.4, 3, 5.4, 7]);
   assert.equal(bent.parts.filter(p => p.k === 'post').length, 5);
+  assert.deepEqual(Array.from(bent.runs, run => [run.start,run.end,run.gate]),
+                   [[0,3,false],[3,7,false]]);
   // rails span bays, never the whole run
   const rails = bent.parts.filter(p => p.k === 'rail');
   assert.ok(rails.length > 0 && rails.every(r => r.w <= 2.4 + 1e-9));
@@ -390,6 +392,8 @@ test('the developed elevation agrees with the model it is drawn from', () => {
   assert.equal(+cap.x.toFixed(4), -0.05);
   assert.equal(+cap.w.toFixed(4), 4.1);
   assert.equal(+cap.h.toFixed(4), 0.045);
+  assert.equal(+capped.runs[0].handrailStart.toFixed(4), -0.05);
+  assert.equal(+capped.runs[0].handrailEnd.toFixed(4), 4.05);
 
   // A run whose first point is its right-hand end would draw mirrored against the plan.
   // 5 m at 2.4 spacing has its short 0.2 m bay beside the last point, so drawing left to
@@ -398,6 +402,7 @@ test('the developed elevation agrees with the model it is drawn from', () => {
     [{ pts:[{x:5,y:0},{x:0,y:0}], closed:false, mat:{...mat, spacing:2.4} }], 0);
   assert.equal(rightToLeft.flipped, true);
   assert.deepEqual(Array.from(rightToLeft.stations).map(v => +v.toFixed(4)), [0, 0.2, 2.6, 5]);
+  assert.deepEqual([rightToLeft.runs[0].start,rightToLeft.runs[0].end],[5,0]);
   const leftToRight = context.elevationParts(
     [{ pts:[{x:0,y:0},{x:5,y:0}], closed:false, mat:{...mat, spacing:2.4} }], 0);
   assert.equal(leftToRight.flipped, false);
@@ -406,6 +411,24 @@ test('the developed elevation agrees with the model it is drawn from', () => {
   const northward = context.elevationParts(
     [{ pts:[{x:0,y:5},{x:0,y:0}], closed:false, mat }], 0);
   assert.equal(northward.flipped, true);
+});
+
+test('sheet elevations mark sequential purchased rail and handrail lengths', () => {
+  const start=html.indexOf('function stockJointStations(');
+  const end=html.indexOf('function sheetPlanPostUnderHandrail(',start);
+  assert.ok(start>=0 && end>start);
+  const context={Math};
+  vm.createContext(context);
+  vm.runInContext(html.slice(start,end),context);
+  assert.deepEqual(Array.from(context.stockJointStations(0,10.5,5.4)),[5.4]);
+  assert.deepEqual(Array.from(context.stockJointStations(10.5,0,5.4)),[5.1]);
+  assert.deepEqual(Array.from(context.stockJointStations(0,10.8,5.4)),[5.4]);
+  assert.deepEqual(Array.from(context.stockJointStations(0,5.4,5.4)),[]);
+  assert.match(html,/paintElevationStockJoints\(ev,xAt,base,mm\);/);
+  assert.match(html,/notes\.push\(`rail stock joints every/);
+  assert.match(html,/notes\.push\(`handrail stock joints every/);
+  assert.match(html,/return notes\.length \? 'Dotted: '/);
+  assert.match(html,/ctx\.setLineDash\(\[0\.7\*view\.s,1\.05\*view\.s\]\);/);
 });
 
 test('the drawing reads the BOM exclusions', () => {
@@ -466,8 +489,8 @@ test('the drawing reads the BOM exclusions', () => {
   assert.equal(gate({ excludeRails:true }).railsOff, true);
 
   // and the shared page header says it, in the take-off's words, for every view kind
-  assert.match(html, /if \(pg\.ev && pg\.ev\.notIncluded\.length\)\{/);
-  assert.match(html, /ctx\.fillText\('Dashed: ' \+ pg\.ev\.notIncluded\.join\(' · '\), note\.x, note\.y\);/);
+  assert.match(html, /pg\.ev\.notIncluded\.length \? \['Dashed: ' \+ pg\.ev\.notIncluded\.join\(' · '\)\] : \[\]/);
+  assert.match(html, /ctx\.fillText\(notes\.join\(' · '\), note\.x, note\.y\);/);
   assert.match(html, /ctx\.fillStyle = off \? '#ffffff' : fill;/);
   assert.match(html, /if \(off\) ctx\.setLineDash\(\[3,2\]\);/);
 });

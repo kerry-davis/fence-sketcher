@@ -4072,7 +4072,7 @@ function elevationParts(polys, idx){
   const pl = polys[idx], mat = pl.mat || state.mat;
   const H = fenceHeightOf(mat), hr = hrOf(mat), spacing = Math.max(0.1, mat.spacing);
   const ends = materialPostEndFlags(polys, idx, mat);
-  const postW = postSizeOf(mat), parts = [], stations = [], bays = [];
+  const postW = postSizeOf(mat), parts = [], stations = [], bays = [], runs = [];
   /* The BOM exclusions are part of the drawing: a rail nobody is supplying still gets built,
      so it is drawn — but drawn as reference, and the page says so. Omitting it silently would
      make the sheet disagree with the take-off it was priced from. */
@@ -4087,6 +4087,8 @@ function elevationParts(polys, idx){
   for (const [i, a, b] of segsOf(pl)){
     const L = segLen(a, b);
     total = x0 + L;
+    const run = { start:x0, end:x0+L, gate:!!a.gateAfter };
+    runs.push(run);
     if (i > 0) parts.push({ k:'corner', x:x0 });
     if (a.gateAfter){
       const leaf = gateLeafBuild(H, mat), inset = gateLeafInset(mat), w = gateLeafLength(L, mat);
@@ -4129,6 +4131,8 @@ function elevationParts(polys, idx){
       if (hr.on){
         const startOverhang = !pl.closed && i === 0 && ends.start ? postW/2 : 0;
         const endOverhang = !pl.closed && i === pl.pts.length-2 && ends.end ? postW/2 : 0;
+        run.handrailStart = x0-startOverhang;
+        run.handrailEnd = x0+L+endOverhang;
         parts.push({ k:'cap', x:x0-startOverhang, w:L+startOverhang+endOverhang,
                      y:H, h:hr.t, off:omitted.cap });
       }
@@ -4155,13 +4159,20 @@ function elevationParts(polys, idx){
     for (const q of parts) q.x = total - q.x - (q.k === 'corner' ? 0 : q.w);
     for (let n = 0; n < stations.length; n++) stations[n] = total - stations[n];
     for (const q of bays){ const a2 = q.a; q.a = total - q.b; q.b = total - a2; }
+    for (const q of runs){
+      q.start = total-q.start; q.end = total-q.end;
+      if (q.handrailStart != null){
+        q.handrailStart = total-q.handrailStart;
+        q.handrailEnd = total-q.handrailEnd;
+      }
+    }
   }
   const notIncluded = pl.excludeMaterials ? ['fence not included in BOM']
     : [pl.excludeRails ? 'rails not included in BOM' : '',
        pl.excludePalings && mat.style !== 'rail' ? 'palings not included in BOM' : '']
       .filter(Boolean);
   return { len: total, height: H + (hr.on ? hr.t : 0), fenceHeight: H, flipped: flip,
-           notIncluded, bays, gateOnly: segsOf(pl).every(([, a]) => !!a.gateAfter),
+           notIncluded, bays, runs, gateOnly: segsOf(pl).every(([, a]) => !!a.gateAfter),
            stations: [...new Set(stations.map(x => Math.round(x*1e4)/1e4))].sort((p,q) => p-q),
            parts, mat };
 }
@@ -4963,11 +4974,16 @@ function paintSheetHeader(pg){
   ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`;
   ctx.fillStyle = SHEET_INK; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   ctx.fillText(`${kind} — ${fenceName(state.polys[pg.i], pg.i)}  1:${pg.den}`, H.x, H.y);
-  if (pg.ev && pg.ev.notIncluded.length){
+  const notes = pg.ev ? [
+    ...(pg.ev.notIncluded.length ? ['Dashed: ' + pg.ev.notIncluded.join(' · ')] : []),
+    ...(pg.kind === 'elevation' && sheetStockJointSummary(pg.ev, state.unit)
+      ? [sheetStockJointSummary(pg.ev, state.unit)] : []),
+  ] : [];
+  if (notes.length){
     const note = P2S(h.x, h.y+4.4);
     ctx.font = `${(ANNOT_MM*view.s*0.9).toFixed(2)}px ${PAPER_DIM.font}`;
     ctx.fillStyle = SHEET_LINE;
-    ctx.fillText('Dashed: ' + pg.ev.notIncluded.join(' · '), note.x, note.y);
+    ctx.fillText(notes.join(' · '), note.x, note.y);
   }
   ctx.restore();
 }
@@ -5213,6 +5229,52 @@ function sheetRect(x, y, w, h, fill, off){                    // paper mm rectan
   ctx.beginPath(); ctx.rect(a.x, b.y, b.x-a.x, a.y-b.y);
   ctx.fill(); ctx.stroke();
   ctx.restore();
+}
+// Purchased boards are laid from the run's authored start. A bend or gate starts a new
+// straight run: stock cannot turn a corner or bridge an opening. Keeping the direction is
+// important when the elevation is flipped to match the plan; a 5.4 m first board on a
+// 10.5 m run must not silently become a 5.1 m first board on the drawing.
+function stockJointStations(start, end, stockLength){
+  const length=Math.abs(end-start), direction=end>=start ? 1 : -1, out=[];
+  if (!(stockLength>0)) return out;
+  for (let distance=stockLength; distance<length-1e-6; distance+=stockLength)
+    out.push(start+direction*distance);
+  return out;
+}
+function sheetStockJointSummary(ev, u){
+  const notes=[];
+  if (ev.mat.style==='rail' && effectiveRailYs(ev.mat).length &&
+      ev.runs.some(run=>!run.gate && stockJointStations(run.start,run.end,railLengthOf(ev.mat)).length))
+    notes.push(`rail stock joints every ${fmtLen(railLengthOf(ev.mat),u)}`);
+  if (hrOf(ev.mat).on && ev.runs.some(run=>!run.gate && run.handrailStart!=null &&
+      stockJointStations(run.handrailStart,run.handrailEnd,handrailLengthOf(ev.mat)).length))
+    notes.push(`handrail stock joints every ${fmtLen(handrailLengthOf(ev.mat),u)}`);
+  return notes.length ? 'Dotted: ' + notes.join(' · ') : '';
+}
+function paintElevationStockJoints(ev, xAt, base, mm){
+  const marks=[];
+  if (ev.mat.style==='rail'){
+    const ys=effectiveRailYs(ev.mat), height=ev.mat.railW;
+    for (const run of ev.runs) if (!run.gate)
+      for (const x of stockJointStations(run.start,run.end,railLengthOf(ev.mat)))
+        for (const centre of ys) marks.push({x,y0:centre-height/2,y1:centre+height/2});
+  }
+  const hr=hrOf(ev.mat);
+  if (hr.on) for (const run of ev.runs) if (!run.gate && run.handrailStart!=null)
+    for (const x of stockJointStations(run.handrailStart,run.handrailEnd,handrailLengthOf(ev.mat)))
+      marks.push({x,y0:ev.fenceHeight,y1:ev.fenceHeight+hr.t});
+  if (!marks.length) return;
+  const extension=1.4*view.s;
+  ctx.save();
+  ctx.strokeStyle=SHEET_INK; ctx.lineWidth=Math.max(1,0.3*view.s);
+  ctx.setLineDash([0.7*view.s,1.05*view.s]);
+  ctx.beginPath();
+  for (const mark of marks){
+    const low=P2S(xAt(mark.x),base-mm(mark.y0));
+    const high=P2S(xAt(mark.x),base-mm(mark.y1));
+    ctx.moveTo(low.x,low.y+extension); ctx.lineTo(high.x,high.y-extension);
+  }
+  ctx.stroke(); ctx.restore();
 }
 function sheetPlanPostUnderHandrail(p, plan){
   if (!hrOf(plan.mat).on) return false;
@@ -5574,6 +5636,9 @@ function paintElevation(bl, u, k){
   // The handrail sits on the post tops, so it is the final continuous member in elevation.
   for (const p of ev.parts.filter(part => part.k === 'cap'))
     sheetRect(xAt(p.x), base - mm(p.y), xAt(p.x+p.w)-xAt(p.x), mm(p.h), fill.cap, p.off);
+  // Show where sequential purchased lengths actually finish. A join landing between the
+  // posts remains visible through the member instead of being hidden by the quantity total.
+  paintElevationStockJoints(ev,xAt,base,mm);
   const ground = P2S(xAt(0) - 3, base), groundEnd = P2S(xAt(ev.len) + 3, base);
   ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(ground.x, ground.y); ctx.lineTo(groundEnd.x, groundEnd.y); ctx.stroke();
