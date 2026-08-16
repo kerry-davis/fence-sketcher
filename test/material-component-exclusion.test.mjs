@@ -10,7 +10,7 @@ test('materials panel exposes separate BOM controls for rails and palings', () =
   assert.match(html, /id="bomPalings" checked> Include palings in BOM/);
   assert.match(html, /excludeRails:!!pl\.excludeRails/);
   assert.match(html, /excludePalings:!!pl\.excludePalings/);
-  assert.match(html, /const fenceRails = pl\.excludeRails \? 0 : pPanels \* mat\.rails/);
+  assert.match(html, /const fenceRails = pl\.excludeRails \? 0 : pPanels \* railsPerPanel/);
   assert.match(html, /const fencePalings = !pl\.excludePalings &&/);
   assert.match(html, /function gateMaterialQuantities\(L, mat, pl\)/);
 });

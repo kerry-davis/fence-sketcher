@@ -26,7 +26,9 @@ class MemoryKV {
 const snapshot = {
   v: 2,
   unit: 'm',
-  polys: [{ pts: [{ x: 0, y: 0 }, { x: 2, y: 0 }], closed: false }],
+  polys: [{ pts: [{ x: 0, y: 0 }, {
+    x: 2, y: 0, postOrient:'custom', postAngle:Math.PI/6,
+  }], closed: false }],
   builds: [],
   mat: { style: 'rail', spacing: 2.4, rails: 2 },
   snapGrid: true,
@@ -90,6 +92,8 @@ test('share lifecycle creates, reads, updates, and revokes a snapshot', async ()
   assert.equal(shared.title, 'Back fence');
   assert.equal(shared.snapshot.snapGrid, undefined);
   assert.equal(shared.snapshot.polys[0].pts[1].x, 2);
+  assert.equal(shared.snapshot.polys[0].pts[1].postOrient, 'custom');
+  assert.equal(shared.snapshot.polys[0].pts[1].postAngle, Math.PI/6);
   assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow, noarchive');
 
   const changed = structuredClone(snapshot);

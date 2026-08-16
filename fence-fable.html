@@ -702,10 +702,13 @@
             <button data-s="rail">Rails only</button>
           </div>
         </div>
-        <div class="row onlyRail" title="Left and right are viewed from the first post toward the last post.">
+        <div class="row onlyRail" title="Left and right are viewed from the first post toward the last post. Between-post rails finish against the actual post faces.">
           <span>Rail side</span>
           <span><select id="iRailSide">
             <option value="left">Left of line</option><option value="right">Right of line</option>
+            <option value="inside-left">Between posts — left</option>
+            <option value="inside-middle">Between posts — centre</option>
+            <option value="inside-right">Between posts — right</option>
           </select></span>
         </div>
         <h3 class="subhead">Posts</h3>
@@ -720,6 +723,19 @@
               <option value="post:square">Square</option><option value="post:round">Round</option>
             </optgroup>
           </select></span></div>
+        <div class="row" id="postOrientWrap" style="display:none"
+             title="Sets the selected rectangular post in plan. Automatic keeps the first connected fence leg used by older drawings.">
+          <span>Post orientation</span>
+          <span><select id="iPostOrient">
+            <option value="auto">Automatic</option>
+            <option value="previous">Previous fence leg</option>
+            <option value="next">Next fence leg</option>
+            <option value="bisect">Bisect corner</option>
+            <option value="custom">Custom angle</option>
+          </select></span></div>
+        <div class="row" id="postAngleWrap" style="display:none"
+             title="Plan angle measured clockwise from the horizontal; equivalent angles repeat every 180 degrees.">
+          <span>Post angle</span><span><input id="iPostAngle" inputmode="decimal"> <span class="unit">°</span></span></div>
         <div class="row sizePair" title="Square post width × depth, or round post diameter. A 100x100 post is width 100, depth 100."><span>Post</span><span><span class="times" id="postSizePrefix" style="display:none">Ø</span><input id="iPostSize" inputmode="decimal" title="Post width"> <b class="times" id="postTimes">×</b> <input id="iPostSizeD" inputmode="decimal" title="Post depth"> <span class="unit" id="uPostSize">mm</span></span></div>
         <div class="row" title="Posts at the ends of a run. Auto skips an end already posted by another fence. One end lets you choose the physical end.">
           <span>End posts <span style="opacity:.5">ⓘ</span></span>
@@ -1026,6 +1042,8 @@ function parseSmall(s, unit){
    State. Fence = array of polylines. Each point may carry:
      gateAfter — the segment leaving this point is a gate
      lockAfter — that segment's length was typed and is locked (metres)
+     postOrient — previous | next | bisect | custom for a rectangular physical post
+     postAngle — custom post angle in radians, clockwise from plan horizontal
    Polyline flags: closed (loop), done (drawing finished, don't extend).
    ===================================================================== */
 let state = {
@@ -1055,6 +1073,8 @@ let showAllTotals = false;
 let dimTool = null;                           // null | { a: ref | null }
 let dimHover = null;                          // reference under the cursor, highlighted while armed
 let dimHits = [];                             // value label boxes, captured at paint time
+let sheetPostHits = [];                       // selectable vertex posts painted on live Sheet pages
+let collectSheetPostHits = false;             // false while PDF pages paint offscreen
 let dimEdit = null;                           // { kind:'dim'|'seg', p, i } while the input is open
 let undoStack = [], redoStack = [];
 
@@ -1312,8 +1332,48 @@ function wallBands(ha, hb, cuts){
 
 // Handrail cross-section, with defaults for saves made before handrails existed.
 const hrOf = mat => ({ on: !!mat.handrail, w: mat.hrW ?? DEF.m.hrW, t: mat.hrT ?? DEF.m.hrT });
-const railSideOf = mat => mat && mat.railSide === 'right' ? 'right' : 'left';
-const railSideLabel = mat => railSideOf(mat) === 'right' ? 'Right of line' : 'Left of line';
+const RAIL_POSITIONS = new Set(['left','right','inside-left','inside-middle','inside-right']);
+const railPositionOf = mat => mat && RAIL_POSITIONS.has(mat.railSide) ? mat.railSide : 'left';
+// Only a rails-only fence fits its rails between the posts. A paling fence's backing rails
+// stay on the post face, even when an inside position is left over from a style switch —
+// the Rail side control is hidden for palings, so that stale value is never visible.
+const railBetweenPosts = mat => !!mat && mat.style === 'rail' &&
+  railPositionOf(mat).startsWith('inside-');
+const railSideOf = mat => railPositionOf(mat) === 'right' ? 'right' : 'left';
+const railSideLabel = mat => ({
+  left:'Left of line', right:'Right of line',
+  'inside-left':'Between posts — left',
+  'inside-middle':'Between posts — centre',
+  'inside-right':'Between posts — right',
+})[railPositionOf(mat)];
+// halfAcross is how far the post the rail actually lands on reaches across the run. It
+// defaults to the fence's own post section; callers that know the physical post pass its
+// own, because a per-vertex shape or orientation override moves the face the rail sits on.
+const railLateralOffset = (mat, halfAcross =
+    (postShapeOf(mat) === 'round' ? postSizeOf(mat) : postTOf(mat))/2) => {
+  const room = halfAcross - railTOf(mat)/2;
+  return railPositionOf(mat) === 'inside-left' ? room
+       : railPositionOf(mat) === 'inside-right' ? -room : 0;
+};
+// One face-mounted rail is one straight construction plane for the whole fence leg. A
+// re-oriented corner post rotates over that plane; it cannot shift the rail sideways without
+// pulling the same rail off the ordinary post at the other end of its bay.
+const faceMountedRailOffset = mat =>
+  (postShapeOf(mat) === 'round' ? postSizeOf(mat) : postTOf(mat))/2 + railTOf(mat)/2;
+// Gate hardware is independent of fence rails. Old drawings used railSide implicitly, so
+// migration records that physical placement on the gate segment before rail position changes.
+const legacyGateSide = mat => mat && mat.style === 'rail' && mat.railSide === 'right'
+  ? 'right' : 'left';
+const gateSideOf = (segmentStart, mat) => segmentStart && segmentStart.gateSideAfter === 'right'
+  ? 'right' : segmentStart && segmentStart.gateSideAfter === 'left' ? 'left' : legacyGateSide(mat);
+function migrateGateSides(polys, defMat){
+  for (const pl of polys || []){
+    const side = legacyGateSide(pl.mat || defMat);
+    for (const [,a] of segsOf(pl))
+      if (a.gateAfter && a.gateSideAfter !== 'left' && a.gateSideAfter !== 'right')
+        a.gateSideAfter = side;
+  }
+}
 
 // How many of an open run's two end posts to count. 'auto' = count both, except an end that
 // already sits on an earlier fence (that junction post is counted once, by the earlier run).
@@ -1486,6 +1546,8 @@ function calcMaterials(polys, defMat){
       }  // gate: no panels or fence length, but its leaf has materials
       else {
         const n = Math.max(1, Math.ceil(L/spacing - 1e-9)), panelLengths = [];
+        const segmentPosts = postsAlong(a, b, spacing, false);
+        const between = typeof railBetweenPosts === 'function' && railBetweenPosts(mat);
         for (let k = 0; k < n-1; k++) panelLengths.push(spacing);
         panelLengths.push(Math.max(0, L - spacing*(n-1)));
         const startOverhang = !pl.closed && i === 0 && ends.start ? postSizeOf(mat)/2 : 0;
@@ -1494,9 +1556,19 @@ function calcMaterials(polys, defMat){
           const panelLength = panelLengths[k];
           const panelStartOverhang = k === 0 ? startOverhang : 0;
           const panelEndOverhang = k === n-1 ? endOverhang : 0;
-          const cut = {length:panelLength + panelStartOverhang + panelEndOverhang, centres:panelLength};
+          const startPost = pl.closed || !(i === 0 && k === 0 && !ends.start);
+          const endPost = pl.closed || !(i === pl.pts.length-2 && k === n-1 && !ends.end);
+          const geometry = between ? betweenRailGeometry(polys, mat,
+            segmentPosts[k], segmentPosts[k+1],
+            {startPost:railPostStands(polys,startPost,segmentPosts[k]),
+             endPost:railPostStands(polys,endPost,segmentPosts[k+1])}) : null;
+          const cut = geometry
+            ? {length:geometry.cutLength, centres:panelLength, fit:'between',
+               startMitre:geometry.startMitre, endMitre:geometry.endMitre}
+            : {length:panelLength + panelStartOverhang + panelEndOverhang, centres:panelLength};
           pRailCuts.push(cut);
-          if (mat.handrail) pHandrailCuts.push({length:cut.length, span:cut.centres});
+          if (mat.handrail) pHandrailCuts.push({
+            length:panelLength + panelStartOverhang + panelEndOverhang, span:panelLength});
         }
         pPanels += n; pPosts += n; len += L;
       }
@@ -1514,7 +1586,13 @@ function calcMaterials(polys, defMat){
     // rail-style fence (or paling width 0) has no boards to count
     const fencePalings = !pl.excludePalings && mat.style !== 'rail' && mat.paling > 0.001
       ? Math.ceil(len / pw) : 0;
-    const fenceRails = pl.excludeRails ? 0 : pPanels * mat.rails;
+    // a rail the bottom gap or rail count pushes past the fence height is built by nobody,
+    // so nobody buys it either — count the rails the views actually draw. A paling fence's
+    // backing rails are not the ones railYs lays out, so they still go by the count.
+    const railsPerPanel = mat.style === 'rail' && typeof effectiveRailYs === 'function' &&
+      Number.isFinite(mat.railW + mat.railGap)   // no layout to filter by: the count stands
+      ? effectiveRailYs(mat).length : mat.rails;
+    const fenceRails = pl.excludeRails ? 0 : pPanels * railsPerPanel;
     const pRails = pGateRails + fenceRails, pPalings = pGatePalings + fencePalings;
     // handrail runs the length of the fence itself — a linear quantity, not a piece count
     const pHandrail = pHandrailCuts.reduce((sum,cut) => sum + cut.length, 0);
@@ -1964,17 +2042,26 @@ function setPointDim(polys, p, i, ref, len){
 // each segment's START point, so they must shift to the segment's new start when reversed.
 function reversePoly(pl){
   const n = pl.pts.length;
-  const flags = pl.pts.map(q => ({ g: q.gateAfter, l: q.lockAfter, o: q.lockOff }));
+  const flags = pl.pts.map(q => ({ g: q.gateAfter, s:q.gateSideAfter,
+                                   l: q.lockAfter, o: q.lockOff }));
   pl.pts.reverse();
   pl.pts.forEach((q, k) => {
-    const src = k < n-1 ? flags[n-2-k] : { g: undefined, l: undefined, o: undefined };
+    const src = k < n-1 ? flags[n-2-k]
+                        : { g: undefined, s:undefined, l: undefined, o: undefined };
     q.gateAfter = src.g; q.lockAfter = src.l == null ? null : src.l;
+    if (src.s === 'left') q.gateSideAfter = 'right';
+    else if (src.s === 'right') q.gateSideAfter = 'left';
+    else delete q.gateSideAfter;
     // a placement is measured off the segment's direction, which the reverse turns around
     if (src.o == null) delete q.lockOff; else q.lockOff = -src.o;
     if (q.ang){                                  // the legs swap ends with the run, and the
       q.ang.fwd = !q.ang.fwd;                    // swing recorded against them turns with them
       if (q.ang.d) q.ang.d = -q.ang.d;
     }
+    // Reversal is a bookkeeping change, not a construction change: keep a post that followed
+    // a physical leg on that same leg after Previous and Next exchange names.
+    if (q.postOrient === 'previous') q.postOrient = 'next';
+    else if (q.postOrient === 'next') q.postOrient = 'previous';
   });
 }
 function translatePolyline(pl, start, dx, dy){
@@ -3042,6 +3129,9 @@ function deleteSelected(){
   // 3D is for looking: a label tap there selects a fence to inspect, and the canvas ✕ is
   // hidden, so the keyboard must not be the one path that quietly deletes it.
   if (mode3d) return;
+  // The sheet is paper: it auto-selects the fence you scrolled to, so a keystroke there would
+  // delete something the reader never picked.
+  if (modeSheet) return;
   if (!sel) return;
   pushUndo();
   if (sel.t==='pt')  deletePoint(state.polys, sel.p, sel.i);
@@ -3559,7 +3649,14 @@ function doPaint(){
   raf = 0;
   ctx.clearRect(0,0,cw,ch);
   dimHits = [];                                 // rebuilt as the dimensions draw
-  if (modeSheet){ fdel.style.display = fswap.style.display = 'none'; paintSheet(); return; }
+  sheetPostHits = [];                           // rebuilt only from the live sheet canvas
+  if (modeSheet){
+    syncVisibleSheetFence();
+    fdel.style.display = fswap.style.display = 'none';
+    collectSheetPostHits = true;
+    try { paintSheet(); } finally { collectSheetPostHits = false; }
+    return;
+  }
   if (mode3d){ fdel.style.display = fswap.style.display = 'none'; paint3d(); return; }
 
   // --- grid: spacing follows zoom, keeping squares readable without manual controls ---
@@ -3874,16 +3971,108 @@ function railYs(mat){
     ys.push((mat.botOff||0) + k*d + mat.railW/2);
   return ys;
 }
+// The rails the fence actually gets: a bottom gap or rail count that pushes a rail past the
+// fence height leaves it built by nobody, so no view may draw or set one out either.
+// declared, not assigned: calcMaterials runs before this line during the self-test
+function effectiveRailYs(mat){
+  return railYs(mat).filter(ry => ry + mat.railW/2 <= fenceHeightOf(mat) + 1e-6);
+}
 /* ---- developed elevation: the fence unrolled onto a vertical plane ----
    A corner is a fold, not a break, so the runs lay out end to end at true length — the view a
    builder sets out from. Metres in, metres out: x along the run from its start, y up from the
    ground. Everything comes from the same helpers the plan, the 3D scene and the materials use,
    so an elevation cannot show a fence nobody else agrees with. */
+/* ---- corner joinery: the cuts the rails need at each fold ----
+   Face-mounted rails retain their rail-to-rail corner mitre. Between-post rails instead
+   terminate independently against the actual corner-post footprint: square when the face is
+   perpendicular to the run, mitred when it is angled. A gate is a hard break, so its side of
+   the corner contributes no fence rail. */
+const CORNER_MAX_DEG = 170;
+function fenceCorners(polys, idx){
+  const pl = polys[idx], mat = pl.mat || state.mat;
+  const pts = pl.pts, n = pts.length, out = [];
+  const between = typeof railBetweenPosts === 'function' && railBetweenPosts(mat);
+  const ends = typeof materialPostEndFlags === 'function'
+    ? materialPostEndFlags(polys,idx,mat) : {start:true,end:true};
+  const segGate = i => !!pts[(i + n) % n].gateAfter;      // seg i runs pts[i] -> pts[i+1]
+  const faceRailOff = typeof faceMountedRailOffset === 'function'
+    ? faceMountedRailOffset(mat) : postTOf(mat)/2 + railTOf(mat)/2;
+  const count = pl.closed ? n : n - 2;
+  for (let j = 0; j < count; j++){
+    const k = pl.closed ? j : j + 1;                      // vertex between seg k-1 and seg k
+    const V = pts[k], A = pts[(k - 1 + n) % n], B = pts[(k + 1) % n];
+    const inGate=segGate(k-1), outGate=segGate(k);
+    if ((!between && (inGate || outGate)) || (between && inGate && outGate)) continue;
+    const d1 = norm2({ x: V.x - A.x, y: V.y - A.y });     // into the corner
+    const d2 = norm2({ x: B.x - V.x, y: B.y - V.y });     // out of it
+    if (!d1 || !d2) continue;
+    const dot = Math.max(-1, Math.min(1, -d1.x*d2.x - d1.y*d2.y));
+    const theta = Math.acos(dot) * 180/Math.PI;           // interior angle, 0..180
+    if (theta > CORNER_MAX_DEG) continue;
+    // each leg runs to the nearest post of its own bay — the same posts the model places —
+    // so the detail shows the corner in its context, not two floating stubs
+    const spacing = Math.max(0.1, mat.spacing);
+    const inPosts = inGate ? [] : postsAlong(A, V, spacing, false);
+    const outPosts = outGate ? [] : postsAlong(V, B, spacing, false);
+    const pIn = inGate ? null : inPosts[inPosts.length - 2];
+    const pOut = outGate ? null : outPosts[1];
+    // a leg shorter than the spacing runs to the fence's own end, which the end rule may
+    // leave unposted — the detail then cuts and draws that leg as the model builds it.
+    // Ownership only says who stands a shared junction post, so ask whether one is built.
+    const stands = (owned,point) => typeof railPostStands === 'function'
+      ? railPostStands(polys,owned,point) : owned;
+    const pInPost = !!pIn && (k > 1 || inPosts.length > 2 || stands(ends.start,pIn));
+    const pOutPost = !!pOut && (k < n-2 || outPosts.length > 2 || stands(ends.end,pOut));
+    out.push({ v: V, polyIndex:idx, pointIndex:k, d1, d2, theta, mitre: (180 - theta)/2,
+               pIn,pOut,pInPost,pOutPost,inGate,outGate,between,
+               // the detail obeys the same BOM exclusions as the elevation: excluded work is
+               // still built, so it is still drawn — as reference
+               postOff: !!pl.excludeMaterials,
+               railOff: !!(pl.excludeMaterials || pl.excludeRails),
+               position:typeof railPositionOf === 'function' ? railPositionOf(mat) : railSideOf(mat),
+               mat,polys,
+               legIn: pIn ? segLen(pIn,V) : 0,
+               legOut: pOut ? segLen(V,pOut) : 0,
+               side: railSideOf(mat), railT: railTOf(mat),
+               offIn: faceRailOff, offOut: faceRailOff, postW: postSizeOf(mat),
+               postT: postTOf(mat),
+               postShape:typeof postShapeAt === 'function' ? postShapeAt(polys,V,mat) : 'square',
+               postAngle:typeof postAngleAt === 'function'
+                 ? postAngleAt(polys,V,Math.atan2(d1.y,d1.x)) : Math.atan2(d1.y,d1.x) });
+  }
+  return out;
+}
+const norm2 = d => { const L = Math.hypot(d.x, d.y); return L > 1e-9 ? { x:d.x/L, y:d.y/L } : null; };
+const sideNormal = (d, side) => side === 'right' ? { x:d.y, y:-d.x } : { x:-d.y, y:d.x };
+function lineCross(p, d, q, e){
+  const den = d.x*e.y - d.y*e.x;
+  if (Math.abs(den) < 1e-12) return null;
+  const t = ((q.x - p.x)*e.y - (q.y - p.y)*e.x) / den;
+  return { x: p.x + d.x*t, y: p.y + d.y*t };
+}
+// The two face-mounted footprints at a fold. This is construction geometry, not detail-view
+// decoration: the isolated plan and the fabrication corner must show these exact same cuts.
+function faceMountedCornerGeometry(c){
+  const move=(q,d,t)=>({x:q.x+d.x*t,y:q.y+d.y*t});
+  const n1=sideNormal(c.d1,c.side),n2=sideNormal(c.d2,c.side);
+  const X=lineCross(move(c.v,n1,c.offIn),c.d1,move(c.v,n2,c.offOut),c.d2);
+  if (!X) return null;
+  const seam=norm2({x:-c.d1.x+c.d2.x,y:-c.d1.y+c.d2.y}) || sideNormal(c.d1,'left');
+  const rail=(dir,nrm,off,back)=>{
+    const eA=move(c.v,nrm,off-c.railT/2),eB=move(c.v,nrm,off+c.railT/2);
+    const cutA=lineCross(eA,dir,X,seam),cutB=lineCross(eB,dir,X,seam);
+    if (!cutA || !cutB) return null;
+    return {polygon:[move(eA,dir,-back),cutA,cutB,move(eB,dir,-back)],cutA,cutB};
+  };
+  return {X,seam,n1,n2,
+          incoming:rail(c.d1,n1,c.offIn,c.legIn),
+          outgoing:rail({x:-c.d2.x,y:-c.d2.y},n2,c.offOut,c.legOut)};
+}
 function elevationParts(polys, idx){
   const pl = polys[idx], mat = pl.mat || state.mat;
   const H = fenceHeightOf(mat), hr = hrOf(mat), spacing = Math.max(0.1, mat.spacing);
   const ends = materialPostEndFlags(polys, idx, mat);
-  const postW = postSizeOf(mat), parts = [], stations = [], bays = [];
+  const postW = postSizeOf(mat), parts = [], stations = [], bays = [], runs = [];
   /* The BOM exclusions are part of the drawing: a rail nobody is supplying still gets built,
      so it is drawn — but drawn as reference, and the page says so. Omitting it silently would
      make the sheet disagree with the take-off it was priced from. */
@@ -3898,6 +4087,8 @@ function elevationParts(polys, idx){
   for (const [i, a, b] of segsOf(pl)){
     const L = segLen(a, b);
     total = x0 + L;
+    const run = { start:x0, end:x0+L, gate:!!a.gateAfter };
+    runs.push(run);
     if (i > 0) parts.push({ k:'corner', x:x0 });
     if (a.gateAfter){
       const leaf = gateLeafBuild(H, mat), inset = gateLeafInset(mat), w = gateLeafLength(L, mat);
@@ -3907,7 +4098,8 @@ function elevationParts(polys, idx){
       stations.push(x0, x0+L);
       bays.push({ a:x0, b:x0+L, gate:true });        // the opening is the bay here
     } else {
-      const posts = postsAlong(a, b, spacing, false).map(q => x0 + segLen(a, q));
+      const segmentPosts = postsAlong(a, b, spacing, false);
+      const posts = segmentPosts.map(q => x0 + segLen(a, q));
       stations.push(...posts);
       for (let k = 0; k < posts.length-1; k++)
         bays.push({ a:posts[k], b:posts[k+1], gate:false });
@@ -3915,7 +4107,19 @@ function elevationParts(polys, idx){
         for (let k = 0; k < posts.length-1; k++)
           for (const ry of railYs(mat)){
             if (ry + mat.railW/2 > H + 1e-6) break;
-            parts.push({ k:'rail', x:posts[k], w:posts[k+1]-posts[k],
+            const between = typeof railBetweenPosts === 'function' && railBetweenPosts(mat);
+            const startPost = pl.closed || !(i === 0 && k === 0 && !ends.start);
+            const endPost = pl.closed || !(i === pl.pts.length-2 && k === posts.length-2 && !ends.end);
+            const geometry = between ? betweenRailGeometry(polys,mat,
+              segmentPosts[k],segmentPosts[k+1],
+              {startPost:railPostStands(polys,startPost,segmentPosts[k]),
+               endPost:railPostStands(polys,endPost,segmentPosts[k+1])}) : null;
+            parts.push({ k:'rail',
+                         x:geometry ? posts[k]+geometry.axialStart : posts[k],
+                         w:geometry ? geometry.axialEnd-geometry.axialStart : posts[k+1]-posts[k],
+                         cutLength:geometry ? geometry.cutLength : posts[k+1]-posts[k],
+                         startMitre:geometry && geometry.startMitre,
+                         endMitre:geometry && geometry.endMitre,
                          y:ry - mat.railW/2, h:mat.railW, off:omitted.rail });
           }
       else if (mat.paling > 0.001){
@@ -3927,6 +4131,8 @@ function elevationParts(polys, idx){
       if (hr.on){
         const startOverhang = !pl.closed && i === 0 && ends.start ? postW/2 : 0;
         const endOverhang = !pl.closed && i === pl.pts.length-2 && ends.end ? postW/2 : 0;
+        run.handrailStart = x0-startOverhang;
+        run.handrailEnd = x0+L+endOverhang;
         parts.push({ k:'cap', x:x0-startOverhang, w:L+startOverhang+endOverhang,
                      y:H, h:hr.t, off:omitted.cap });
       }
@@ -3953,13 +4159,20 @@ function elevationParts(polys, idx){
     for (const q of parts) q.x = total - q.x - (q.k === 'corner' ? 0 : q.w);
     for (let n = 0; n < stations.length; n++) stations[n] = total - stations[n];
     for (const q of bays){ const a2 = q.a; q.a = total - q.b; q.b = total - a2; }
+    for (const q of runs){
+      q.start = total-q.start; q.end = total-q.end;
+      if (q.handrailStart != null){
+        q.handrailStart = total-q.handrailStart;
+        q.handrailEnd = total-q.handrailEnd;
+      }
+    }
   }
   const notIncluded = pl.excludeMaterials ? ['fence not included in BOM']
     : [pl.excludeRails ? 'rails not included in BOM' : '',
        pl.excludePalings && mat.style !== 'rail' ? 'palings not included in BOM' : '']
       .filter(Boolean);
   return { len: total, height: H + (hr.on ? hr.t : 0), fenceHeight: H, flipped: flip,
-           notIncluded, bays, gateOnly: segsOf(pl).every(([, a]) => !!a.gateAfter),
+           notIncluded, bays, runs, gateOnly: segsOf(pl).every(([, a]) => !!a.gateAfter),
            stations: [...new Set(stations.map(x => Math.round(x*1e4)/1e4))].sort((p,q) => p-q),
            parts, mat };
 }
@@ -3976,6 +4189,209 @@ function railBayBounds(a, b, startOverhang, endOverhang){
   const p = { x:a.x-ux*startOverhang, y:a.y-uy*startOverhang };
   const q = { x:b.x+ux*endOverhang, y:b.y+uy*endOverhang };
   return { a:p, b:q, len:L+startOverhang+endOverhang };
+}
+// Resolve one physical rectangular post once, then let plan, Sheet, 3D and rail cuts consume
+// that angle. Automatic retains the legacy first-segment rule. Explicit settings live on one
+// coincident vertex, but are found from any run that shares the physical post.
+function postAngleAt(polys, point, fallback=0){
+  const record=postOrientationAt(polys,point);
+  if (record){
+    if (record.mode==='custom' && Number.isFinite(record.point.postAngle))
+      return normalPostAngle(record.point.postAngle);
+    const legs=postOrientationLegs(polys,record);
+    if (record.mode==='previous') return normalPostAngle(legs.previous ?? legs.next ?? fallback);
+    if (record.mode==='next') return normalPostAngle(legs.next ?? legs.previous ?? fallback);
+    if (record.mode==='bisect'){
+      if (legs.previous != null && legs.next != null)
+        return bisectPostAngles(legs.previous,legs.next);
+      return normalPostAngle(legs.previous ?? legs.next ?? fallback);
+    }
+  }
+  for (const pl of polys || []) for (const [,a,b] of segsOf(pl)){
+    if (samePhysicalPost(a,point) || samePhysicalPost(b,point))
+      return Math.atan2(b.y-a.y,b.x-a.x);
+  }
+  return fallback;
+}
+const POST_ORIENTATIONS=new Set(['previous','next','bisect','custom']);
+const samePhysicalPost=(a,b)=>!!a && !!b &&
+  Math.hypot(a.x-b.x,a.y-b.y)<FENCE_JOIN_TOL;
+function normalPostAngle(angle){
+  let a=angle%Math.PI;
+  if (a<0) a+=Math.PI;
+  return a;
+}
+function postOrientationAt(polys,point){
+  let found=null;
+  for (const pl of polys || []) pl.pts.forEach((q,i)=>{
+    if (!found && samePhysicalPost(q,point) && POST_ORIENTATIONS.has(q.postOrient))
+      found={mode:q.postOrient,point:q,pl,i};
+  });
+  return found;
+}
+function incidentPostAngles(polys,point){
+  const angles=[];
+  for (const pl of polys || []) for (const [,a,b] of segsOf(pl)){
+    if (segLen(a,b)<1e-9) continue;
+    if (samePhysicalPost(a,point) || samePhysicalPost(b,point)){
+      const angle=normalPostAngle(Math.atan2(b.y-a.y,b.x-a.x));
+      if (!angles.some(old=>Math.abs(postAxisDelta(old,angle))<1e-7)) angles.push(angle);
+    }
+  }
+  return angles;
+}
+function postAxisDelta(from,to){
+  let d=normalPostAngle(to)-normalPostAngle(from);
+  if (d>Math.PI/2) d-=Math.PI;
+  if (d<=-Math.PI/2) d+=Math.PI;
+  return d;
+}
+function bisectPostAngles(previous,next){
+  return normalPostAngle(previous+postAxisDelta(previous,next)/2);
+}
+function postOrientationLegs(polys,record){
+  const {pl,i,point}=record,n=pl.pts.length;
+  let previous=null,next=null;
+  if (i>0 || pl.closed){
+    const q=pl.pts[(i-1+n)%n];
+    if (segLen(q,point)>1e-9) previous=Math.atan2(point.y-q.y,point.x-q.x);
+  }
+  if (i<n-1 || pl.closed){
+    const q=pl.pts[(i+1)%n];
+    if (segLen(point,q)>1e-9) next=Math.atan2(q.y-point.y,q.x-point.x);
+  }
+  // At a junction made from separate runs, the owning endpoint supplies one leg and the
+  // other run supplies the missing one. This keeps Previous/Next useful at shared endpoints.
+  for (const angle of incidentPostAngles(polys,point)){
+    if (previous==null && (next==null || Math.abs(postAxisDelta(next,angle))>1e-7)){
+      previous=angle; continue;
+    }
+    if (next==null && (previous==null || Math.abs(postAxisDelta(previous,angle))>1e-7))
+      next=angle;
+  }
+  return {previous,next};
+}
+function clearPostOrientationAt(polys,point){
+  for (const pl of polys || []) for (const q of pl.pts)
+    if (samePhysicalPost(q,point)){
+      delete q.postOrient;
+      delete q.postAngle;
+    }
+}
+function setPostOrientationAt(polys,point,mode,angle=0){
+  clearPostOrientationAt(polys,point);
+  if (!POST_ORIENTATIONS.has(mode)) return;
+  point.postOrient=mode;
+  if (mode==='custom') point.postAngle=normalPostAngle(angle);
+}
+// Which run stands the physical post at a point, and therefore whose section is on site.
+// Ownership follows postEndFlags — an auto junction hands the shared post to the earlier run
+// — so the first run standing one there owns it, which is the post the take-off bought and
+// the post build3 draws, whatever the joined runs' heights. Null where no post stands.
+// ponytail: vertices only, which is where runs join; an intermediate post is always its own
+// run's, so rails never have to ask about one.
+function standingPostAt(polys, point){
+  if (typeof postEndFlags !== 'function') return null;
+  let found = null;
+  (polys || []).forEach((pl,i) => {
+    if (found) return;
+    const last = pl.pts.length-1;
+    const stands = pl.pts.some((q,k) => samePhysicalPost(q,point) &&
+      (pl.closed || (k > 0 && k < last) ||
+       postEndFlags(polys,i,pl.mat || state.mat)[k === 0 ? 'start' : 'end']));
+    if (!stands) return;
+    const mat = pl.mat || state.mat;
+    found = { mat, H: fenceHeightOf(mat) };
+  });
+  return found;
+}
+// Ownership only says which run draws a shared junction post. The rail still butts against
+// the timber the other run stands there, so ask whether one is built at all.
+function railPostStands(polys, owned, point){
+  return owned || !!standingPostAt(polys, point);
+}
+// Section of the post a rail lands on: the physical post's where one stands, otherwise the
+// rail's own fence. A rail cut against its own postT misses a joined run's different post.
+const postSectionOf = (polys, point, mat) => {
+  const post = standingPostAt(polys, point);
+  return post ? post.mat : mat;
+};
+function railPostExit(polys, mat, centre, lineOrigin, ray, fallbackAngle, hasPost=true){
+  if (!hasPost) return {x:lineOrigin.x,y:lineOrigin.y,normal:{x:ray.x,y:ray.y},distance:0};
+  mat = postSectionOf(polys,centre,mat);         // the post built here, not this run's own
+  const shape = postShapeAt(polys,centre,mat);
+  if (shape === 'round'){
+    const distance = postSizeOf(mat)/2;                    // tangent-face butt, not a scribe
+    return {x:lineOrigin.x+ray.x*distance,y:lineOrigin.y+ray.y*distance,
+            normal:{x:ray.x,y:ray.y},distance};
+  }
+  const angle = postAngleAt(polys,centre,fallbackAngle);
+  const u={x:Math.cos(angle),y:Math.sin(angle)}, v=sideNormal(u,'left');
+  const rel={x:lineOrigin.x-centre.x,y:lineOrigin.y-centre.y};
+  const ou=rel.x*u.x+rel.y*u.y, ov=rel.x*v.x+rel.y*v.y;
+  const du=ray.x*u.x+ray.y*u.y, dv=ray.x*v.x+ray.y*v.y;
+  const hw=postSizeOf(mat)/2, hd=postTOf(mat)/2, hits=[];
+  for (const sign of [-1,1]) if (Math.abs(du)>1e-9){
+    const distance=(sign*hw-ou)/du, across=ov+dv*distance;
+    if (distance>=-1e-9 && Math.abs(across)<=hd+1e-9)
+      hits.push({distance,normal:{x:sign*u.x,y:sign*u.y},faceEnds:[
+        {x:centre.x+u.x*sign*hw-v.x*hd,y:centre.y+u.y*sign*hw-v.y*hd},
+        {x:centre.x+u.x*sign*hw+v.x*hd,y:centre.y+u.y*sign*hw+v.y*hd},
+      ]});
+  }
+  for (const sign of [-1,1]) if (Math.abs(dv)>1e-9){
+    const distance=(sign*hd-ov)/dv, across=ou+du*distance;
+    if (distance>=-1e-9 && Math.abs(across)<=hw+1e-9)
+      hits.push({distance,normal:{x:sign*v.x,y:sign*v.y},faceEnds:[
+        {x:centre.x+v.x*sign*hd-u.x*hw,y:centre.y+v.y*sign*hd-u.y*hw},
+        {x:centre.x+v.x*sign*hd+u.x*hw,y:centre.y+v.y*sign*hd+u.y*hw},
+      ]});
+  }
+  hits.sort((a,b)=>a.distance-b.distance);
+  const hit=hits[0] || {distance:postSizeOf(mat)/2,normal:{x:ray.x,y:ray.y}};
+  return {x:lineOrigin.x+ray.x*hit.distance,y:lineOrigin.y+ray.y*hit.distance,...hit};
+}
+// How far the post standing at `centre` reaches across the run, along the unit direction
+// `across`: the room an inside-left/right rail has before it passes the face it sits on. A
+// round or re-oriented post presents a different face there than the fence's own section.
+function postHalfAcross(polys, mat, centre, across, fallbackAngle){
+  mat = postSectionOf(polys,centre,mat);         // the post built here, not this run's own
+  if (postShapeAt(polys,centre,mat) === 'round') return postSizeOf(mat)/2;
+  const angle=postAngleAt(polys,centre,fallbackAngle);
+  const u={x:Math.cos(angle),y:Math.sin(angle)}, v=sideNormal(u,'left');
+  return postSizeOf(mat)/2*Math.abs(u.x*across.x+u.y*across.y)
+       + postTOf(mat)/2*Math.abs(v.x*across.x+v.y*across.y);
+}
+// Footprint and fabrication data for one rail fitted between two post faces. `polygon` is
+// ordered around the true mitred timber; cutLength is the longer of its two longitudinal
+// edges, exactly the edge a fabricator measures before making the two end cuts.
+function betweenRailGeometry(polys, mat, a, b, options={}){
+  const L=segLen(a,b) || 1, d={x:(b.x-a.x)/L,y:(b.y-a.y)/L}, n=sideNormal(d,'left');
+  const half=railTOf(mat)/2, angle=Math.atan2(d.y,d.x);
+  // the tighter of the two posts actually standing here, so the rail sits on a real face at
+  // one end and stays inside the footprint at the other
+  const across=[a,b].filter((q,i)=>(i ? options.endPost : options.startPost)!==false)
+                    .map(q=>postHalfAcross(polys,mat,q,n,angle));
+  const offset=railLateralOffset(mat,across.length ? Math.min(...across) : undefined);
+  const origin=(q,off)=>({x:q.x+n.x*off,y:q.y+n.y*off});
+  const startLow=railPostExit(polys,mat,a,origin(a,offset-half),d,angle,options.startPost!==false);
+  const startHigh=railPostExit(polys,mat,a,origin(a,offset+half),d,angle,options.startPost!==false);
+  const back={x:-d.x,y:-d.y};
+  const endLow=railPostExit(polys,mat,b,origin(b,offset-half),back,angle,options.endPost!==false);
+  const endHigh=railPostExit(polys,mat,b,origin(b,offset+half),back,angle,options.endPost!==false);
+  const along=q=>(q.x-a.x)*d.x+(q.y-a.y)*d.y;
+  const saw=(q,ray)=>Math.acos(Math.max(-1,Math.min(1,
+    Math.abs(q.normal.x*ray.x+q.normal.y*ray.y))))*180/Math.PI;
+  const axialStart=Math.min(along(startLow),along(startHigh));
+  const axialEnd=Math.max(along(endLow),along(endHigh));
+  const edges=[[startLow,endLow],[startHigh,endHigh]];
+  const edgeLengths=edges.map(([p,q])=>Math.max(0,along(q)-along(p)));
+  const dimension=edgeLengths[1] > edgeLengths[0] ? edges[1] : edges[0];
+  return {a,b,d,n,angle,offset,polygon:[startLow,endLow,endHigh,startHigh],
+          start:[startLow,startHigh],end:[endLow,endHigh],axialStart,axialEnd,
+          cutLength:Math.max(...edgeLengths),dimension,centres:L,
+          startMitre:Math.max(saw(startLow,d),saw(startHigh,d)),
+          endMitre:Math.max(saw(endLow,back),saw(endHigh,back))};
 }
 // Gate leaf endpoints inset from the two post centres.
 function gateLeafBounds(a, b, gap){
@@ -3998,6 +4414,16 @@ function pushBox(F, cx,cy,cz, hx,hy,hz, ang, col, caps = null){
   F.push({ p:[P(-1,-1,1),P(1,-1,1),P(1,1,1),P(-1,1,1)],     n:N(0,1),  col });
   F.push({ p:[P(-1,-1,-1),P(1,-1,-1),P(1,1,-1),P(-1,1,-1)], n:N(0,-1), col });
   F.push({ p:[P(-1,1,-1),P(1,1,-1),P(1,1,1),P(-1,1,1)],     n:[0,1,0], col });
+}
+function pushRailPrism(F, footprint, cy, height, col){
+  const y0=cy-height/2,y1=cy+height/2;
+  const world=(q,y)=>[q.x,y,q.y];
+  for (let i=0;i<footprint.length;i++){
+    const a=footprint[i],b=footprint[(i+1)%footprint.length];
+    pushFace(F,[world(a,y0),world(b,y0),world(b,y1),world(a,y1)],col,
+             [b.y-a.y,0,-(b.x-a.x)]);
+  }
+  pushFace(F,footprint.map(q=>world(q,y1)),col,[0,1,0]);
 }
 function pushCylinder(F, cx,cy,cz, radius, height, col){
   const sides = 16, y0 = cy-height/2, y1 = cy+height/2, top = [];
@@ -4081,7 +4507,8 @@ function pushHouse(F, builds, g){
       if (!covered(i,j+1)) wall(x0,z1, x1,z1, [0,0, 1]);
     }
 }
-// A closed gate leaf. Its frame is fixed to the same side of the posts as the fence.
+// A closed gate leaf. Its attachment side is stored on the gate segment, independently of
+// any later rail-position change on either adjoining fence.
 // Rail gates reuse the fence's rail heights; paling gates add two frame rails behind
 // their boards. The BOM uses the same leaf geometry for its rail/paling quantities.
 /* A gate leaf is not a fence panel: it hangs clear of the ground and carries its own rails,
@@ -4103,7 +4530,7 @@ function pushGate(F, a, b, H, mat){
   const leaf = gateLeafBounds(a,b,inset), ang = Math.atan2(b.y-a.y,b.x-a.x);
   const ux = (b.x-a.x)/L, uy = (b.y-a.y)/L;
   const built = gateLeafBuild(H, mat), bottom = built.bottom, leafH = built.leafH;
-  const side = mat.style === 'rail' && typeof railSideOf === 'function' ? railSideOf(mat) : 'left';
+  const side = typeof gateSideOf === 'function' ? gateSideOf(a,mat) : 'left';
   const sign = side === 'right' ? -1 : 1;
   const pointOnSide = (q,off) => ({x:q.x-uy*off*sign, y:q.y+ux*off*sign});
   const frameOff = postTOf(mat)/2 + (mat.style === 'rail' ? railTOf(mat)/2 : palingTOf(mat)+railTOf(mat)/2);
@@ -4145,6 +4572,7 @@ function build3(){
     if (pl.pts.length < 2) return;
     const mat = pl.mat || state.mat;
     const railSide = typeof railSideOf === 'function' ? railSideOf(mat) : 'left';
+    const between = typeof railBetweenPosts === 'function' && railBetweenPosts(mat);
     const H = fenceHeightOf(mat), sp = Math.max(0.1, mat.spacing);
     const ends = postEndFlags(visiblePolys, p, mat);
     for (const [i,a,b] of segsOf(pl)){
@@ -4155,6 +4583,7 @@ function build3(){
       const hasPost = (k) => pl.closed ||
         !(i === 0 && k === 0 && !ends.start) &&
         !(i === pl.pts.length-2 && k === segmentPosts.length-1 && !ends.end);
+      const postStands = (k) => railPostStands(visiblePolys, hasPost(k), segmentPosts[k]);
       segmentPosts.forEach((q, k) => {
         if (!hasPost(k)) return;
         const shared = [...posts].find(([,post]) =>
@@ -4163,25 +4592,33 @@ function build3(){
         const old = shared && shared[1];
         const explicitShape = explicitPostShapeAt(visiblePolys,q);
         const shape = explicitShape || (old ? old.shape : postShapeOf(mat));
-        if (!old || H > old.H){
+        // the run that owns the junction, as standingPostAt and the take-off resolve it,
+        // builds it — a later run joining here does not re-cut a post already stood
+        if (!old){
           const size = postSizeOf(mat), t = shape === 'round' ? size : postTOf(mat);
-          posts.set(key, { q, H, ang, shape, size, t });
+          posts.set(key, { q, H, fallbackAngle:ang, shape, size, t });
         }
         else if (explicitShape) old.shape = explicitShape;
       });
       if (a.gateAfter){ pushGate(F,a,b,H,mat); continue; }
       if (mat.style === 'rail'){
+        const faceRailOff = faceMountedRailOffset(mat);
         for (let k = 0; k < segmentPosts.length-1; k++){
           const first = k === 0, last = k === segmentPosts.length-2;
           const runStart = !pl.closed && i === 0 && first && hasPost(k);
           const runEnd = !pl.closed && i === pl.pts.length-2 && last && hasPost(k+1);
-          const rail = railBayBounds(segmentPosts[k], segmentPosts[k+1],
-                                     runStart ? postSizeOf(mat)/2 : 0, runEnd ? postSizeOf(mat)/2 : 0);
-          const mid = segmentSideMid(rail.a, rail.b, postTOf(mat)/2 + railTOf(mat)/2, railSide);
+          const rail = between
+            ? betweenRailGeometry(visiblePolys, mat, segmentPosts[k], segmentPosts[k+1],
+                                  {startPost:postStands(k),endPost:postStands(k+1)})
+            : railBayBounds(segmentPosts[k], segmentPosts[k+1],
+                            runStart ? postSizeOf(mat)/2 : 0, runEnd ? postSizeOf(mat)/2 : 0);
+          const mid = between ? null
+            : segmentSideMid(rail.a, rail.b, faceRailOff, railSide);
           for (const ry of railYs(mat)){
             if (ry + mat.railW/2 > H + 1e-6) break;
-            pushBox(F, mid.x, ry, mid.y, rail.len/2, mat.railW/2, railTOf(mat)/2, ang, WOOD.rail,
-                    {start:first,end:last});
+            if (between) pushRailPrism(F,rail.polygon,ry,mat.railW,WOOD.rail);
+            else pushBox(F, mid.x, ry, mid.y, rail.len/2, mat.railW/2, railTOf(mat)/2,
+                         ang, WOOD.rail, {start:first,end:last});
           }
         }
       } else if (mat.paling > 0.001){
@@ -4208,10 +4645,11 @@ function build3(){
   });
   // Post depth is a purchase length below the ground plane; only the above-ground
   // portion is drawn so the visible fence height remains H.
-  for (const { q, H, ang, shape, size, t } of posts.values()){
+  for (const { q, H, fallbackAngle, shape, size, t } of posts.values()){
     const hw = (size || POST_SIDE)/2, hd = (t || size || POST_SIDE)/2;
     if (shape === 'round') pushCylinder(F, q.x, H/2, q.y, hw, H, WOOD.post);
-    else pushBox(F, q.x, H/2, q.y, hw, H/2, hd, ang, WOOD.post);
+    else pushBox(F, q.x, H/2, q.y, hw, H/2, hd,
+                 postAngleAt(visiblePolys,q,fallbackAngle), WOOD.post);
   }
   return F;
 }
@@ -4536,11 +4974,16 @@ function paintSheetHeader(pg){
   ctx.font = `600 ${(ANNOT_MM*view.s).toFixed(2)}px ${PAPER_DIM.font}`;
   ctx.fillStyle = SHEET_INK; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   ctx.fillText(`${kind} — ${fenceName(state.polys[pg.i], pg.i)}  1:${pg.den}`, H.x, H.y);
-  if (pg.ev && pg.ev.notIncluded.length){
+  const notes = pg.ev ? [
+    ...(pg.ev.notIncluded.length ? ['Dashed: ' + pg.ev.notIncluded.join(' · ')] : []),
+    ...(pg.kind === 'elevation' && sheetStockJointSummary(pg.ev, state.unit)
+      ? [sheetStockJointSummary(pg.ev, state.unit)] : []),
+  ] : [];
+  if (notes.length){
     const note = P2S(h.x, h.y+4.4);
     ctx.font = `${(ANNOT_MM*view.s*0.9).toFixed(2)}px ${PAPER_DIM.font}`;
     ctx.fillStyle = SHEET_LINE;
-    ctx.fillText('Dashed: ' + pg.ev.notIncluded.join(' · '), note.x, note.y);
+    ctx.fillText(notes.join(' · '), note.x, note.y);
   }
   ctx.restore();
 }
@@ -4550,11 +4993,18 @@ function paintSheetHeader(pg){
    independent of the rest of the drawing: no buildings or neighbouring runs can leak in. */
 function sheetPlanGeometry(polys, idx){
   const pl = polys[idx], mat = pl.mat || state.mat, spacing = Math.max(0.1, mat.spacing);
-  const ends = materialPostEndFlags(polys, idx, mat), segments = [], posts = [], angles = [];
+  const ends = materialPostEndFlags(polys, idx, mat), segments = [], posts = [], angles = [],
+        railFootprints = [];
   const addPost = (q, shape, angle) => {
+    const pointIndex=pl.pts.findIndex(point=>samePhysicalPost(point,q));
     const old = posts.find(p => Math.hypot(p.x-q.x, p.y-q.y) < FENCE_JOIN_TOL);
-    if (old){ if (shape === 'round') old.shape = 'round'; return; }
-    posts.push({x:q.x, y:q.y, shape, angle});
+    if (old){
+      if (shape === 'round') old.shape = 'round';
+      if (old.pointIndex == null && pointIndex >= 0) old.pointIndex=pointIndex;
+      return;
+    }
+    posts.push({x:q.x, y:q.y, shape, angle,
+                ...(pointIndex >= 0 ? {pointIndex} : {})});
   };
   const runSegs = segsOf(pl);
   for (const [i, a, b] of runSegs){
@@ -4572,7 +5022,7 @@ function sheetPlanGeometry(polys, idx){
     segmentPosts.forEach((q, k) => {
       if (!pl.closed && i === 0 && k === 0 && !ends.start) return;
       if (!pl.closed && i === runSegs.length-1 && k === segmentPosts.length-1 && !ends.end) return;
-      addPost(q, postShapeAt(polys, q, mat), angle);
+      addPost(q, postShapeAt(polys, q, mat), postAngleAt(polys,q,angle));
     });
   }
   for (let i = 0; i < pl.pts.length; i++){
@@ -4580,11 +5030,67 @@ function sheetPlanGeometry(polys, idx){
     const m = cornerAngleAt(pl, i);
     if (m) angles.push({ i, point:pl.pts[i], degrees:m.degrees, signed:m.signed });
   }
+  // A sheet plan must show where the rail actually sits, not merely the fence centreline.
+  // One footprint represents all vertically stacked rails because they coincide in plan.
+  if (mat.style === 'rail' && effectiveRailYs(mat).length){
+    const between=railBetweenPosts(mat), side=railSideOf(mat);
+    for (const seg of segments){
+      if (seg.gate || seg.len < 1e-9) continue;
+      for (let k=0;k<seg.stations.length-1;k++){
+        const first=k===0,last=k===seg.stations.length-2;
+        const startPost=pl.closed || !(seg.i===0 && first && !ends.start);
+        const endPost=pl.closed || !(seg.i===segments.length-1 && last && !ends.end);
+        if (between){
+          const rail=betweenRailGeometry(polys,mat,seg.stations[k],seg.stations[k+1],
+            {startPost:railPostStands(polys,startPost,seg.stations[k]),
+             endPost:railPostStands(polys,endPost,seg.stations[k+1])});
+          railFootprints.push({points:rail.polygon});
+          continue;
+        }
+        const bay=railBayBounds(seg.stations[k],seg.stations[k+1],
+          !pl.closed && seg.i===0 && first && startPost ? postSizeOf(mat)/2 : 0,
+          !pl.closed && seg.i===segments.length-1 && last && endPost ? postSizeOf(mat)/2 : 0);
+        const L=segLen(bay.a,bay.b)||1,d={x:(bay.b.x-bay.a.x)/L,y:(bay.b.y-bay.a.y)/L};
+        const n=sideNormal(d,side),half=railTOf(mat)/2;
+        const off=faceMountedRailOffset(mat);
+        const move=(q,amount)=>({x:q.x+n.x*amount,y:q.y+n.y*amount});
+        railFootprints.push({points:[move(bay.a,off-half),move(bay.b,off-half),
+                                     move(bay.b,off+half),move(bay.a,off+half)],
+                             segmentIndex:seg.i,bayIndex:k});
+      }
+    }
+    // Replace the two rectangular bays beside every face-mounted fold with the exact mitred
+    // footprints used by the fabrication corner page. Drawing them from separate geometry is
+    // what allowed the isolated plan to show a different joint at a rotated corner post.
+    if (!between){
+      for (const c of fenceCorners(polys,idx)){
+        const joint=faceMountedCornerGeometry(c);
+        if (!joint) continue;
+        const incomingIndex=(c.pointIndex-1+pl.pts.length)%pl.pts.length;
+        const incomingSeg=segments.find(seg=>seg.i===incomingIndex);
+        const incoming=railFootprints.find(rail=>rail.segmentIndex===incomingIndex &&
+          rail.bayIndex===(incomingSeg ? incomingSeg.stations.length-2 : -1));
+        const outgoing=railFootprints.find(rail=>rail.segmentIndex===c.pointIndex && rail.bayIndex===0);
+        // Footprints run start-low, end-low, end-high, start-high. Change only this fold's
+        // endpoint so a short bay between two folds can retain both shared mitre cuts.
+        if (incoming && joint.incoming){
+          incoming.points[1]=joint.incoming.cutA;
+          incoming.points[2]=joint.incoming.cutB;
+        }
+        if (outgoing && joint.outgoing){
+          outgoing.points[0]=joint.outgoing.cutA;
+          outgoing.points[3]=joint.outgoing.cutB;
+        }
+      }
+    }
+  }
   const size = postSizeOf(mat), pad = Math.max(size*0.75, 0.08);
-  const all = pl.pts.concat(posts), xs = all.map(q => q.x), ys = all.map(q => q.y);
+  const all = pl.pts.concat(posts,railFootprints.flatMap(rail=>rail.points));
+  const xs = all.map(q => q.x), ys = all.map(q => q.y);
   const loX = Math.min(...xs) - pad, hiX = Math.max(...xs) + pad;
   const loY = Math.min(...ys) - pad, hiY = Math.max(...ys) + pad;
-  return { pl, mat, segments, posts, angles, postSize:size, postDepth:postTOf(mat), ends,
+  return { pl, mat, segments, posts, angles, railFootprints,
+           postSize:size, postDepth:postTOf(mat), ends,
            bounds:{loX, hiX, loY, hiY, width:Math.max(hiX-loX, 0.1),
                    height:Math.max(hiY-loY, 0.1)} };
 }
@@ -4673,6 +5179,35 @@ function sheetLayout(){
     place({ kind:'section', i, ev, bounds, bay, win, den:sden, k:sk,
             x: SHEET.margin + 8 + Math.max(0, (room.w - wide*sk)/2),
             base: SHEET.margin + 8 + (room.h + tall*sk)/2 });
+    // a corner detail is rail joinery: a paling fence, or a rail fence set to no rails, has none
+    const corners = ev.mat.style === 'rail' && effectiveRailYs(ev.mat).length
+      ? fenceCorners(state.polys, i) : [];
+    if (corners.length){
+      // every fold gets its detail, six to a page, and one standard scale serves them all:
+      // as large as the worst-fitting detail allows, so a lone corner fills the paper
+      const PAD = 0.5;
+      for (const c of corners){
+        const xs = [0, -c.d1.x*c.legIn, c.d2.x*c.legOut];
+        const ys = [0, -c.d1.y*c.legIn, c.d2.y*c.legOut];
+        c.box = { loX: Math.min(...xs) - PAD, hiX: Math.max(...xs) + PAD,
+                  loY: Math.min(...ys) - PAD, hiY: Math.max(...ys) + PAD };
+      }
+      const sheets = [];
+      for (let n = 0; n < corners.length; n += 6){
+        const shown = corners.slice(n, n + 6);
+        const cols = shown.length === 1 ? 1 : shown.length === 2 ? 2 : shown.length <= 4 ? 2 : 3;
+        sheets.push({ shown, cols, rows: Math.ceil(shown.length / cols) });
+      }
+      const fitsC = d => sheets.every(s => {
+        const cellW = (room.w - 4)/s.cols, cellH = (room.h - 14)/s.rows;
+        return s.shown.every(c => (c.box.hiX - c.box.loX)*(1000/d) <= cellW &&
+                                  (c.box.hiY - c.box.loY)*(1000/d) <= cellH);
+      });
+      const cden = SCALES.find(fitsC) ?? SCALES[SCALES.length - 1];
+      for (const s of sheets)
+        place({ kind:'corners', i, ev, corners: s.shown, cols: s.cols, rows: s.rows,
+                den: cden, k: 1000/cden, base:0, x:0 });
+    }
   }
   return { pages };
 }
@@ -4695,6 +5230,52 @@ function sheetRect(x, y, w, h, fill, off){                    // paper mm rectan
   ctx.fill(); ctx.stroke();
   ctx.restore();
 }
+// Purchased boards are laid from the run's authored start. A bend or gate starts a new
+// straight run: stock cannot turn a corner or bridge an opening. Keeping the direction is
+// important when the elevation is flipped to match the plan; a 5.4 m first board on a
+// 10.5 m run must not silently become a 5.1 m first board on the drawing.
+function stockJointStations(start, end, stockLength){
+  const length=Math.abs(end-start), direction=end>=start ? 1 : -1, out=[];
+  if (!(stockLength>0)) return out;
+  for (let distance=stockLength; distance<length-1e-6; distance+=stockLength)
+    out.push(start+direction*distance);
+  return out;
+}
+function sheetStockJointSummary(ev, u){
+  const notes=[];
+  if (ev.mat.style==='rail' && effectiveRailYs(ev.mat).length &&
+      ev.runs.some(run=>!run.gate && stockJointStations(run.start,run.end,railLengthOf(ev.mat)).length))
+    notes.push(`rail stock joints every ${fmtLen(railLengthOf(ev.mat),u)}`);
+  if (hrOf(ev.mat).on && ev.runs.some(run=>!run.gate && run.handrailStart!=null &&
+      stockJointStations(run.handrailStart,run.handrailEnd,handrailLengthOf(ev.mat)).length))
+    notes.push(`handrail stock joints every ${fmtLen(handrailLengthOf(ev.mat),u)}`);
+  return notes.length ? 'Dotted: ' + notes.join(' · ') : '';
+}
+function paintElevationStockJoints(ev, xAt, base, mm){
+  const marks=[];
+  if (ev.mat.style==='rail'){
+    const ys=effectiveRailYs(ev.mat), height=ev.mat.railW;
+    for (const run of ev.runs) if (!run.gate)
+      for (const x of stockJointStations(run.start,run.end,railLengthOf(ev.mat)))
+        for (const centre of ys) marks.push({x,y0:centre-height/2,y1:centre+height/2});
+  }
+  const hr=hrOf(ev.mat);
+  if (hr.on) for (const run of ev.runs) if (!run.gate && run.handrailStart!=null)
+    for (const x of stockJointStations(run.handrailStart,run.handrailEnd,handrailLengthOf(ev.mat)))
+      marks.push({x,y0:ev.fenceHeight,y1:ev.fenceHeight+hr.t});
+  if (!marks.length) return;
+  const extension=1.4*view.s;
+  ctx.save();
+  ctx.strokeStyle=SHEET_INK; ctx.lineWidth=Math.max(1,0.3*view.s);
+  ctx.setLineDash([0.7*view.s,1.05*view.s]);
+  ctx.beginPath();
+  for (const mark of marks){
+    const low=P2S(xAt(mark.x),base-mm(mark.y0));
+    const high=P2S(xAt(mark.x),base-mm(mark.y1));
+    ctx.moveTo(low.x,low.y+extension); ctx.lineTo(high.x,high.y-extension);
+  }
+  ctx.stroke(); ctx.restore();
+}
 function sheetPlanPostUnderHandrail(p, plan){
   if (!hrOf(plan.mat).on) return false;
   return plan.segments.some(seg => {
@@ -4705,9 +5286,29 @@ function sheetPlanPostUnderHandrail(p, plan){
     return Math.hypot(p.x-(seg.a.x+vx*t), p.y-(seg.a.y+vy*t)) < FENCE_JOIN_TOL;
   });
 }
+function recordSheetPostHit(p,i,point,radius){
+  if (!collectSheetPostHits || i == null) return;
+  sheetPostHits.push({t:'pt',p,i,x:point.x,y:point.y,r:Math.max(10,radius)});
+}
+function pickSheetPost(sx,sy){
+  for (let i=sheetPostHits.length-1;i>=0;i--){
+    const hit=sheetPostHits[i];
+    if (Math.hypot(sx-hit.x,sy-hit.y)<=hit.r) return {t:'pt',p:hit.p,i:hit.i};
+  }
+  return null;
+}
+function markSelectedSheetPost(p,i,point,radius){
+  if (!collectSheetPostHits || !sel || sel.t!=='pt' || sel.p!==p || sel.i!==i) return;
+  ctx.save();
+  ctx.strokeStyle=ACCENT;ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(point.x,point.y,Math.max(9,radius),0,Math.PI*2);ctx.stroke();
+  ctx.restore();
+}
 function sheetPlanPost(p, at, plan, pg){
   const S = at(p), halfW = Math.max(1.5, plan.postSize*pg.k*view.s/2);
   const halfD = Math.max(1.5, plan.postDepth*pg.k*view.s/2);
+  const hitRadius=Math.hypot(halfW,halfD)+3;
+  recordSheetPostHit(pg.i,p.pointIndex,S,hitRadius);
   const off = plan.pl.excludeMaterials, covered = sheetPlanPostUnderHandrail(p, plan);
   ctx.save(); ctx.translate(S.x,S.y); ctx.rotate(p.angle || 0);
   ctx.fillStyle = off ? '#ffffff' : '#cbd5e1';
@@ -4721,6 +5322,7 @@ function sheetPlanPost(p, at, plan, pg){
   if (!covered) ctx.fill();
   ctx.stroke();
   ctx.restore();
+  markSelectedSheetPost(pg.i,p.pointIndex,S,hitRadius);
 }
 function sheetPlanHandrail(seg, at, plan){
   if (seg.gate || !hrOf(plan.mat).on || seg.len < 1e-9) return;
@@ -4743,6 +5345,21 @@ function sheetPlanHandrail(seg, at, plan){
   ctx.beginPath();
   corners.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y));
   ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+}
+function sheetPlanRails(plan, at){
+  if (!plan.railFootprints || !plan.railFootprints.length) return;
+  const off=plan.pl.excludeMaterials || plan.pl.excludeRails;
+  ctx.save();
+  ctx.fillStyle=off ? '#ffffff' : '#e2e8f0';
+  ctx.strokeStyle=off ? SHEET_LINE : SHEET_INK;
+  ctx.lineWidth=1;
+  if (off) ctx.setLineDash([3,2]);
+  for (const rail of plan.railFootprints){
+    ctx.beginPath();
+    rail.points.map(at).forEach((p,i)=>i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y));
+    ctx.closePath();ctx.fill();ctx.stroke();
+  }
+  ctx.restore();
 }
 function sheetPlanHandrailDimension(plan, u, paperPoint, toScreen, scale){
   const seg = plan.segments.find(item => !item.gate && item.len > 1e-9);
@@ -4768,7 +5385,9 @@ function sheetPlanAngle(pg, angle, at, scale){
   while (sweep <= -Math.PI) sweep += Math.PI*2;
   while (sweep > Math.PI) sweep -= Math.PI*2;
   const leg = Math.min(Math.hypot(prev.x-V.x, prev.y-V.y), Math.hypot(next.x-V.x, next.y-V.y));
-  const radius = Math.max(7*view.s, Math.min(14*view.s, leg*0.30));
+  // Keep the bend readable without letting its arc dominate a short plan or reach the
+  // longitudinal dimension bands. Segment dimensions are placed outside this wedge below.
+  const radius = Math.max(6*view.s, Math.min(10*view.s, leg*0.18));
   ctx.save();
   ctx.strokeStyle = dimInk(); ctx.fillStyle = dimInk(); ctx.lineWidth = Math.max(1, scale);
   ctx.beginPath(); ctx.arc(V.x, V.y, radius, b1, b1+sweep, sweep < 0); ctx.stroke();
@@ -4788,6 +5407,37 @@ function sheetPlanAngle(pg, angle, at, scale){
   ctx.fillStyle = dimInk(); ctx.fillText(txt, 0, 0);
   ctx.restore();
 }
+// A bend owns the inside wedge for its angle annotation. Put a segment's longitudinal
+// dimensions on the other side instead of independently choosing a down-page side, which
+// can run a length line and its witnesses straight through the angle arc.
+function sheetPlanDimAvoid(plan, seg, paperPoint){
+  const A = paperPoint(seg.a), B = paperPoint(seg.b), dx = B[0]-A[0], dy = B[1]-A[1];
+  const L = Math.hypot(dx,dy) || 1, nx = -dy/L, ny = dx/L;
+  let inside = 0;
+  for (const angle of plan.angles){
+    const atStart = angle.i === seg.i;
+    const atEnd = angle.i === (seg.i+1)%plan.pl.pts.length;
+    if (!atStart && !atEnd) continue;
+    const V = paperPoint(angle.point);
+    const prev = paperPoint(plan.pl.pts[(angle.i-1+plan.pl.pts.length)%plan.pl.pts.length]);
+    const next = paperPoint(plan.pl.pts[(angle.i+1)%plan.pl.pts.length]);
+    const pL = Math.hypot(prev[0]-V[0],prev[1]-V[1]) || 1;
+    const nL = Math.hypot(next[0]-V[0],next[1]-V[1]) || 1;
+    const bx = (prev[0]-V[0])/pL + (next[0]-V[0])/nL;
+    const by = (prev[1]-V[1])/pL + (next[1]-V[1])/nL;
+    const side = bx*nx + by*ny;
+    if (Math.abs(side) > 1e-9) inside += Math.sign(side);
+  }
+  // Straight runs retain the established preference for keeping dimensions below the page.
+  if (!inside){
+    const down = ny >= 0 ? 1 : -1;
+    inside = -down;
+  }
+  // dimAt projects dimension inputs as [x,y]. Returning a point object here makes that
+  // projection NaN and silently leaves every segment on renderDimension's default side.
+  return [(A[0]+B[0])/2 + nx*Math.sign(inside)*100,
+          (A[1]+B[1])/2 + ny*Math.sign(inside)*100];
+}
 function paintPlan(pg, u, scale){
   const { plan, x, base } = pg, b = plan.bounds, mm = v => v*pg.k;
   const top = base - mm(b.height);
@@ -4798,20 +5448,14 @@ function paintPlan(pg, u, scale){
   // projector passed to dimAt, rather than converting a screen point back into paper space.
   const toScreen = p => P2S(p[0], p[1]);
   const paperPoint = q => [x + mm(q.x-b.loX), top + mm(q.y-b.loY)];
-  // Dimension bands use the side of each segment that runs down the page where possible;
-  // this keeps the chain and its farther overall line clear of the fixed header above.
-  const dimAvoid = seg => {
-    const A = paperPoint(seg.a), B = paperPoint(seg.b), dx = B[0]-A[0], dy = B[1]-A[1];
-    const L = Math.hypot(dx,dy) || 1, nx = -dy/L, ny = dx/L, down = ny >= 0 ? 1 : -1;
-    return {x:(A[0]+B[0])/2 - nx*down*100, y:(A[1]+B[1])/2 - ny*down*100};
-  };
   // The centreline is the item's actual XY path. Gates retain the plan's dashed convention;
   // no other item is visited here, so this is an isolated run rather than a site overview.
   for (const seg of plan.segments){
     const A = at(seg.a), B = at(seg.b);
-    // A handrail is the visible top surface. Its construction centreline is underneath it
-    // and must not read as a real groove; gate openings retain their dashed path reference.
-    if (seg.gate || !hrOf(plan.mat).on){
+    // The physical rail footprint already describes a rails-only run, so do not add a
+    // post-centre reference beside it. Keep the path only where it is the plan depiction of
+    // a paling fence, or the dashed reference through a gate opening.
+    if (seg.gate || (!hrOf(plan.mat).on && !plan.railFootprints.length)){
       ctx.save();
       ctx.strokeStyle = plan.pl.excludeMaterials ? SHEET_LINE : seg.gate ? '#475569' : SHEET_INK;
       ctx.lineWidth = 1.5; ctx.setLineDash(seg.gate || plan.pl.excludeMaterials ? [8,5] : []);
@@ -4824,7 +5468,7 @@ function paintPlan(pg, u, scale){
       ? seg.bays.map(bay => ({ p:paperPoint(bay.a), q:paperPoint(bay.b),
           txt:(seg.gate ? 'Gate ' : '') + fmtLen(bay.len, u) }))
       : [];
-    const avoid = dimAvoid(seg);
+    const avoid = sheetPlanDimAvoid(plan, seg, paperPoint);
     const reach = dimItems.length ? dimChain(toScreen, dimItems, avoid, scale) : CHAIN_OFF*scale;
     dimAt(toScreen, paperPoint(seg.a), paperPoint(seg.b),
           (seg.gate ? 'Gate ' : '') + fmtLen(seg.len, u), reach + CHAIN_OFF*scale*1.6,
@@ -4835,8 +5479,9 @@ function paintPlan(pg, u, scale){
       ctx.fillStyle = SHEET_INK; ctx.textAlign = 'center'; ctx.fillText('GATE', mid.x, mid.y-5*view.s); ctx.restore();
     }
   }
-  // Paint the top surface after every run line and longitudinal dimension. This guarantees
-  // that no construction centreline can show through the solid handrail.
+  // Paint physical members after every run line and longitudinal dimension. This makes rail
+  // position visible in plan, and no construction centreline can show through the solid handrail.
+  sheetPlanRails(plan, at);
   for (const seg of plan.segments) sheetPlanHandrail(seg, at, plan);
   for (const post of plan.posts) sheetPlanPost(post, at, plan, pg);
   sheetPlanHandrailDimension(plan, u, paperPoint, toScreen, scale);
@@ -4858,6 +5503,7 @@ function paintSheetPageInk(pg, u, k){
   ctx.strokeRect(b0.x, b0.y, b1.x-b0.x, b1.y-b0.y);           // border frame
   if (pg.kind === 'section') paintSection(pg, u, k);
   else if (pg.kind === 'plan') paintPlan(pg, u, k);
+  else if (pg.kind === 'corners') paintCorners(pg, u, k);
   else paintElevation(pg, u, k);
   paintSheetHeader(pg);                                      // one fixed, masked header for every view
   // the two things a drawing is worthless without: what it is, and what scale it is at
@@ -4990,6 +5636,9 @@ function paintElevation(bl, u, k){
   // The handrail sits on the post tops, so it is the final continuous member in elevation.
   for (const p of ev.parts.filter(part => part.k === 'cap'))
     sheetRect(xAt(p.x), base - mm(p.y), xAt(p.x+p.w)-xAt(p.x), mm(p.h), fill.cap, p.off);
+  // Show where sequential purchased lengths actually finish. A join landing between the
+  // posts remains visible through the member instead of being hidden by the quantity total.
+  paintElevationStockJoints(ev,xAt,base,mm);
   const ground = P2S(xAt(0) - 3, base), groundEnd = P2S(xAt(ev.len) + 3, base);
   ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(ground.x, ground.y); ctx.lineTo(groundEnd.x, groundEnd.y); ctx.stroke();
@@ -5026,6 +5675,220 @@ function paintElevation(bl, u, k){
 /* The build-up, drawn large enough to dimension: one post with its rails and cap, and the
    whole vertical chain beside it. The elevation says how long the fence is; this says how
    it goes together. */
+/* Corner details: each fold in plan — the corner post, rails running to their real neighbouring
+   posts, fabrication lengths and any required mitre/set-out. The general plan already gives
+   the fence angle. The grid follows the corner count and each detail is centred in its cell. */
+function paintCorners(pg, u, k){
+  const room = { w: SHEET.w - 2*SHEET.margin - 16, h: SHEET.h - 2*SHEET.margin - 16 };
+  const cellW = (room.w - 4)/pg.cols, cellH = (room.h - 14)/pg.rows;
+  pg.corners.forEach((c, n) => {
+    const col = n % pg.cols, row = (n / pg.cols) | 0;
+    const cx = SHEET.margin + 10 + (col + 0.5)*cellW - pg.k*(c.box.loX + c.box.hiX)/2;
+    const cy = pg.top + SHEET.margin + 16 + (row + 0.5)*cellH - pg.k*(c.box.loY + c.box.hiY)/2;
+    if (c.between) paintBetweenCornerDetail(c, cx, cy, pg.k, u, k);
+    else paintCornerDetail(c, cx, cy, pg.k, u, k);
+  });
+  // the page header names the view; this note, at the foot, says which face the joints
+  // are drawn on and what the mitre figure is for
+  const note = P2S(SHEET.margin + 8, pg.top + SHEET.h - SHEET.margin - 6);
+  ctx.font = `${(ANNOT_MM*view.s*0.9).toFixed(2)}px ${PAPER_DIM.font}`;
+  ctx.fillStyle = SHEET_LINE;
+  const mat=state.polys[pg.i].mat || state.mat;
+  const detailNote = railBetweenPosts(mat)
+    ? ' · cuts are face-to-face long-edge lengths · square butt unless a mitre is called out'
+    : ' · mitre is the saw setting · rail lengths run long point to post centre';
+  ctx.fillText(`rails ${railSideLabel(mat).toLowerCase()}` + detailNote, note.x, note.y);
+}
+// A builder can mark a physical post corner, not its concealed centre. For a mitred end, use
+// the lower endpoint of the actual post face hit by the rail's long point and measure along
+// that face to the contact. When a face is horizontal on paper, choose its nearer endpoint.
+// A square butt remains flush and needs no special set-out.
+function sheetCornerSetout(rail,atCorner){
+  const saw=atCorner==='end'?rail.endMitre:rail.startMitre;
+  if (saw<0.05) return null;
+  const cut=atCorner==='end'?rail.dimension[1]:rail.dimension[0];
+  if (!cut.faceEnds || cut.faceEnds.length!==2) return null;
+  const maxY=Math.max(cut.faceEnds[0].y,cut.faceEnds[1].y);
+  const lower=cut.faceEnds.filter(q=>maxY-q.y<1e-7)
+    .sort((a,b)=>Math.hypot(a.x-cut.x,a.y-cut.y)-Math.hypot(b.x-cut.x,b.y-cut.y))[0];
+  return {cut,corner:lower,distance:Math.hypot(cut.x-lower.x,cut.y-lower.y)};
+}
+function sheetCornerNote(to,lines,point,k,leader){
+  lines=Array.isArray(lines)?lines:[lines];
+  const s=to(point),lineH=12.4*k;
+  ctx.save();ctx.font=dimFont(k);ctx.textAlign='center';ctx.textBaseline='middle';
+  const wide=Math.max(...lines.map(txt=>ctx.measureText(txt).width));
+  if (leader){
+    const tip=to(leader),dx=tip.x-s.x,dy=tip.y-s.y,L=Math.hypot(dx,dy)||1;
+    ctx.strokeStyle=dimInk();ctx.fillStyle=dimInk();ctx.lineWidth=k;
+    ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(tip.x,tip.y);ctx.stroke();
+    dimArrow(tip.x,tip.y,dx/L,dy/L,k*.65);
+  }
+  ctx.fillStyle=dimHalo();
+  ctx.fillRect(s.x-wide/2-1.6*k,s.y-lineH*lines.length/2,wide+3.2*k,lineH*lines.length);
+  ctx.fillStyle=dimInk();
+  lines.forEach((txt,i)=>ctx.fillText(txt,s.x,s.y+(i-(lines.length-1)/2)*lineH));
+  ctx.restore();
+}
+function sheetCornerDatumMark(to,point,k){
+  const s=to(point),r=2.2*k;
+  ctx.save();ctx.strokeStyle=dimInk();ctx.fillStyle=dimHalo();ctx.lineWidth=k;
+  ctx.beginPath();ctx.arc(s.x,s.y,r,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.beginPath();ctx.moveTo(s.x-r*1.7,s.y);ctx.lineTo(s.x+r*1.7,s.y);
+  ctx.moveTo(s.x,s.y-r*1.7);ctx.lineTo(s.x,s.y+r*1.7);ctx.stroke();ctx.restore();
+}
+// Excluded work reads the same on a detail as on the plan and elevation: unfilled and dashed.
+function sheetDetailInk(fill, off){
+  ctx.fillStyle = off ? '#ffffff' : fill;
+  ctx.strokeStyle = off ? SHEET_LINE : SHEET_INK; ctx.lineWidth = 1;
+  ctx.setLineDash(off ? [3,2] : []);
+}
+function paintBetweenCornerDetail(c, cxMM, cyMM, kMM, u, k){
+  const mm=v=>v*kMM;
+  const at=q=>P2S(cxMM+mm(q.x-c.v.x),cyMM+mm(q.y-c.v.y));
+  const poly=(pts2,fill,off)=>{
+    ctx.save();ctx.beginPath();
+    pts2.forEach((q,i)=>{const s=at(q);i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});
+    ctx.closePath();sheetDetailInk(fill,off);
+    ctx.fill();ctx.stroke();ctx.restore();
+  };
+  // a shared junction post is the owning run's timber, in its section and shape, not this run's
+  const postAt=(q,angle)=>{
+    const pm=postSectionOf(c.polys,q,c.mat),w=postSizeOf(pm),t=postTOf(pm);
+    if (postShapeAt(c.polys,q,pm)==='round'){
+      const s=at(q),r=mm(w/2)*view.s;
+      ctx.save();ctx.beginPath();ctx.arc(s.x,s.y,r,0,2*Math.PI);ctx.closePath();
+      sheetDetailInk('#cbd5e1',c.postOff);ctx.fill();ctx.stroke();ctx.restore();
+      return;
+    }
+    const d={x:Math.cos(angle),y:Math.sin(angle)},n=sideNormal(d,'left');
+    const move=(p,v,s)=>({x:p.x+v.x*s,y:p.y+v.y*s});
+    poly([move(move(q,d,-w/2),n,-t/2),
+          move(move(q,d, w/2),n,-t/2),
+          move(move(q,d, w/2),n, t/2),
+          move(move(q,d,-w/2),n, t/2)],'#cbd5e1',c.postOff);
+  };
+  const incoming=c.pIn ? betweenRailGeometry(c.polys,c.mat,c.pIn,c.v,{startPost:c.pInPost}) : null;
+  const outgoing=c.pOut ? betweenRailGeometry(c.polys,c.mat,c.v,c.pOut,{endPost:c.pOutPost}) : null;
+  if (incoming) poly(incoming.polygon,'#e2e8f0',c.railOff);
+  if (outgoing) poly(outgoing.polygon,'#e2e8f0',c.railOff);
+  if (c.pInPost) postAt(c.pIn,postAngleAt(c.polys,c.pIn,Math.atan2(c.d1.y,c.d1.x)));
+  if (c.pOutPost) postAt(c.pOut,postAngleAt(c.polys,c.pOut,Math.atan2(c.d2.y,c.d2.x)));
+  postAt(c.v,c.postAngle);
+  const cornerHitRadius=mm(Math.hypot(c.postW,c.postT)/2)*view.s+3;
+  recordSheetPostHit(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
+  markSelectedSheetPost(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
+
+  const paper=mmOnPaper=>mmOnPaper/kMM;
+  // Cut notes occupy the member itself; length dimensions remain outside it.
+  const railDim=g=>{
+    if (!g) return;
+    const A=at(g.dimension[0]),B=at(g.dimension[1]);
+    const side=dimSide3(A,B,at(c.v));
+    renderDimension(A,B,fmtLen(g.cutLength,u),CHAIN_OFF*k*side,{scale:k});
+  };
+  railDim(incoming);railDim(outgoing);
+  const cutLabel=(g,atCorner,dir)=>{
+    if (!g) return;
+    const saw=atCorner==='end'?g.endMitre:g.startMitre;
+    // Put the fabrication note in the open interior of the corner, not along either member
+    // where it would compete with the rail-length dimensions. A leader returns to the cut.
+    const open=norm2({x:-c.d1.x+c.d2.x,y:-c.d1.y+c.d2.y}) || sideNormal(dir,'left');
+    const noteAt={x:c.v.x+open.x*paper(30),y:c.v.y+open.y*paper(30)};
+    const lines=[];
+    if (saw>=0.05) lines.push(`mitre ${+saw.toFixed(1)}°`);
+    const setout=sheetCornerSetout(g,atCorner);
+    if (setout && setout.distance>=0.0005)
+      lines.push(`long point ${fmtSmall(setout.distance,u)} from bottom post corner`);
+    if (lines.length) sheetCornerNote(at,lines,noteAt,k,setout && setout.cut);
+    if (setout) sheetCornerDatumMark(at,setout.corner,k);
+  };
+  cutLabel(incoming,'end',c.d1);
+  cutLabel(outgoing,'start',c.d2);
+  ctx.textAlign='left';ctx.textBaseline='alphabetic';
+}
+function paintCornerDetail(c, cxMM, cyMM, kMM, u, k){
+  const mm = v => v*kMM;
+  const at = q => P2S(cxMM + mm(q.x - c.v.x), cyMM + mm(q.y - c.v.y));   // plan orientation
+  const toS = q => at(q);
+  const move = (q, d, t) => ({ x: q.x + d.x*t, y: q.y + d.y*t });
+  const poly = (pts2, fill, off) => {
+    ctx.save();
+    ctx.beginPath();
+    pts2.forEach((q, i) => { const s2 = at(q); i ? ctx.lineTo(s2.x, s2.y) : ctx.moveTo(s2.x, s2.y); });
+    ctx.closePath();
+    sheetDetailInk(fill, off);
+    ctx.fill(); ctx.stroke(); ctx.restore();
+  };
+  const postAt = (q, d) => {
+    // a shared junction post is the owning run's timber: its section and shape, not this run's
+    const pm = postSectionOf(c.polys, q, c.mat), w = postSizeOf(pm), t = postTOf(pm);
+    if (postShapeAt(c.polys, q, pm) === 'round'){        // a round post is round on the detail too
+      const s2 = at(q), r = mm(w/2)*view.s;
+      ctx.save(); ctx.beginPath(); ctx.arc(s2.x, s2.y, r, 0, 2*Math.PI); ctx.closePath();
+      sheetDetailInk('#cbd5e1', c.postOff); ctx.fill(); ctx.stroke(); ctx.restore();
+      return;
+    }
+    const pv = sideNormal(d, 'left');
+    poly([ move(move(q, d, -w/2), pv, -t/2),
+           move(move(q, d,  w/2), pv, -t/2),
+           move(move(q, d,  w/2), pv,  t/2),
+           move(move(q, d, -w/2), pv,  t/2) ], '#cbd5e1', c.postOff);
+  };
+  // rails on their attached face, cut against the same mitre seam the isolated plan uses
+  const joint=faceMountedCornerGeometry(c);
+  if (!joint) return;
+  const {X,seam}=joint;
+  const pIn = move(c.v, c.d1, -c.legIn), pOut = move(c.v, c.d2, c.legOut);
+  // the rail runs to the neighbouring post centre — where interior rails meet, and where
+  // the cut-length dimension ends — with the post drawn over the lap
+  const r1=joint.incoming,r2=joint.outgoing;
+  if (r1) poly(r1.polygon,'#e2e8f0',c.railOff);
+  if (r2) poly(r2.polygon,'#e2e8f0',c.railOff);
+  // each neighbour stands on its own orientation too, not merely square to its leg
+  const postDir = (q, d) => { const a = postAngleAt(c.polys, q, Math.atan2(d.y, d.x));
+                              return { x:Math.cos(a), y:Math.sin(a) }; };
+  if (c.pInPost) postAt(pIn, postDir(pIn, c.d1));          // the posts either side, when the
+  if (c.pOutPost) postAt(pOut, postDir(pOut, c.d2));       // end rule actually places them
+  postAt(c.v,{x:Math.cos(c.postAngle),y:Math.sin(c.postAngle)}); // selected corner orientation
+  const cornerHitRadius=mm(Math.hypot(c.postW,c.postT)/2)*view.s+3;
+  recordSheetPostHit(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
+  markSelectedSheetPost(c.polyIndex,c.pointIndex,at(c.v),cornerHitRadius);
+  /* Annotation geometry is sized in paper millimetres, like every other annotation on the
+     sheet: a 1:50 grid cell and a 1:20 lone corner get the same arc and the same clearances,
+     so labels cannot crowd each other as the scale drops. */
+  const paper = mmOnPaper => mmOnPaper/kMM;                 // paper mm -> metres at this scale
+  const half = Math.max(c.railT*1.4, paper(3));
+  const s0 = at(move(X, seam, -half)), s1 = at(move(X, seam, half));
+  ctx.strokeStyle = SHEET_INK; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(s0.x, s0.y); ctx.lineTo(s1.x, s1.y); ctx.stroke();
+  // The general plan already carries the fence angle. This fabrication page only calls out
+  // the saw setting, clear of the two member-length dimensions.
+  ctx.font = dimFont(k); ctx.fillStyle = dimInk();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const bis = norm2({ x: -c.d1.x + c.d2.x, y: -c.d1.y + c.d2.y }) || { x:0, y:0 };
+  // the leg dimensions sit CHAIN_OFF outside the fence line; the saw setting goes past them
+  const lmitre = at(move(X, seam, -(half + paper(CHAIN_OFF*ANNOT_MM/12 + 7))));
+  if (c.mitre>=0.05) ctx.fillText(`mitre ${+c.mitre.toFixed(1)}°`, lmitre.x, lmitre.y);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const inside = move(c.v, bis, paper(8));
+  /* The number a builder cuts to: the rail's long-point length, from the far tip of the
+     mitre back to the neighbouring post centre, measured along the rail. The long point is
+     laterally offset from the centreline, so it lies exactly on the witness line of an
+     axial dimension taken from the post centre — the arrow lands on the visible tip. */
+  const dot2 = (a2, b2) => a2.x*b2.x + a2.y*b2.y;
+  const railDim = (r, from, toward) => {
+    if (!r) return null;
+    const lenA=dot2({ x:r.cutA.x-from.x, y:r.cutA.y-from.y },toward);
+    const lenB=dot2({ x:r.cutB.x-from.x, y:r.cutB.y-from.y },toward);
+    const len=Math.max(lenA,lenB),cut=lenB>lenA?r.cutB:r.cutA;
+    const A=toS(from),B=toS(move(from,toward,len));
+    const side=dimSide3(A,B,toS(inside));
+    renderDimension(A,B,fmtLen(len,u),CHAIN_OFF*k*side,{scale:k});
+  };
+  railDim(r1,pIn,c.d1);
+  railDim(r2,pOut,{x:-c.d2.x,y:-c.d2.y});
+}
 function paintSection(pg, u, k){
   const { ev, bounds, bay, win, x, base } = pg, mm = v => v*pg.k;
   const at = (px, py) => [x + mm(px - win.lo), base - mm(py)];   // window-relative paper mm
@@ -5188,9 +6051,27 @@ function fitSheet(){                       // frame the first page; the rest are
   view.s = Math.min(cw/SHEET.w, ch/SHEET.h)*0.96;
   view.x = SHEET.w/2 - cw/2/view.s; view.y = SHEET.h/2 - ch/2/view.s;
 }
+// The Construction panel belongs to the sheet page being inspected. Without this, scrolling
+// from (say) Deck fence to Back gate fence leaves the old fence selected: every control works,
+// but changes an off-screen drawing and makes both Sheet and the following 3D view look broken.
+function syncVisibleSheetFence(){
+  if (!modeSheet) return;
+  const pages=sheetLayout().pages;
+  if (!pages.length) return;
+  const lo=view.y,hi=view.y+ch/view.s;
+  let visible=pages[0],amount=-1;
+  for (const page of pages){
+    const overlap=Math.max(0,Math.min(hi,page.top+SHEET.h)-Math.max(lo,page.top));
+    if (overlap>amount){amount=overlap;visible=page;}
+  }
+  if (sel && (sel.t==='pt' || sel.t==='seg') && sel.p===visible.i) return;
+  sel={t:'seg',p:visible.i,i:0};
+  syncMatInputs();updateTotals();updateSelbox();syncReadOnlyDetails();
+}
 function setSheetView(on){
   if (on === modeSheet) return;
   if (on && mode3d) set3d(false);
+  let sheetTarget=null;
   if (on){
     // The inline plan-dimension editor is an HTML overlay, not sheet content. A pending
     // blur normally closes it, but Sheet must also clear it synchronously so it can never
@@ -5199,14 +6080,33 @@ function setSheetView(on){
     const input = $('dimin');
     input.style.display = 'none';
     if (document.activeElement === input) input.blur();
+    // If Sheet was opened without a fence selection (or from a fence excluded from Sheet),
+    // target the fence on its first visible page. Otherwise the panel would edit shared
+    // defaults while an own-settings fence on paper remained completely unchanged.
+    const included=sheetFences();
+    const selectedFence=sel && (sel.t==='pt' || sel.t==='seg') ? sel.p : null;
+    sheetTarget=included.includes(selectedFence) ? selectedFence : included[0];
+    // Preserve a selected post on the fence whose sheets are opening. Its construction
+    // controls are just as relevant on paper as in 3D; only fall back to a segment when
+    // there is no usable fence/post selection.
+    if (sheetTarget != null &&
+        (!sel || (sel.t!=='pt' && sel.t!=='seg') || sel.p!==sheetTarget))
+      sel={t:'seg',p:sheetTarget,i:0};
   }
   modeSheet = on;
   document.body.classList.toggle('sheetview', on);
   $('bSheet').classList.toggle('primary', on);
   $('bSheet').textContent = on ? 'Plan' : 'Sheet';
-  if (on){ planView = {...view}; fitSheet(); }
+  if (on){
+    planView = {...view}; fitSheet();
+    const page=sheetLayout().pages.find(item=>item.i===sheetTarget);
+    if (page) view.y=page.top+SHEET.h/2-ch/(2*view.s);
+  }
   else if (planView){ view = planView; planView = null; }
-  hover = null; sel = on ? null : sel;
+  // Keep the logical fence selection while inspecting its sheets. The canvas remains
+  // inspection-only in Sheet mode, but the Construction panel must continue editing the
+  // fence whose drawings are on screen—especially when it has its own settings.
+  hover = null;
   updateHint(); updateAll();
 }
 function set3d(on){
@@ -5355,7 +6255,7 @@ function syncMatInputs(){
   set('iPostDepth', small(postDepthOf(M)));
   $('iAboveGroundHeight').textContent = fmtLen(fenceHeightOf(M),u);
   set('iRails', M.rails);
-  if (document.activeElement !== $('iRailSide')) $('iRailSide').value = railSideOf(M);
+  if (document.activeElement !== $('iRailSide')) $('iRailSide').value = railPositionOf(M);
   const roundPost = postShapeOf(M) === 'round';
   $('postSizePrefix').style.display = roundPost ? '' : 'none';
   $('postTimes').style.display = roundPost ? 'none' : '';
@@ -5383,6 +6283,18 @@ function syncMatInputs(){
   postShapeInput.value = selectedPoint && postShapeScope === 'post'
     ? 'post:' + (ownPostShape(selectedPoint) || 'inherit')
     : 'fence:' + postShapeOf(M);
+  const selectedPostShape = selectedPoint ? postShapeAt(state.polys,selectedPoint,M) : null;
+  const postOrientRecord = selectedPoint ? postOrientationAt(state.polys,selectedPoint) : null;
+  const postOrientMode = postOrientRecord ? postOrientRecord.mode : 'auto';
+  $('postOrientWrap').style.display = selectedPoint && selectedPostShape !== 'round' ? 'flex' : 'none';
+  $('postAngleWrap').style.display = selectedPoint && selectedPostShape !== 'round' &&
+                                    postOrientMode === 'custom' ? 'flex' : 'none';
+  if (document.activeElement !== $('iPostOrient')) $('iPostOrient').value = postOrientMode;
+  if (selectedPoint && document.activeElement !== $('iPostAngle')){
+    const angle = postOrientMode === 'custom' && Number.isFinite(postOrientRecord.point.postAngle)
+      ? postOrientRecord.point.postAngle : postAngleAt(state.polys,selectedPoint,0);
+    $('iPostAngle').value = +(normalPostAngle(angle)*180/Math.PI).toFixed(1);
+  }
   set('iPaling', small(M.paling));  set('iPalingT', small(palingTOf(M)));  set('iGap', small(M.gap));
   set('iPostSize', small(postSizeOf(M)));  set('iPostSizeD', small(postTOf(M)));
   set('iRailW', small(M.railW));    set('iRailT', small(railTOf(M)));  set('iRailGap', small(M.railGap));
@@ -5435,7 +6347,12 @@ function updateSelbox(){
       });
       $('iGate').addEventListener('change', e => {
         if (sel && sel.t==='seg'){ pushUndo();
-          state.polys[sel.p].pts[sel.i].gateAfter = e.target.checked || undefined; updateAll(); }
+          const pl0=state.polys[sel.p], pt=pl0.pts[sel.i];
+          pt.gateAfter = e.target.checked || undefined;
+          if (e.target.checked && pt.gateSideAfter !== 'left' && pt.gateSideAfter !== 'right')
+            pt.gateSideAfter = legacyGateSide(pl0.mat || state.mat);
+          if (!e.target.checked) delete pt.gateSideAfter;
+          updateAll(); }
       });
       $('iLock').addEventListener('change', e => {
         if (sel && sel.t==='seg'){
@@ -5709,7 +6626,14 @@ cv.addEventListener('pointerdown', e => {
     pend = null; drag = null;
     return;
   }
-  if (modeSheet){ drag = { t:'pan' }; return; }   // the sheet is paper: move it, don't edit it
+  if (modeSheet){
+    // Sheet remains inspection-only, but a tap may select a vertex post so its construction
+    // settings can be changed. Crossing the normal drag threshold turns the same gesture
+    // into paper panning and never moves the post.
+    drag={t:'sheetpan',hit:e.button===2?null:pickSheetPost(e.offsetX,e.offsetY),
+          x:e.offsetX,y:e.offsetY,moved:false};
+    return;
+  }
   if (readOnly){
     pend = { hit:pick(e.offsetX,e.offsetY), x:e.offsetX, y:e.offsetY, moved:false };
     if (e.button === 2) drag = {t:'pan'};
@@ -5760,6 +6684,10 @@ cv.addEventListener('pointermove', e => {
     else orbit(dx, dy);
     paint(); return;
   }
+  if (modeSheet && !pointers.size && e.pointerType!=='touch'){
+    cv.classList.toggle('labelhit',!!pickSheetPost(e.offsetX,e.offsetY));
+    return;
+  }
   // dimension tool: preview where it would land, or what a click would grab
   if (dimTool && !pointers.size && e.pointerType !== 'touch'){
     if (dimTool.pend){ dimTool.at = { x:e.offsetX, y:e.offsetY }; paint(); return; }
@@ -5795,6 +6723,11 @@ cv.addEventListener('pointermove', e => {
     view.x = w.x - mx/view.s; view.y = w.y - my/view.s;
     pinch = { d, mx, my };
     paint(); return;
+  }
+  if (drag && drag.t==='sheetpan'){
+    if (!drag.moved && Math.hypot(e.offsetX-drag.x,e.offsetY-drag.y)>6) drag.moved=true;
+    if (drag.moved){ view.x-=dx/view.s; view.y-=dy/view.s; paint(); }
+    return;
   }
   if (readOnly && pend && !pend.moved &&
       Math.hypot(e.offsetX-pend.x,e.offsetY-pend.y) > 6){
@@ -5880,6 +6813,15 @@ function pointerEnd(e){
   if (!pointers.has(e.pointerId)) return;
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
+  if (modeSheet){
+    if (drag && drag.t==='sheetpan' && !drag.moved && drag.hit &&
+        e.type==='pointerup' && e.button!==2){
+      sel=drag.hit; bsel.clear(); showAllTotals=false; updateAll();
+    }
+    if (!pointers.size) drag=null;
+    pend=null;
+    return;
+  }
   if (mode3d){
     if (drag && drag.t === 'cube' && e.type === 'pointerup') goToFace(drag.face);
     else if (drag && drag.t === 'orbit' && !drag.moved && e.type === 'pointerup'){
@@ -6041,8 +6983,8 @@ window.addEventListener('keydown', e => {
 function hintText(drawing){
   const phone = onPhone();
   if (modeSheet)
-    return phone ? 'Plans · elevations · sections · drag to move'
-                 : 'Individual plans, elevations and sections at true scale · wheel to scroll pages · Ctrl+wheel or pinch to zoom.';
+    return phone ? 'Tap a post · drag to move · pinch to zoom'
+                 : 'Tap a post for its construction settings · drag to move · wheel to scroll pages · Ctrl+wheel or pinch to zoom.';
   if (mode3d)
     return phone
       ? 'Drag to orbit · two fingers to move · pinch to zoom'
@@ -6285,7 +7227,7 @@ $('iOneEnd').addEventListener('change', e => {
 });
 $('iRailSide').addEventListener('change', e => {
   const M = curMat();
-  commitEdit(() => M.railSide = e.target.value === 'right' ? 'right' : 'left');
+  commitEdit(() => M.railSide = RAIL_POSITIONS.has(e.target.value) ? e.target.value : 'left');
   updateAll();
 });
 $('iPostShape').addEventListener('change', e => {
@@ -6305,6 +7247,15 @@ $('iPostShape').addEventListener('change', e => {
     commitEdit(() => M.postShape = shape === 'round' ? 'round' : 'square');
   }
   updateAll();
+});
+$('iPostOrient').addEventListener('change', e => {
+  const point = sel && sel.t === 'pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+  if (!point) return;
+  const mode = POST_ORIENTATIONS.has(e.target.value) ? e.target.value : 'auto';
+  const current = postAngleAt(state.polys,point,0);
+  commitEdit(() => setPostOrientationAt(state.polys,point,mode,current));
+  updateAll();
+  if (mode === 'custom') requestAnimationFrame(() => { $('iPostAngle').focus(); $('iPostAngle').select(); });
 });
 $('matInclude').addEventListener('change', e => {
   const sc = matScope();
@@ -6353,6 +7304,82 @@ document.querySelectorAll('#styleTog button').forEach(b =>
     });
     syncMatInputs(); updateAll();
   }));
+
+/* Numeric construction fields used to repaint only on `change` (blur or Enter). Keep that
+   event as the final validator, but preview every valid `input` through the same state that
+   plan, Sheet and 3D read. The first keystroke records one history snapshot; later keystrokes
+   in the same focus session remain one Undo operation rather than one operation per digit. */
+const liveMaterialEdits = new WeakMap();
+function previewMaterialEdit(input, edit){
+  if (readOnly) return;
+  const before = historySnapshot(), joins = junctionGroups(state.polys);
+  edit();
+  reapplyConstraints(state.polys, joins);
+  if (historySnapshot() === before) return;
+  if (!liveMaterialEdits.has(input)){
+    liveMaterialEdits.set(input, before);
+    pushHistory(before);
+  }
+  updateAll();
+}
+function liveMaterialInput(id, parse, valid, edit){
+  const input = $(id);
+  input.addEventListener('input', e => {
+    const value = parse(e.target.value);
+    if (value == null || !valid(value)) return;
+    previewMaterialEdit(input, () => edit(curMat(), value));
+  });
+  const finish = () => liveMaterialEdits.delete(input);
+  input.addEventListener('change', finish);
+  input.addEventListener('blur', finish);
+}
+$('iPostAngle').addEventListener('input', e => {
+  const degrees=parseFloat(String(e.target.value).replace(/,/g,'.'));
+  const point=sel && sel.t==='pt' && state.polys[sel.p] && state.polys[sel.p].pts[sel.i];
+  if (!point || !Number.isFinite(degrees)) return;
+  previewMaterialEdit(e.currentTarget,() =>
+    setPostOrientationAt(state.polys,point,'custom',degrees*Math.PI/180));
+});
+for (const event of ['change','blur'])
+  $('iPostAngle').addEventListener(event,e => liveMaterialEdits.delete(e.currentTarget));
+const liveLength = value => parseLen(value, state.unit);
+const liveSmall = value => parseSmall(value, state.unit);
+liveMaterialInput('iSpacing', liveLength, value => value > .1,
+  (M,value) => { M.spacing=value; M.touched.spacing=true; });
+liveMaterialInput('iRailLength', liveLength, value => value >= .2,
+  (M,value) => { M.railLength=value; M.touched.railLength=true; });
+liveMaterialInput('iHRLength', liveLength, value => value >= .2,
+  (M,value) => { M.hrLength=value; M.touched.hrLength=true; });
+liveMaterialInput('iRails', value => parseInt(value,10), value => value >= 0 && value <= 10,
+  (M,value) => {
+    M.rails=value;
+    if (M.style === 'rail'){
+      M.railGap=derivedGap(M,value);
+      M.touched.railGap=true;
+    }
+  });
+for (const [id,field] of [
+  ['iPaling','paling'],['iPalingT','palingT'],['iGap','gap'],['iPostDepth','postDepth'],
+  ['iPostSize','postSize'],['iPostSizeD','postT'],['iRailW','railW'],['iRailT','railT'],
+  ['iRailGap','railGap'],['iBotOff','botOff'],['iTopOff','topOff'],
+  ['iHRW','hrW'],['iHRT','hrT'],
+]) liveMaterialInput(id, liveSmall, value => value >= 0, (M,value) => {
+  M[field]=value; M.touched[field]=true;
+  if (M.style === 'rail'){
+    if (field === 'railGap') M.rails=derivedRails(M);
+    else if (field === 'railW' || field === 'botOff' || field === 'topOff'){
+      M.railGap=derivedGap(M,M.rails);
+      M.touched.railGap=true;
+    }
+  }
+});
+liveMaterialInput('iHeight', liveLength, value => value > .2, (M,value) => {
+  M.height=value; M.touched.height=true;
+  if (M.style === 'rail'){
+    M.railGap=derivedGap(M,M.rails);
+    M.touched.railGap=true;
+  }
+});
 
 function fmtBomLength(length,u){
   return u === 'm' ? fmtSmall(length,u) : fmtLen(length,u);
@@ -6427,16 +7454,23 @@ function copyBomRows(entries,u){
     row.qty += qty; addSource(row, source);
     const railLength = cut.length;
     const centreLength = Number.isFinite(cut.centres) && cut.centres > 0 ? cut.centres : railLength;
-    const extension = Math.max(0, railLength - centreLength), stockDelta = stockLength - centreLength;
+    const between = cut.fit === 'between';
+    const extension = between ? 0 : Math.max(0, railLength - centreLength);
+    const stockDelta = stockLength - (between ? railLength : centreLength);
     const status = Math.abs(stockDelta) <= 1e-6
-      ? 'fits post centre-to-centre'
+      ? (between ? 'fits cut length' : 'fits post centre-to-centre')
       : stockDelta > 0
-        ? fmtBomLength(stockDelta,u) + ' overlap'
+        ? fmtBomLength(stockDelta,u) + (between ? ' offcut' : ' overlap')
         : 'ISSUE: ' + fmtBomLength(-stockDelta,u) + ' too short';
-    const planKey = source + '|' + centreLength.toFixed(6) + '|' + extension.toFixed(6) + '|' + status;
+    const startMitre=between ? Number(cut.startMitre)||0 : 0;
+    const endMitre=between ? Number(cut.endMitre)||0 : 0;
+    const planKey = source + '|' + (between?'between':'face') + '|' + railLength.toFixed(6) + '|' +
+      centreLength.toFixed(6) + '|' + extension.toFixed(6) + '|' + startMitre.toFixed(4) + '|' +
+      endMitre.toFixed(4) + '|' + status;
     const plan = row.cutPlan.find(item => item.key === planKey);
     if (plan) plan.qty += qty;
-    else row.cutPlan.push({key:planKey, source, qty, centre:centreLength, extension, status});
+    else row.cutPlan.push({key:planKey, source, qty, length:railLength, centre:centreLength,
+                           extension,status,fit:between?'between':'face',startMitre,endMitre});
   };
   const addHandrail = (cut, M, source) => {
     const hr = hrOf(M), stockLength = handrailLengthOf(M),
@@ -6474,11 +7508,14 @@ function copyBomRows(entries,u){
     const gateRails = f.gateRails || 0, fenceRails = Math.max(0, (f.rails || 0) - gateRails);
     const railCount = M.rails == null ? DEF_RAILS : Math.max(0, M.rails|0);
     if (fenceRails){
-      const railsPerPanel = railCount || 1;
       const fallbackLength = Math.max(0.1, Number(M.spacing) || Number(DEF.m.spacing) || 2.4);
       const railCuts = (f.railCuts || f.panelLengths || [])
         .map(cut => typeof cut === 'number' ? {length:cut, centres:cut} : cut)
         .filter(cut => cut && Number.isFinite(cut.length) && cut.length > 0);
+      // one cut per panel, so the take-off's own rails say how many share each length — a
+      // rail the fence height leaves unbuilt is neither counted nor cut
+      const railsPerPanel = railCuts.length
+        ? Math.max(1, Math.round(fenceRails/railCuts.length)) : railCount || 1;
       if (!railCuts.length)
         for (let i = 0; i < Math.ceil(fenceRails/railsPerPanel); i++)
           railCuts.push({length:fallbackLength, centres:fallbackLength});
@@ -6577,6 +7614,15 @@ function copyBomCutPlan(rows,u){
     for (const cut of plan){
       let group = groups.find(item => item.source === cut.source);
       if (!group){ group = {source:cut.source, parts:[]}; groups.push(group); }
+      if (cut.fit === 'between'){
+        const endCut=value=>value > .05 ? `${+value.toFixed(1)}° mitre` : 'square';
+        const cuts=Math.abs(cut.startMitre-cut.endMitre)<.05
+          ? endCut(cut.startMitre) + ' both ends'
+          : 'start ' + endCut(cut.startMitre) + '; end ' + endCut(cut.endMitre);
+        group.parts.push(cut.qty + ' × ' + fmtBomLength(cut.length,u) +
+          ' face-to-face long-edge cut (' + cuts + '; ' + cut.status + ')');
+        continue;
+      }
       const extension = cut.extension > 1e-6
         ? ' + ' + fmtSmall(cut.extension,u) + ' total end-post extension' : '';
       group.parts.push(cut.qty + ' × ' + fmtBomLength(cut.centre,u) +
@@ -6683,6 +7729,7 @@ function applyState(o){
     if (!o.v || o.v < 2) inferHouses(state.builds);
   }
   if (o.mat) state.mat = Object.assign(state.mat, o.mat);
+  migrateGateSides(state.polys,state.mat);
   state.snapGrid = o.snapGrid !== false; state.snapBld = o.snapBld !== false;
   if (o.view && o.view.s) view = o.view;
 }

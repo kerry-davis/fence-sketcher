@@ -16,10 +16,62 @@ test('the drawing sheet is its own view, and does not collide with the phone she
   assert.match(html, /if \(on && modeSheet\) setSheetView\(false\);\s*\n\s*mode3d = on;/);
   // an inline plan-dimension editor must not remain stranded outside the paper
   assert.match(html, /dimEdit = null;\s*\n\s*const input = \$\('dimin'\);\s*\n\s*input\.style\.display = 'none';/);
-  // paper, not a drawing surface: a press moves the sheet instead of editing the fence
-  assert.match(html, /if \(modeSheet\)\{ drag = \{ t:'pan' \}; return; \}/);
+  // paper remains non-editing: a tap can inspect a post, while a drag only pans the sheet
+  assert.match(html, /drag=\{t:'sheetpan',hit:e\.button===2\?null:pickSheetPost/);
+  assert.match(html, /if \(drag && drag\.t==='sheetpan'\)\{/);
+  assert.match(html, /if \(drag\.moved\)\{ view\.x-=dx\/view\.s; view\.y-=dy\/view\.s; paint\(\); \}/);
   // and the plan's own view is parked, not clobbered
-  assert.match(html, /if \(on\)\{ planView = \{\.\.\.view\}; fitSheet\(\); \}\s*\n\s*else if \(planView\)\{ view = planView; planView = null; \}/);
+  assert.match(html, /planView = \{\.\.\.view\}; fitSheet\(\);/);
+  assert.match(html, /else if \(planView\)\{ view = planView; planView = null; \}/);
+  // Sheet is inspection-only, but its settings panel must keep targeting the selected fence.
+  assert.doesNotMatch(html, /sel = on \? null : sel/);
+  assert.match(html, /Keep the logical fence selection while inspecting its sheets/);
+  assert.match(html, /sheetTarget=included\.includes\(selectedFence\) \? selectedFence : included\[0\];/);
+  assert.match(html, /if \(sheetTarget != null &&\s*\n\s*\(!sel \|\| \(sel\.t!=='pt' && sel\.t!=='seg'\) \|\| sel\.p!==sheetTarget\)\)/);
+  assert.match(html, /if \(modeSheet\)\{\s*\n\s*syncVisibleSheetFence\(\);/);
+});
+
+test('scrolling sheets makes the visible fence the settings and 3D target', () => {
+  const start=html.indexOf('function syncVisibleSheetFence(){');
+  const end=html.indexOf('function setSheetView(',start);
+  assert.ok(start>=0 && end>start);
+  const context={
+    modeSheet:true,view:{y:225,s:1},ch:190,SHEET:{h:210},
+    sel:{t:'seg',p:0,i:0},
+    sheetLayout:()=>({pages:[{top:0,i:0},{top:222,i:3},{top:444,i:4}]}),
+    syncMatInputs(){},updateTotals(){},updateSelbox(){},syncReadOnlyDetails(){},
+  };
+  vm.createContext(context);vm.runInContext(html.slice(start,end),context);
+  context.syncVisibleSheetFence();
+  assert.deepEqual({...context.sel},{t:'seg',p:3,i:0});
+  // Once the right fence is targeted, repainting does not churn the panel.
+  let syncs=0;context.syncMatInputs=()=>syncs++;
+  context.syncVisibleSheetFence();
+  assert.equal(syncs,0);
+});
+
+test('the sheet is inspection-only: Delete cannot mutate the fence from paper', () => {
+  const start = html.indexOf('function deleteSelected(){');
+  const end = html.indexOf('function clearAll(){', start);
+  assert.ok(start >= 0 && end > start);
+  const context = {
+    readOnly:false, mode3d:false, modeSheet:true, sel:{t:'seg',p:0,i:0}, bsel:new Set(),
+    deleted:0, state:{polys:[],builds:[]},
+    pushUndo(){}, updateAll(){},
+    deletePoint(){ context.deleted++; }, deleteSegment(){ context.deleted++; },
+    deleteBuildings(){ context.deleted++; },
+  };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  // the sheet auto-selects the visible fence, so a keystroke must not act on that selection
+  context.deleteSelected();
+  assert.equal(context.deleted, 0);
+  assert.deepEqual({...context.sel}, {t:'seg',p:0,i:0});
+  // back on the plan the same key still deletes
+  context.modeSheet = false;
+  context.deleteSelected();
+  assert.equal(context.deleted, 1);
+  assert.equal(context.sel, null);
 });
 
 test('desktop wheel scrolls through sheet pages while modified wheel still zooms', () => {
@@ -101,12 +153,16 @@ test('each item gets an isolated, dimensioned plan page', () => {
   assert.match(html, /const planPage = \{ kind:'plan', i, plan, ev, den:paired\.den, k:paired\.k,/);
   assert.match(html, /else if \(pg\.kind === 'plan'\) paintPlan\(pg, u, k\);/);
   assert.match(html, /for \(const seg of plan\.segments\)\{/);
+  assert.match(html, /seg\.gate \|\| \(!hrOf\(plan\.mat\)\.on && !plan\.railFootprints\.length\)/);
   assert.match(html, /const dimItems = seg\.bays\.length > 1\s*\n\s*\? seg\.bays\.map\(bay =>/);
   assert.match(html, /txt:\(seg\.gate \? 'Gate ' : ''\) \+ fmtLen\(bay\.len, u\) \}\)\)\s*\n\s*: \[\];/);
   assert.match(html, /const reach = dimItems\.length \? dimChain\(toScreen, dimItems, avoid, scale\) : CHAIN_OFF\*scale;/);
+  assert.match(html, /const avoid = sheetPlanDimAvoid\(plan, seg, paperPoint\);/);
   assert.match(html, /reach \+ CHAIN_OFF\*scale\*1\.6/);
   assert.match(html, /dimAt\(toScreen, paperPoint\(seg\.a\), paperPoint\(seg\.b\)/);
   assert.match(html, /for \(const angle of plan\.angles\) sheetPlanAngle\(pg, angle, at, scale\);/);
+  assert.match(html, /function sheetPlanRails\(plan, at\)\{/);
+  assert.match(html, /sheetPlanRails\(plan, at\);/);
   // State and canvas coordinates are both Y-down. Increasing state Y must therefore move
   // down the isolated paper plan, preserving the run's chirality rather than mirroring it.
   assert.match(html, /const top = base - mm\(b\.height\);\s*\/\/ The interactive plan's S2W uses canvas Y-down/);
@@ -118,6 +174,42 @@ test('each item gets an isolated, dimensioned plan page', () => {
   const start = html.indexOf('function paintPlan('), end = html.indexOf('function paintSheet(){', start);
   assert.ok(start >= 0 && end > start);
   assert.doesNotMatch(html.slice(start, end), /state\.builds|state\.polys\.forEach/);
+});
+
+test('plan bend dimensions stay outside the angle annotation wedge', () => {
+  const start = html.indexOf('function sheetPlanDimAvoid(');
+  const end = html.indexOf('function paintPlan(', start);
+  assert.ok(start >= 0 && end > start);
+  const context = { Math };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  const sideStart = html.indexOf('function dimSide3(');
+  const sideEnd = html.indexOf('const CHAIN_OFF', sideStart);
+  vm.runInContext(html.slice(sideStart, sideEnd), context);
+  const pts = [{x:0,y:0},{x:1,y:1},{x:2,y:1}];
+  const plan = {pl:{pts}, angles:[{i:1,point:pts[1]}]};
+  const paperPoint = q => [q.x,q.y];
+  const incoming = context.sheetPlanDimAvoid(plan, {i:0,a:pts[0],b:pts[1]}, paperPoint);
+  const outgoing = context.sheetPlanDimAvoid(plan, {i:1,a:pts[1],b:pts[2]}, paperPoint);
+  // The minor angle is above/right of the bend. Both projected points identify that occupied
+  // side in the [x,y] form dimAt consumes; a point object would project to NaN and fail open.
+  assert.ok(incoming[0] > 0.5 && incoming[1] < 0.5);
+  assert.ok(outgoing[1] < 1);
+  assert.equal(Number.isFinite(incoming[0]) && Number.isFinite(incoming[1]), true);
+  assert.equal(Number.isFinite(outgoing[0]) && Number.isFinite(outgoing[1]), true);
+  const renderedSide = (seg, avoid) => {
+    const A={x:seg.a.x,y:seg.a.y}, B={x:seg.b.x,y:seg.b.y};
+    const L=Math.hypot(B.x-A.x,B.y-A.y), nx=-(B.y-A.y)/L, ny=(B.x-A.x)/L;
+    const V=pts[1], prev=pts[0], next=pts[2];
+    const pL=Math.hypot(prev.x-V.x,prev.y-V.y), nL=Math.hypot(next.x-V.x,next.y-V.y);
+    const bisector={x:(prev.x-V.x)/pL+(next.x-V.x)/nL,
+                    y:(prev.y-V.y)/pL+(next.y-V.y)/nL};
+    const sign=context.dimSide3(A,B,{x:avoid[0],y:avoid[1]});
+    return (nx*sign)*bisector.x + (ny*sign)*bisector.y;
+  };
+  // Negative means renderDimension's actual offset points away from the inside bisector.
+  assert.ok(renderedSide({a:pts[0],b:pts[1]}, incoming) < 0);
+  assert.ok(renderedSide({a:pts[1],b:pts[2]}, outgoing) < 0);
 });
 
 test('the item plan keeps XY bends, stations, gate flags and angles', () => {
@@ -137,8 +229,17 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
         o.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});}return o;};
     const materialPostEndFlags=()=>({start:true,end:true});
     const postShapeAt=()=> 'square';
+    const postAngleAt=(polys,q,fallback)=>fallback;
+    const samePhysicalPost=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y)<FENCE_JOIN_TOL;
     const postSizeOf=m=>m.postSize??0.1;
     const postTOf=m=>m.postT??m.postSize??0.1;
+    const railTOf=m=>m.railT??0.045;
+    const railBetweenPosts=()=>false;
+    const railSideOf=m=>m.railSide==='right'?'right':'left';
+    const faceMountedRailOffset=m=>postTOf(m)/2+railTOf(m)/2;
+    const effectiveRailYs=m=>m.style==='rail'?[0.5]:[];
+    const railBayBounds=(a,b,start,end)=>{const L=segLen(a,b)||1,ux=(b.x-a.x)/L,uy=(b.y-a.y)/L;
+      return {a:{x:a.x-ux*start,y:a.y-uy*start},b:{x:b.x+ux*end,y:b.y+uy*end}};};
     const cornerAngleAt=(pl,k)=>{const V=pl.pts[k],A=pl.pts[k-1],B=pl.pts[k+1];
       const a1=Math.atan2(A.y-V.y,A.x-V.x),a2=Math.atan2(B.y-V.y,B.x-V.x);
       let d=a2-a1;while(d<=-Math.PI)d+=2*Math.PI;while(d>Math.PI)d-=2*Math.PI;
@@ -146,6 +247,9 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
   `;
   vm.createContext(context);
   vm.runInContext(helpers + html.slice(start, end), context);
+  const cornerStart=html.indexOf('const CORNER_MAX_DEG');
+  const cornerEnd=html.indexOf('function elevationParts(',cornerStart);
+  vm.runInContext(html.slice(cornerStart,cornerEnd),context);
   const mat = {spacing:2.4, postSize:0.1};
   const plan = context.sheetPlanGeometry([
     {pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],closed:false,mat}
@@ -160,6 +264,23 @@ test('the item plan keeps XY bends, stations, gate flags and angles', () => {
                    [[2.4,0.6],[2.4,1.6]]);
   assert.equal(plan.angles.length, 1);
   assert.equal(+plan.angles[0].degrees.toFixed(4), 90);
+  const railMat={...mat,style:'rail',railSide:'left',railT:.045,postT:.1};
+  const railPolys=[{pts:[{x:0,y:0},{x:2.4,y:0},
+    {x:2.4-1.8*Math.cos(131.2*Math.PI/180),y:-1.8*Math.sin(131.2*Math.PI/180)}],
+    closed:false,mat:railMat}];
+  const railPlan=context.sheetPlanGeometry(railPolys,0);
+  const corner=context.fenceCorners(railPolys,0)[0];
+  const joint=context.faceMountedCornerGeometry(corner);
+  const inFoot=railPlan.railFootprints.find(r=>r.segmentIndex===0 && r.bayIndex===0);
+  const outFoot=railPlan.railFootprints.find(r=>r.segmentIndex===1 && r.bayIndex===0);
+  assert.deepEqual([inFoot.points[1].x,inFoot.points[1].y],
+                   [joint.incoming.cutA.x,joint.incoming.cutA.y]);
+  assert.deepEqual([inFoot.points[2].x,inFoot.points[2].y],
+                   [joint.incoming.cutB.x,joint.incoming.cutB.y]);
+  assert.deepEqual([outFoot.points[0].x,outFoot.points[0].y],
+                   [joint.outgoing.cutA.x,joint.outgoing.cutA.y]);
+  assert.deepEqual([outFoot.points[3].x,outFoot.points[3].y],
+                   [joint.outgoing.cutB.x,joint.outgoing.cutB.y]);
   const tenFive = context.sheetPlanGeometry([
     {pts:[{x:0,y:0},{x:10.5,y:0}],closed:false,mat:{...mat, spacing:1.5}}
   ], 0);
@@ -257,6 +378,8 @@ test('the developed elevation agrees with the model it is drawn from', () => {
   // Array.from: the vm realm's arrays are structurally equal but not reference-equal
   assert.deepEqual(Array.from(bent.stations), [0, 2.4, 3, 5.4, 7]);
   assert.equal(bent.parts.filter(p => p.k === 'post').length, 5);
+  assert.deepEqual(Array.from(bent.runs, run => [run.start,run.end,run.gate]),
+                   [[0,3,false],[3,7,false]]);
   // rails span bays, never the whole run
   const rails = bent.parts.filter(p => p.k === 'rail');
   assert.ok(rails.length > 0 && rails.every(r => r.w <= 2.4 + 1e-9));
@@ -269,6 +392,8 @@ test('the developed elevation agrees with the model it is drawn from', () => {
   assert.equal(+cap.x.toFixed(4), -0.05);
   assert.equal(+cap.w.toFixed(4), 4.1);
   assert.equal(+cap.h.toFixed(4), 0.045);
+  assert.equal(+capped.runs[0].handrailStart.toFixed(4), -0.05);
+  assert.equal(+capped.runs[0].handrailEnd.toFixed(4), 4.05);
 
   // A run whose first point is its right-hand end would draw mirrored against the plan.
   // 5 m at 2.4 spacing has its short 0.2 m bay beside the last point, so drawing left to
@@ -277,6 +402,7 @@ test('the developed elevation agrees with the model it is drawn from', () => {
     [{ pts:[{x:5,y:0},{x:0,y:0}], closed:false, mat:{...mat, spacing:2.4} }], 0);
   assert.equal(rightToLeft.flipped, true);
   assert.deepEqual(Array.from(rightToLeft.stations).map(v => +v.toFixed(4)), [0, 0.2, 2.6, 5]);
+  assert.deepEqual([rightToLeft.runs[0].start,rightToLeft.runs[0].end],[5,0]);
   const leftToRight = context.elevationParts(
     [{ pts:[{x:0,y:0},{x:5,y:0}], closed:false, mat:{...mat, spacing:2.4} }], 0);
   assert.equal(leftToRight.flipped, false);
@@ -285,6 +411,24 @@ test('the developed elevation agrees with the model it is drawn from', () => {
   const northward = context.elevationParts(
     [{ pts:[{x:0,y:5},{x:0,y:0}], closed:false, mat }], 0);
   assert.equal(northward.flipped, true);
+});
+
+test('sheet elevations mark sequential purchased rail and handrail lengths', () => {
+  const start=html.indexOf('function stockJointStations(');
+  const end=html.indexOf('function sheetPlanPostUnderHandrail(',start);
+  assert.ok(start>=0 && end>start);
+  const context={Math};
+  vm.createContext(context);
+  vm.runInContext(html.slice(start,end),context);
+  assert.deepEqual(Array.from(context.stockJointStations(0,10.5,5.4)),[5.4]);
+  assert.deepEqual(Array.from(context.stockJointStations(10.5,0,5.4)),[5.1]);
+  assert.deepEqual(Array.from(context.stockJointStations(0,10.8,5.4)),[5.4]);
+  assert.deepEqual(Array.from(context.stockJointStations(0,5.4,5.4)),[]);
+  assert.match(html,/paintElevationStockJoints\(ev,xAt,base,mm\);/);
+  assert.match(html,/notes\.push\(`rail stock joints every/);
+  assert.match(html,/notes\.push\(`handrail stock joints every/);
+  assert.match(html,/return notes\.length \? 'Dotted: '/);
+  assert.match(html,/ctx\.setLineDash\(\[0\.7\*view\.s,1\.05\*view\.s\]\);/);
 });
 
 test('the drawing reads the BOM exclusions', () => {
@@ -345,8 +489,8 @@ test('the drawing reads the BOM exclusions', () => {
   assert.equal(gate({ excludeRails:true }).railsOff, true);
 
   // and the shared page header says it, in the take-off's words, for every view kind
-  assert.match(html, /if \(pg\.ev && pg\.ev\.notIncluded\.length\)\{/);
-  assert.match(html, /ctx\.fillText\('Dashed: ' \+ pg\.ev\.notIncluded\.join\(' · '\), note\.x, note\.y\);/);
+  assert.match(html, /pg\.ev\.notIncluded\.length \? \['Dashed: ' \+ pg\.ev\.notIncluded\.join\(' · '\)\] : \[\]/);
+  assert.match(html, /ctx\.fillText\(notes\.join\(' · '\), note\.x, note\.y\);/);
   assert.match(html, /ctx\.fillStyle = off \? '#ffffff' : fill;/);
   assert.match(html, /if \(off\) ctx\.setLineDash\(\[3,2\]\);/);
 });
@@ -361,9 +505,8 @@ test('enabled handrail is visible in plan, elevation and section', () => {
   assert.match(html, /function sheetPlanPostUnderHandrail\(p, plan\)\{/);
   assert.match(html, /if \(off \|\| covered\) ctx\.setLineDash\(\[3,2\]\);/);
   assert.match(html, /if \(!covered\) ctx\.fill\(\);/);
-  assert.match(html, /if \(seg\.gate \|\| !hrOf\(plan\.mat\)\.on\)\{/);
-  assert.match(html, /A handrail is the visible top surface/);
-  assert.match(html, /if \(seg\.gate \|\| !hrOf\(plan\.mat\)\.on/);
+  assert.match(html, /if \(seg\.gate \|\| \(!hrOf\(plan\.mat\)\.on && !plan\.railFootprints\.length\)\)\{/);
+  assert.match(html, /physical rail footprint already describes a rails-only run/);
   assert.match(html, /for \(const p of ev\.parts\.filter\(part => part\.k === 'cap'\)\)/);
   assert.match(html, /The handrail sits on the post tops/);
   assert.match(html, /As in elevation, the cap is on top of the posts/);
@@ -375,7 +518,7 @@ test('enabled handrail is visible in plan, elevation and section', () => {
 });
 
 test('sheet posts use their segment orientation and true rectangular section', () => {
-  assert.match(html, /posts\.push\(\{x:q\.x, y:q\.y, shape, angle\}\);/);
+  assert.match(html, /posts\.push\(\{x:q\.x, y:q\.y, shape, angle,/);
   assert.match(html, /postDepth:postTOf\(mat\)/);
   assert.match(html, /ctx\.save\(\); ctx\.translate\(S\.x,S\.y\); ctx\.rotate\(p\.angle \|\| 0\);/);
   assert.match(html, /ctx\.rect\(-halfW, -halfD, halfW\*2, halfD\*2\);/);
@@ -474,8 +617,147 @@ test('paper gets paper\'s ink, not the screen theme\'s', () => {
   assert.match(html, /ctx\.fillRect\(-wide\/2 - 1\.6\*k, lift - 6\.2\*k, wide \+ 3\.2\*k, 12\.4\*k\);/);
   // one drawing face, used to measure as well as to draw, or the fit tests lie
   assert.match(html, /const dimFont = k => `\$\{\(12\*k\)\.toFixed\(2\)\}px \$\{dimStyle\.font\}`;/);
-  assert.equal((html.match(/ctx\.font = dimFont\(k\);/g) || []).length, 3);
+  assert.equal((html.match(/ctx\.font = dimFont\(k\);/g) || []).length, 4);   // dimAt, dimChain, renderDimension, corner labels
   assert.doesNotMatch(html, /px system-ui`; ctx\.textAlign/);
   // sized for A4 rather than for a screen
   assert.match(html, /const ANNOT_MM = 3\.1;/);
+});
+
+test('corner details carry the mitre cut for the rails at each fold', () => {
+  const start = html.indexOf('const CORNER_MAX_DEG');
+  const end = html.indexOf('function elevationParts(', start);
+  assert.ok(start >= 0 && end > start);
+  const segLen = (a,b) => Math.hypot(b.x-a.x, b.y-a.y);
+  const context = { Math, state:{ mat:{} },
+    railSideOf: m => (m && m.railSide === 'right' ? 'right' : 'left'),
+    railTOf: () => 0.045, postTOf: () => 0.1, postSizeOf: () => 0.1,
+    segLen,
+    postsAlong: (a,b,sp,gate) => { const L = segLen(a,b),
+        n = gate ? 1 : Math.max(1, Math.ceil(L/sp - 1e-9)), o = [];
+      for (let k2 = 0; k2 <= n; k2++){ const d = gate ? L*k2 : Math.min(L, sp*k2), t = L ? d/L : 0;
+        o.push({ x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t }); } return o; } };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  const mat = { railSide:'left', spacing:2.4 };
+
+  // a square corner mitres at 45; the reference drawing's 131.2 corner at 24.4
+  const L = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}], closed:false, mat }], 0);
+  assert.equal(L.length, 1);
+  assert.equal(+L[0].theta.toFixed(1), 90);
+  assert.equal(+L[0].mitre.toFixed(1), 45);
+  // postsAlong spaces from each run's start with the remainder at its end, so a 3 m leg
+  // at 2.4 m spacing has its nearest post 0.6 m before the corner, the 4 m leg 2.4 m after
+  assert.equal(+L[0].legIn.toFixed(4), 0.6);
+  assert.equal(+L[0].legOut.toFixed(4), 2.4);
+  const a = 131.2*Math.PI/180;
+  const ref = context.fenceCorners([{ pts:[
+    {x:0,y:0},{x:2.4,y:0},{x:2.4 - 1.8*Math.cos(a), y: -1.8*Math.sin(a)}], closed:false, mat }], 0);
+  assert.equal(+ref[0].theta.toFixed(1), 131.2);
+  assert.equal(+ref[0].mitre.toFixed(1), 24.4);
+
+  // a gate leaf never meets a rail, and a near-straight fold is cut square in practice
+  const gated = context.fenceCorners([{ pts:[
+    {x:0,y:0,gateAfter:true},{x:1.5,y:0},{x:1.5,y:3}], closed:false, mat }], 0);
+  assert.equal(gated.length, 0);
+  const straight = context.fenceCorners([{ pts:[
+    {x:0,y:0},{x:3,y:0},{x:6,y:0.1}], closed:false, mat }], 0);
+  assert.equal(straight.length, 0);
+
+  // a closed square has four corners, including the wrap at the first point
+  const loop = context.fenceCorners([{ pts:[
+    {x:0,y:0},{x:4,y:0},{x:4,y:4},{x:0,y:4}], closed:true, mat }], 0);
+  assert.equal(loop.length, 4);
+  assert.ok(loop.every(c => +c.mitre.toFixed(1) === 45));
+
+  // the drawing draws the joint on the fence's own rail side
+  const right = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],
+    closed:false, mat:{ railSide:'right', spacing:2.4 } }], 0);
+  assert.equal(right[0].side, 'right');
+  // each leg is offset by the face its own side normal meets, square posts giving both alike
+  assert.equal(+right[0].offIn.toFixed(4), 0.0725);         // postT/2 + railT/2
+  assert.equal(+right[0].offOut.toFixed(4), 0.0725);
+
+  // BOM exclusions travel with the corner, so the detail can draw excluded work as reference
+  assert.equal(L[0].postOff, false);
+  assert.equal(L[0].railOff, false);
+  const railsOut = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],
+    closed:false, excludeRails:true, mat }], 0);
+  assert.equal(railsOut[0].postOff, false);
+  assert.equal(railsOut[0].railOff, true);
+  const allOut = context.fenceCorners([{ pts:[{x:0,y:0},{x:3,y:0},{x:3,y:4}],
+    closed:false, excludeMaterials:true, mat }], 0);
+  assert.equal(allOut[0].postOff, true);
+  assert.equal(allOut[0].railOff, true);
+
+  // ...but only for a fence that actually has rails to join, rails above the fence height
+  // being built by nobody
+  assert.match(html, /const corners = ev\.mat\.style === 'rail' && effectiveRailYs\(ev\.mat\)\.length\s*\n\s*\? fenceCorners\(state\.polys, i\) : \[\];/);
+  // and the page exists, after the section — every fold detailed, six to a page
+  // the grid follows the corner count, one standard scale fits the worst cell, centred
+  assert.match(html, /for \(let n = 0; n < corners\.length; n \+= 6\)\{/);
+  assert.match(html, /place\(\{ kind:'corners', i, ev, corners: s\.shown, cols: s\.cols, rows: s\.rows,/);
+  assert.doesNotMatch(html, /corners\.slice\(0, 6\)/);
+  assert.match(html, /const cden = SCALES\.find\(fitsC\) \?\? SCALES\[SCALES\.length - 1\];/);
+  assert.match(html, /const cols = shown\.length === 1 \? 1 : shown\.length === 2 \? 2 : shown\.length <= 4 \? 2 : 3;/);
+  assert.match(html, /\(col \+ 0\.5\)\*cellW - pg\.k\*\(c\.box\.loX \+ c\.box\.hiX\)\/2;/);
+  // annotation clearances are paper millimetres, so a 1:50 grid cell reads like a 1:20 page
+  assert.match(html, /const paper = mmOnPaper => mmOnPaper\/kMM;/);
+  assert.match(html, /const lmitre = at\(move\(X, seam, -\(half \+ paper\(CHAIN_OFF\*ANNOT_MM\/12 \+ 7\)\)\)\);/);
+  // between-post cut notes use the open corner field, with masks keeping leader/member lines
+  // out of the lettering
+  assert.match(html, /ctx\.fillRect\(s\.x-wide\/2-1\.6\*k,s\.y-lineH\*lines\.length\/2,wide\+3\.2\*k,lineH\*lines\.length\);/);
+  // One shared mitred footprint drives both this fabrication detail and the isolated plan.
+  assert.match(html, /function faceMountedCornerGeometry\(c\)\{/);
+  assert.match(html, /const joint=faceMountedCornerGeometry\(c\);/);
+  assert.match(html, /if \(r1\) poly\(r1\.polygon,'#e2e8f0',c\.railOff\);/);
+  assert.match(html, /incoming\.points\[1\]=joint\.incoming\.cutA;/);
+  assert.match(html, /incoming\.points\[2\]=joint\.incoming\.cutB;/);
+  assert.match(html, /outgoing\.points\[0\]=joint\.outgoing\.cutA;/);
+  assert.match(html, /outgoing\.points\[3\]=joint\.outgoing\.cutB;/);
+  const sharedJoint=context.faceMountedCornerGeometry(ref[0]);
+  assert.ok(sharedJoint && sharedJoint.incoming && sharedJoint.outgoing);
+  const xy=points=>Array.from(points,p=>[p.x,p.y]);
+  assert.deepEqual(xy(sharedJoint.incoming.polygon.slice(1,3)),
+                   xy([sharedJoint.incoming.cutA,sharedJoint.incoming.cutB]));
+  assert.deepEqual(xy(sharedJoint.outgoing.polygon.slice(1,3)),
+                   xy([sharedJoint.outgoing.cutA,sharedJoint.outgoing.cutB]));
+  // posts either side — where the end rule places them — and the bay lengths post to post
+  assert.match(html, /if \(c\.pInPost\) postAt\(pIn, postDir\(pIn, c\.d1\)\);/);
+  assert.match(html, /if \(c\.pOutPost\) postAt\(pOut, postDir\(pOut, c\.d2\)\);/);
+  // the fabrication page has only cut length, a required mitre and the long-point setback;
+  // the general fence angle already exists on the plan page and must not be repeated here
+  const betweenPainter=html.slice(html.indexOf('function paintBetweenCornerDetail('),
+                                  html.indexOf('function paintCornerDetail('));
+  const facePainter=html.slice(html.indexOf('function paintCornerDetail('),
+                               html.indexOf('function paintSection('));
+  assert.doesNotMatch(betweenPainter,/c\.theta/);
+  assert.doesNotMatch(facePainter,/c\.theta/);
+  // both painters draw excluded work in the plan's reference ink: unfilled and dashed
+  assert.match(html,/function sheetDetailInk\(fill, off\)\{/);
+  assert.match(html,/ctx\.setLineDash\(off \? \[3,2\] : \[\]\);/);
+  assert.match(betweenPainter,/poly\(incoming\.polygon,'#e2e8f0',c\.railOff\);/);
+  assert.match(betweenPainter,/sheetDetailInk\('#cbd5e1',c\.postOff\);/);
+  assert.match(facePainter,/sheetDetailInk\(fill, off\);/);
+  // and a round post stays round on a face-mounted detail
+  assert.match(facePainter,/if \(postShapeAt\(c\.polys, q, pm\) === 'round'\)\{/);
+  // and each drawn post is the section of the run that actually stands it, not this run's
+  assert.match(facePainter,/const pm = postSectionOf\(c\.polys, q, c\.mat\), w = postSizeOf\(pm\), t = postTOf\(pm\);/);
+  assert.match(betweenPainter,/const pm=postSectionOf\(c\.polys,q,c\.mat\),w=postSizeOf\(pm\),t=postTOf\(pm\);/);
+  assert.match(html,/function sheetCornerSetout\(rail,atCorner\)/);
+  assert.match(html,/if \(saw<0\.05\) return null;/);
+  assert.match(html,/return \{cut,corner:lower,distance:Math\.hypot\(cut\.x-lower\.x,cut\.y-lower\.y\)\};/);
+  assert.match(html,/lines\.push\(`long point \$\{fmtSmall\(setout\.distance,u\)\} from bottom post corner`\);/);
+  assert.match(html,/const open=norm2\(\{x:-c\.d1\.x\+c\.d2\.x,y:-c\.d1\.y\+c\.d2\.y\}\) \|\| sideNormal\(dir,'left'\);/);
+  assert.match(html,/const noteAt=\{x:c\.v\.x\+open\.x\*paper\(30\),y:c\.v\.y\+open\.y\*paper\(30\)\};/);
+  assert.match(html,/sheetCornerDatumMark\(at,setout\.corner,k\);/);
+  assert.match(html,/function sheetCornerNote\(to,lines,point,k,leader\)/);
+  assert.match(html,/dimArrow\(tip\.x,tip\.y,dx\/L,dy\/L,k\*\.65\);/);
+  assert.match(html,/const lenA=dot2\(\{ x:r\.cutA\.x-from\.x, y:r\.cutA\.y-from\.y \},toward\);/);
+  // the drawn rail ends where the dimension ends: the neighbouring post centre
+  assert.match(html, /incoming:rail\(c\.d1,n1,c\.offIn,c\.legIn\)/);
+  assert.doesNotMatch(html, /rail\(c\.d1,n1,c\.offIn,c\.legIn - c\.postW\/2\)/);
+  assert.match(html, /railDim\(r2,pOut,\{x:-c\.d2\.x,y:-c\.d2\.y\}\);/);
+  assert.doesNotMatch(html, /dimAt\(toS, pIn, c\.v, fmtLen\(c\.legIn/);   // not the bay
+  assert.match(html, /else if \(pg\.kind === 'corners'\) paintCorners\(pg, u, k\);/);
+  assert.match(html, /`mitre \$\{\+c\.mitre\.toFixed\(1\)\}°`/);
 });
