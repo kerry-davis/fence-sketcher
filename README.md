@@ -75,6 +75,11 @@ screens.
   spacing, style, height, rail position, post shapes, end-post rule, handrail and
   materials inclusion. Its 3D and drawing-sheet visibility can be controlled
   independently. Totals aggregate across all included fences.
+- **Copy fence settings.** Select a fence or gate and use **Copy settings** in
+  its Fence panel, then select another and choose **Paste settings**. Construction,
+  end-post, materials-inclusion and visibility settings are cloned as one undoable
+  edit. The target keeps its own name, geometry, gate locations and individual-post
+  overrides. A selected gate also passes its attachment side to another selected gate.
 - **Gates.** Mark any segment as a gate: its opening is excluded from fence length
   and panel totals, while its support posts and leaf rails/palings are included in
   materials unless those BOM components are excluded. Gate-only runs are named
