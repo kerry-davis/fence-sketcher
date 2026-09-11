@@ -25,11 +25,13 @@ test('full restore validates library entries and legacy single-drawing files', (
   assert.ok(start >= 0 && end > start);
 
   const context = {
-    Error, Array, Set, FULL_EXTERNAL_MAX_FILES:1000,
+    Error, Array, Set, Blob, FULL_EXTERNAL_MAX_FILES:1000,
     MAX_BACKUP_BODY:1_900_000,
     BK_FILE_RE:/^[a-zA-Z0-9._-]{1,64}$/,
   };
   vm.createContext(context);
+  vm.runInContext(html.slice(html.indexOf('function validateSnapshot('),
+                            html.indexOf('function applyState(')), context);
   vm.runInContext(html.slice(start, end), context);
 
   const direct = {v:2, polys:[], builds:[]};
@@ -51,4 +53,10 @@ test('full restore validates library entries and legacy single-drawing files', (
     format:'fence-sketcher-library', formatVersion:1,
     drawings:[{name:'same', snapshot:direct}, {name:'same', snapshot:direct}],
   }), /invalid or duplicate drawing name/);
+  assert.throws(() => context.externalLibrary({
+    ...library, drawings:[{name:'broken', snapshot:{...direct, polys:[{pts:[null]}]}}],
+  }), /Invalid drawing/);
+  assert.throws(() => context.externalLibrary({
+    ...library, drawings:[{name:'unicode', snapshot:{...direct, note:'界'.repeat(650_000)}}],
+  }), /too large/, 'preflight counts UTF-8 bytes, not JavaScript characters');
 });

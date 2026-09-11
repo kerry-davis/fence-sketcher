@@ -148,7 +148,7 @@ test('face-mounted corner rails keep one straight plane when the corner post rot
 
 test('gates preserve an independent side when rail position changes', () => {
   assert.match(html, /const side = typeof gateSideOf === 'function' \? gateSideOf\(a,mat\) : 'left'/);
-  assert.match(html, /migrateGateSides\(state\.polys,state\.mat\)/);
+  assert.match(html, /migrateGateSides\(next\.polys, next\.mat\)/);
   assert.match(html, /pt\.gateSideAfter = legacyGateSide\(pl0\.mat \|\| state\.mat\)/);
   assert.match(html, /if \(src\.s === 'left'\) q\.gateSideAfter = 'right'/);
   assert.match(html, /else if \(src\.s === 'right'\) q\.gateSideAfter = 'left'/);

@@ -293,6 +293,8 @@
   .bkSyncDot{width:7px;height:7px;flex:none;background:var(--accent);border-radius:50%;
              box-shadow:0 0 0 3px var(--accent-soft)}
   .bkSync strong{color:var(--ink);font-weight:600}
+  .bkSync[data-connected="false"] .bkSyncDot{background:var(--muted);box-shadow:none}
+  #bkRetry{margin-left:auto;min-height:32px;padding:4px 8px;font-size:11px}
   #bkStatus[data-kind="error"], #bkDialogError{color:var(--danger)}
   #readOnlyDetails{display:none}
   body.readonly #readOnlyDetails{display:block}
@@ -506,7 +508,7 @@
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
       </svg></button>
     </div>
-  <details id="bkSec" class="editorOnly" style="display:none">
+  <details id="bkSec" class="editorOnly">
     <summary id="bkMenuButton">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"
@@ -554,7 +556,18 @@
       </section>
       <section class="bkLocal" aria-labelledby="bkLocalTitle">
         <div class="bkLocalHead">
-          <span id="bkLocalTitle">External backup</span>
+          <span id="bkLocalTitle">This drawing</span>
+          <small>Keep a copy on your device or open a drawing file. Works offline.</small>
+        </div>
+        <div class="bkLocalActions">
+          <button id="bkExportDrawing" class="primary">Download drawing</button>
+          <button id="bkImportDrawing">Open file</button>
+        </div>
+        <input id="bkDrawingInput" type="file" accept=".json,application/json" hidden>
+      </section>
+      <section class="bkLocal" aria-labelledby="bkLibraryTitle">
+        <div class="bkLocalHead">
+          <span id="bkLibraryTitle">External backup</span>
           <small>All saved drawings and the current canvas. Public share links are not included.</small>
         </div>
         <div class="bkLocalActions">
@@ -564,9 +577,10 @@
         <input id="bkRestoreInput" type="file" accept=".json,application/json" hidden>
       </section>
       <p class="note" id="bkStatus" role="status" aria-live="polite"></p>
-      <div class="bkSync">
+      <div class="bkSync" id="bkConnection" data-connected="false">
         <span class="bkSyncDot" aria-hidden="true"></span>
-        <span><strong>Saved on gbot</strong> · Available through Tailscale</span>
+        <span id="bkConnectionText" role="status">Checking file server…</span>
+        <button id="bkRetry" hidden>Retry connection</button>
       </div>
     </div>
   </details>
@@ -715,7 +729,7 @@
         </div>
         <div class="row onlyRail" title="Left and right are viewed from the first post toward the last post. Between-post rails finish against the actual post faces.">
           <span>Rail side</span>
-          <span><select id="iRailSide">
+          <span><select id="iRailSide" aria-label="Rail side">
             <option value="left">Left of line</option><option value="right">Right of line</option>
             <option value="inside-left">Between posts — left</option>
             <option value="inside-middle">Between posts — centre</option>
@@ -723,9 +737,9 @@
           </select></span>
         </div>
         <h3 class="subhead">Posts</h3>
-        <div class="row"><span>Post spacing</span><span><input id="iSpacing" inputmode="decimal"> <span class="unit" id="uSpacing">m</span></span></div>
+        <div class="row"><label for="iSpacing">Post spacing</label><span><input id="iSpacing" inputmode="decimal" aria-describedby="uSpacing"> <span class="unit" id="uSpacing">m</span></span></div>
         <div class="row"><span>Post shape</span>
-          <span><select id="iPostShape">
+          <span><select id="iPostShape" aria-label="Post shape">
             <optgroup label="Fence setting">
               <option value="fence:square">Square</option><option value="fence:round">Round</option>
             </optgroup>
@@ -737,7 +751,7 @@
         <div class="row" id="postOrientWrap" style="display:none"
              title="Sets the selected rectangular post in plan. Automatic keeps the first connected fence leg used by older drawings.">
           <span>Post orientation</span>
-          <span><select id="iPostOrient">
+          <span><select id="iPostOrient" aria-label="Post orientation">
             <option value="auto">Automatic</option>
             <option value="previous">Previous fence leg</option>
             <option value="next">Next fence leg</option>
@@ -746,11 +760,11 @@
           </select></span></div>
         <div class="row" id="postAngleWrap" style="display:none"
              title="Plan angle measured clockwise from the horizontal; equivalent angles repeat every 180 degrees.">
-          <span>Post angle</span><span><input id="iPostAngle" inputmode="decimal"> <span class="unit">°</span></span></div>
-        <div class="row sizePair" title="Square post width × depth, or round post diameter. A 100x100 post is width 100, depth 100."><span>Post</span><span><span class="times" id="postSizePrefix" style="display:none">Ø</span><input id="iPostSize" inputmode="decimal" title="Post width"> <b class="times" id="postTimes">×</b> <input id="iPostSizeD" inputmode="decimal" title="Post depth"> <span class="unit" id="uPostSize">mm</span></span></div>
+          <span>Post angle</span><span><input id="iPostAngle" inputmode="decimal" aria-label="Post angle in degrees"> <span class="unit">°</span></span></div>
+        <div class="row sizePair" title="Square post width × depth, or round post diameter. A 100x100 post is width 100, depth 100."><span>Post</span><span><span class="times" id="postSizePrefix" style="display:none">Ø</span><input id="iPostSize" inputmode="decimal" title="Post width" aria-label="Post width or diameter" aria-describedby="uPostSize"> <b class="times" id="postTimes">×</b> <input id="iPostSizeD" inputmode="decimal" title="Post depth" aria-label="Post depth" aria-describedby="uPostSize"> <span class="unit" id="uPostSize">mm</span></span></div>
         <div class="row" title="Posts at the ends of a run. Auto skips an end already posted by another fence. One end lets you choose the physical end.">
           <span>End posts <span style="opacity:.5">ⓘ</span></span>
-          <span><select id="iEnds">
+          <span><select id="iEnds" aria-label="End posts">
             <option value="auto">Auto</option>
             <option value="2">Both ends</option>
             <option value="one">One end</option>
@@ -758,29 +772,29 @@
           </select></span></div>
         <div class="row" id="oneEndWrap" style="display:none">
           <span>Post at</span>
-          <span><select id="iOneEnd">
+          <span><select id="iOneEnd" aria-label="Post at">
             <option value="start">First end</option><option value="end">Second end</option>
           </select></span></div>
-        <div class="row" title="Total length of each fence post. Above-ground fence height is this length minus the post depth in ground."><span>Post length (total)</span><span><input id="iHeight" inputmode="decimal"> <span class="unit" id="uHeight">m</span></span></div>
+        <div class="row" title="Total length of each fence post. Above-ground fence height is this length minus the post depth in ground."><label for="iHeight">Post length (total)</label><span><input id="iHeight" inputmode="decimal" aria-describedby="uHeight"> <span class="unit" id="uHeight">m</span></span></div>
         <div class="row" title="The part of each post installed below finished ground level. The 3D view shows the remaining above-ground height.">
-          <span>Hole depth</span><span><input id="iPostDepth" inputmode="decimal"> <span class="unit" id="uPostDepth">mm</span></span></div>
+          <label for="iPostDepth">Hole depth</label><span><input id="iPostDepth" inputmode="decimal" aria-describedby="uPostDepth"> <span class="unit" id="uPostDepth">mm</span></span></div>
         <div class="row"><span>Height above ground</span><b id="iAboveGroundHeight">0</b></div>
         <h3 class="subhead">Panel</h3>
-        <div class="row" title="Enter 0 for no rails"><span>Rails per panel</span><span><input id="iRails" inputmode="numeric"> <span class="unit"></span></span></div>
+        <div class="row" title="Enter 0 for no rails"><label for="iRails">Rails per panel</label><span><input id="iRails" inputmode="numeric"> <span class="unit"></span></span></div>
         <div class="row" title="Length of each rail available to buy. The BOM compares this stock length with each post-to-post span.">
-          <span>Rail length</span><span><input id="iRailLength" inputmode="decimal"> <span class="unit" id="uRailLength">m</span></span></div>
+          <label for="iRailLength">Rail length</label><span><input id="iRailLength" inputmode="decimal" aria-describedby="uRailLength"> <span class="unit" id="uRailLength">m</span></span></div>
         <div class="row onlyPaling sizePair" title="Paling width × thickness"><span>Paling</span><span><input id="iPaling" inputmode="decimal" title="Paling width"> <b class="times">×</b> <input id="iPalingT" inputmode="decimal" title="Paling thickness"> <span class="unit" id="uPaling">mm</span></span></div>
-        <div class="row onlyPaling"><span>Paling gap</span><span><input id="iGap" inputmode="decimal"> <span class="unit" id="uGap">mm</span></span></div>
-        <div class="row onlyRail"><span>Bottom gap</span><span><input id="iBotOff" inputmode="decimal"> <span class="unit" id="uBotOff">mm</span></span></div>
-        <div class="row onlyRail"><span>Top gap</span><span><input id="iTopOff" inputmode="decimal"> <span class="unit" id="uTopOff">mm</span></span></div>
+        <div class="row onlyPaling"><label for="iGap">Paling gap</label><span><input id="iGap" inputmode="decimal" aria-describedby="uGap"> <span class="unit" id="uGap">mm</span></span></div>
+        <div class="row onlyRail"><label for="iBotOff">Bottom gap</label><span><input id="iBotOff" inputmode="decimal" aria-describedby="uBotOff"> <span class="unit" id="uBotOff">mm</span></span></div>
+        <div class="row onlyRail"><label for="iTopOff">Top gap</label><span><input id="iTopOff" inputmode="decimal" aria-describedby="uTopOff"> <span class="unit" id="uTopOff">mm</span></span></div>
         <div class="row onlyRail sizePair" title="Rail width × thickness"><span>Rail</span><span><input id="iRailW" inputmode="decimal" title="Rail width"> <b class="times">×</b> <input id="iRailT" inputmode="decimal" title="Rail thickness"> <span class="unit" id="uRailW">mm</span></span></div>
-        <div class="row onlyRail"><span>Rail gap</span><span><input id="iRailGap" inputmode="decimal"> <span class="unit" id="uRailGap">mm</span></span></div>
+        <div class="row onlyRail"><label for="iRailGap">Rail gap</label><span><input id="iRailGap" inputmode="decimal" aria-describedby="uRailGap"> <span class="unit" id="uRailGap">mm</span></span></div>
         <h3 class="subhead">Handrail</h3>
         <label class="own" style="margin:4px 0 0" title="A capping / hand rail laid along the tops of the posts. It sits on top, so it adds its own thickness above the fence height.">
           <input type="checkbox" id="iHR"> Handrail on top of posts</label>
         <div class="row onlyHR sizePair" title="Handrail width × thickness"><span>Handrail</span><span><input id="iHRW" inputmode="decimal" title="Handrail width"> <b class="times">×</b> <input id="iHRT" inputmode="decimal" title="Handrail thickness"> <span class="unit" id="uHRW">mm</span></span></div>
         <div class="row onlyHR" title="Length of each handrail available to buy. The BOM compares this stock length with each post-bay span.">
-          <span>Handrail length</span><span><input id="iHRLength" inputmode="decimal"> <span class="unit" id="uHRLength">m</span></span></div>
+          <label for="iHRLength">Handrail length</label><span><input id="iHRLength" inputmode="decimal" aria-describedby="uHRLength"> <span class="unit" id="uHRLength">m</span></span></div>
       </div>
     </details>
 
@@ -6971,8 +6985,11 @@ cv.addEventListener('wheel', e => {
 
 // keyboard: Delete/Backspace, Esc, Undo/Redo
 window.addEventListener('keydown', e => {
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   if (document.querySelector('dialog[open]')) return;   // a modal owns the keyboard, Escape included
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)){
+    if (e.key === 'Escape' && sheetOpen()){ e.preventDefault(); setSheet(false); }
+    return;
+  }
   if (readOnly){
     if (e.key === 'Escape'){ sel = null; updateAll(); }
     return;
@@ -7776,17 +7793,96 @@ function statePayload(){
   return { v:2, unit:state.unit, polys:state.polys, builds:state.builds,
            mat:state.mat, snapGrid:state.snapGrid, snapBld:state.snapBld, view };
 }
-function applyState(o){
-  state.unit = o.unit === 'ft' ? 'ft' : 'm';
-  if (Array.isArray(o.polys))  state.polys  = o.polys;
-  if (Array.isArray(o.builds)){
-    state.builds = o.builds;
-    if (!o.v || o.v < 2) inferHouses(state.builds);
+// Validate before touching live state: a broken file must not replace a working drawing.
+// Optional fields from older versions keep their existing defaults; unknown fields survive.
+function validateSnapshot(o){
+  const record = v => v && typeof v === 'object' && !Array.isArray(v);
+  const invalid = detail => { throw new Error('Invalid drawing: ' + detail + '.'); };
+  const number = (v, name, min=-Infinity) => {
+    if (!Number.isFinite(v) || v < min) invalid(name);
+  };
+  const optionalNumbers = (value, keys, name, min=-Infinity) => {
+    for (const key of keys) if (value[key] != null) number(value[key], name + ' ' + key, min);
+  };
+  const material = mat => {
+    if (mat == null) return;
+    if (!record(mat) || (mat.touched != null && !record(mat.touched))) invalid('construction settings');
+    optionalNumbers(mat, ['spacing','railLength','hrLength','rails','paling','gap','postSize',
+      'postT','palingT','railT','height','postDepth','railW','railGap','botOff','topOff',
+      'hrW','hrT'], 'construction', 0);
+  };
+  if (!record(o) || (o.v !== undefined && o.v !== 1 && o.v !== 2)) invalid('unsupported version');
+  if (!Array.isArray(o.polys) || !Array.isArray(o.builds)) invalid('missing fences or buildings');
+  material(o.mat);
+  for (const pl of o.polys){
+    if (!record(pl) || !Array.isArray(pl.pts)) invalid('fence points');
+    if (pl.name != null && typeof pl.name !== 'string') invalid('fence name');
+    material(pl.mat);
+    for (const q of pl.pts){
+      if (!record(q)) invalid('post');
+      number(q.x, 'post x'); number(q.y, 'post y');
+      if (q.pid != null && typeof q.pid !== 'string') invalid('post reference');
+      optionalNumbers(q, ['lockAfter'], 'post', 0);
+      optionalNumbers(q, ['postAngle','lockOff'], 'post');
+      if (q.dim != null){
+        const d = q.dim;
+        if (!record(d)) invalid('post dimension');
+        number(d.len, 'dimension length', 0);
+        if (d.axis != null){
+          if (d.axis !== 'x' && d.axis !== 'y') invalid('dimension axis');
+          number(d.v, 'wall position');
+          if (d.span != null && (!Array.isArray(d.span) || d.span.length !== 2 ||
+              !d.span.every(Number.isFinite))) invalid('wall span');
+        } else {
+          number(d.x, 'dimension anchor x'); number(d.y, 'dimension anchor y');
+        }
+        if (d.pid != null && typeof d.pid !== 'string') invalid('dimension reference');
+        optionalNumbers(d, ['off'], 'dimension');
+      }
+      if (q.ang != null){
+        if (!record(q.ang)) invalid('corner angle');
+        optionalNumbers(q.ang, ['deg','d','r'], 'corner angle');
+      }
+    }
   }
-  if (o.mat) state.mat = Object.assign(state.mat, o.mat);
-  migrateGateSides(state.polys,state.mat);
-  state.snapGrid = o.snapGrid !== false; state.snapBld = o.snapBld !== false;
-  if (o.view && o.view.s) view = o.view;
+  for (const b of o.builds){
+    if (!record(b)) invalid('building');
+    number(b.x, 'building x'); number(b.y, 'building y');
+    number(b.w, 'building width', 0); number(b.h, 'building depth', 0);
+    optionalNumbers(b, ['z','pitch'], 'building', 0);
+  }
+  if (o.view != null){
+    if (!record(o.view)) invalid('view');
+    number(o.view.x, 'view x'); number(o.view.y, 'view y');
+    number(o.view.s, 'view scale', Number.MIN_VALUE);
+  }
+  return o;
+}
+function applyState(o){
+  const next = JSON.parse(JSON.stringify(validateSnapshot(o)));
+  const unit = next.unit === 'ft' ? 'ft' : 'm';
+  const materials = mat => ({...DEF[unit], style:'paling', rails:DEF_RAILS,
+    ends:DEF_ENDS, postShape:'square', railSide:'left', handrail:false,
+    // Before embedment existed, height meant the entire above-ground height.
+    postDepth:0, ...mat, touched:mat && mat.touched || {}});
+  next.mat = materials(next.mat);
+  for (const pl of next.polys) if (pl.mat) pl.mat = materials(pl.mat);
+  if (!next.v || next.v < 2) inferHouses(next.builds);
+  migrateGateSides(next.polys, next.mat);
+  Object.assign(state, {unit, polys:next.polys, builds:next.builds, mat:next.mat,
+    snapGrid:next.snapGrid !== false, snapBld:next.snapBld !== false});
+  view = next.view || {x:-2, y:-2, s:24};
+}
+function replaceDrawing(snapshot){
+  validateSnapshot(snapshot);
+  const before = historySnapshot();
+  // A new drawing opens in plan. Old sheet coordinates, camera targets and held
+  // dimension references belong to the previous drawing, including an empty import.
+  setDimTool(false); setSheetView(false); set3d(false);
+  applyState(snapshot);
+  pushHistory(before);
+  sel = null; bsel.clear();
+  syncControls(); fitView();
 }
 let saveTimer = 0, lastSavedPayload = '', lastSavedAt = 0, autosaveInitializing = true;
 function setAutosaveStatus(message, kind=''){
@@ -7813,7 +7909,7 @@ function saveNow(){
     setAutosaveStatus(autosaveSuccessMessage(), 'success');
     return true;
   } catch(error) {
-    setAutosaveStatus('Autosave failed. Changes may be lost if you close this page; use Files if available.', 'error');
+    setAutosaveStatus('Autosave failed. Use Files → Download drawing to keep a copy before closing this page.', 'error');
     return false;
   }
 }
@@ -7842,12 +7938,10 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flushAutosave();
 });
 async function loadSharedDrawing(){
-  const response = await fetch('/api/shares/' + SHARE_ROUTE[1], {
+  const {response, value} = await requestJson('/api/shares/' + SHARE_ROUTE[1], {
     cache:'no-store',
     headers:{accept:'application/json'},
-  });
-  let value = {};
-  try { value = await response.json(); } catch {}
+  }, 'sharing service');
   if (!response.ok || !value.snapshot || value.snapshot.v !== 2 ||
       !Array.isArray(value.snapshot.polys) || !Array.isArray(value.snapshot.builds))
     throw new Error('This view-only link is invalid, expired, or has been stopped.');
@@ -7885,7 +7979,7 @@ const FULL_EXTERNAL_MAX = 25 * 1024 * 1024;
 const FULL_EXTERNAL_MAX_FILES = 1000;
 let bkCurrent = '';
 let bkItems = [], bkDialogAction = null, bkBusy = false, bkServerAvailable = false;
-let pendingExternalRestore = null;
+let pendingExternalRestore = null, pendingDrawingImport = null;
 let shareAvailable = false, currentShare = null, shareSource = '', shareBusy = false;
 let sharedItems = [];
 try { bkCurrent = localStorage.getItem(BK_KEY) || ''; } catch(e) {}
@@ -7906,6 +8000,55 @@ function externalLibraryFileName(){
   const d = new Date(), p = n => String(n).padStart(2,'0');
   return `fence-sketcher-backup-${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.json`;
 }
+function downloadJsonFile(value, name){
+  const blob = new Blob([JSON.stringify(value, null, 2) + '\n'], {type:'application/json'});
+  const url = URL.createObjectURL(blob), link = document.createElement('a');
+  try {
+    link.href = url; link.download = name; link.rel = 'noopener';
+    document.body.appendChild(link); link.click();
+  } finally {
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+function downloadDrawing(){
+  if (readOnly || bkBusy) return;
+  setBkBusy(true); setBkStatus('Preparing drawing file…');
+  try {
+    const name = (bkCurrent || bkAutoName()) + '.json';
+    downloadJsonFile({format:'fence-sketcher', formatVersion:1,
+      drawingName:bkCurrent, exportedAt:new Date().toISOString(), snapshot:statePayload()}, name);
+    setBkStatus(`Downloaded “${name}”.`, 'success');
+  } catch(error) { setBkStatus(error.message || 'Could not download the drawing.', 'error'); }
+  finally { setBkBusy(false); }
+}
+async function chooseDrawingFile(file){
+  if (!file || readOnly || bkBusy) return;
+  setBkBusy(true); setBkStatus('Reading drawing file…');
+  try {
+    if (file.size > FULL_EXTERNAL_MAX) throw new Error('This file is larger than 25 MB.');
+    const value = JSON.parse(await file.text());
+    if (value && value.format === 'fence-sketcher-library')
+      throw new Error('This is a full library backup. Use Restore all files to open it.');
+    const snapshot = externalSnapshot(value);
+    pendingDrawingImport = {name:file.name, snapshot};
+    openBkDialog('importDrawing', file.name);
+    setBkStatus('Drawing file ready to open.');
+  } catch(error) {
+    setBkStatus(error instanceof SyntaxError ? 'This file is not valid JSON.' : error.message, 'error');
+  } finally { setBkBusy(false); setBkDialogBusy(false); }
+}
+function importDrawing(){
+  if (!pendingDrawingImport || readOnly || bkBusy) return;
+  const {name, snapshot} = pendingDrawingImport;
+  try {
+    replaceDrawing(snapshot);
+    // An imported file is a new local drawing; Save must not overwrite an unrelated backup.
+    setBkCurrent('');
+    closeBkDialog();
+    setBkStatus(`Opened “${name}”. You can Undo this change.`, 'success');
+  } catch(error) { $('bkDialogError').textContent = error.message; }
+}
 function externalSnapshot(value){
   const envelope = !!(value && value.format === 'fence-sketcher');
   if (envelope && value.formatVersion !== 1)
@@ -7914,12 +8057,12 @@ function externalSnapshot(value){
   if (!snapshot || !Array.isArray(snapshot.polys) || !Array.isArray(snapshot.builds) ||
       (snapshot.v !== undefined && snapshot.v !== 1 && snapshot.v !== 2))
     throw new Error('Choose a valid Fence Sketcher JSON file.');
-  return snapshot;
+  return validateSnapshot(snapshot);
 }
 function externalLibrary(value){
   if (value && value.format === 'fence-sketcher'){
     const snapshot = externalSnapshot(value);
-    if (JSON.stringify(snapshot).length > MAX_BACKUP_BODY)
+    if (new Blob([JSON.stringify(snapshot)]).size > MAX_BACKUP_BODY)
       throw new Error('A drawing in this backup is too large for the file server.');
     const name = typeof value.drawingName === 'string' && BK_FILE_RE.test(value.drawingName)
       ? value.drawingName : 'restored-drawing';
@@ -7934,7 +8077,7 @@ function externalLibrary(value){
       throw new Error('The full backup contains an invalid or duplicate drawing name.');
     names.add(entry.name);
     const snapshot = externalSnapshot(entry.snapshot);
-    if (JSON.stringify(snapshot).length > MAX_BACKUP_BODY)
+    if (new Blob([JSON.stringify(snapshot)]).size > MAX_BACKUP_BODY)
       throw new Error(`Drawing “${entry.name}” is too large for the file server.`);
     return {name:entry.name, snapshot};
   });
@@ -7958,6 +8101,8 @@ function syncBkActions(){
   $('bkOpenCount').textContent = bkItems.length || '';
   $('bkDownload').disabled = bkBusy || !bkServerAvailable;
   $('bkRestore').disabled = bkBusy || !bkServerAvailable;
+  $('bkExportDrawing').disabled = $('bkImportDrawing').disabled = bkBusy;
+  $('bkRetry').disabled = $('pickClose').disabled = bkBusy;
   $('bkSec').setAttribute('aria-busy', String(bkBusy));
   syncShareAction();
 }
@@ -7965,12 +8110,33 @@ function setBkBusy(busy){
   bkBusy = busy;
   syncBkActions();
 }
+async function requestJson(path, options={}, service='gbot file server'){
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    let response;
+    try { response = await fetch(path, {...options, signal:controller.signal}); }
+    catch(error) {
+      if (controller.signal.aborted) throw error;
+      throw new Error(`Could not reach the ${service}.`);
+    }
+    let value;
+    try { value = await response.json(); }
+    catch(error) {
+      if (controller.signal.aborted) throw error;
+      throw new Error(`The ${service} returned an unreadable response. Try again.`);
+    }
+    return {response, value};
+  } catch(error) {
+    if (controller.signal.aborted)
+      throw new Error(`The ${service} took too long to respond. ` +
+        (options.method && options.method !== 'GET'
+          ? 'Check saved files or links before retrying.' : 'Please try again.'));
+    throw error;
+  } finally { clearTimeout(timer); }
+}
 async function bkRequest(path, options, fallback){
-  let r;
-  try { r = await fetch(path, options); }
-  catch(e) { throw new Error('Could not reach the gbot file server.'); }
-  let body = {};
-  try { body = await r.json(); } catch(e) {}
+  const {response:r, value:body} = await requestJson(path, options);
   if (!r.ok){
     const messages = { exists:'A drawing with that name already exists.',
                        'not found':'That saved drawing no longer exists.',
@@ -7994,8 +8160,7 @@ function syncShareAction(){
 }
 async function refreshShareConfig(){
   try {
-    const response = await fetch('share-config', {cache:'no-store'});
-    const value = await response.json();
+    const {response, value} = await requestJson('share-config', {cache:'no-store'});
     shareAvailable = response.ok && value.configured === true;
   } catch { shareAvailable = false; }
   syncShareAction();
@@ -8136,11 +8301,8 @@ function syncShareDialog(){
   }
 }
 async function shareRequest(source, options={}){
-  let response;
-  try { response = await fetch('shares/' + encodeURIComponent(source), options); }
-  catch { throw new Error('Could not reach the gbot share service.'); }
-  let value = {};
-  try { value = await response.json(); } catch {}
+  const {response, value} = await requestJson('shares/' + encodeURIComponent(source), options,
+                                           'gbot share service');
   if (response.status === 404 && (!options.method || options.method === 'GET')) return null;
   if (!response.ok) {
     const messages = {
@@ -8209,8 +8371,12 @@ async function stopSharing(){
   finally { setShareBusy(false); }
 }
 async function refreshBackups(){
+  $('bkConnectionText').textContent = 'Checking file server…';
   try {
     const list = await bkRequest('backups', {}, 'Could not load saved drawings.');
+    if (!Array.isArray(list) || list.some(item => !item || typeof item.name !== 'string' ||
+        !BK_FILE_RE.test(item.name) || !Number.isFinite(item.mtime)))
+      throw new Error('The file server returned an invalid drawing list.');
     bkServerAvailable = true;
     bkItems = list;
     $('bkSec').style.display = '';
@@ -8218,6 +8384,7 @@ async function refreshBackups(){
     setBkCurrent(bkCurrent);
     syncBkActions();
     renderPicker();
+    $('bkConnectionText').textContent = 'File server connected · gbot';
     if (shareAvailable) refreshSharedDrawings();
   } catch(e) {
     bkServerAvailable = false;
@@ -8226,7 +8393,11 @@ async function refreshBackups(){
     syncBkActions();
     renderPicker();
     setPickMessage(e.message, 'drawings');
-    setBkStatus(e.message + ' Full external backup requires the file server.', 'error');
+    $('bkConnectionText').textContent = 'File server unavailable';
+    setBkStatus(e.message + ' You can still download or open a drawing on this device.', 'error');
+  } finally {
+    $('bkConnection').dataset.connected = String(bkServerAvailable);
+    $('bkRetry').hidden = bkServerAvailable;
   }
 }
 function uniqueBkName(){
@@ -8258,6 +8429,7 @@ function openBkDialog(type, name=''){
     create: ['Save as new drawing','Choose a name before creating this saved copy.','Save drawing'],
     rename: ['Rename saved drawing',`Choose a new name for “${name}”.`,'Rename'],
     open:   ['Open saved drawing?',`Open “${name}” and replace the drawing currently on the canvas? You can Undo this change.`,'Open'],
+    importDrawing:['Open drawing file?',`Open “${name}” and replace the current canvas? You can Undo this change. Server drawings will stay as they are.`,'Open file'],
     restoreAll:['Restore full backup?',`Restore ${restoreCount} saved drawings from “${name}”? The current canvas will also be replaced.`,'Restore'],
     delete: ['Delete saved drawing?',`Permanently delete “${name}” from gbot? Any view-only link will also stop working. This cannot be undone.`,'Delete'],
   }[type];
@@ -8283,6 +8455,7 @@ function openBkDialog(type, name=''){
   else requestAnimationFrame(() => $('bkDialogConfirm').focus());
 }
 function setBkDialogBusy(busy){
+  $('bkDialog').setAttribute('aria-busy', String(busy));
   $('bkDialogCancel').disabled = busy;
   $('bkName').disabled = busy;
   $('bkRestoreMode').disabled = busy;
@@ -8292,6 +8465,7 @@ function closeBkDialog(){
   if ($('bkDialog').open) $('bkDialog').close();
   bkDialogAction = null;
   pendingExternalRestore = null;
+  pendingDrawingImport = null;
   $('bkRestoreModeWrap').style.display = 'none';
   $('bkRestoreSummary').textContent = '';
 }
@@ -8315,18 +8489,14 @@ async function downloadExternalLibrary(){
   try {
     const library = await collectExternalLibrary();
     const name = externalLibraryFileName();
-    const blob = new Blob([JSON.stringify(library, null, 2) + '\n'],
-                          {type:'application/json'});
-    const url = URL.createObjectURL(blob), link = document.createElement('a');
-    link.href = url; link.download = name; link.rel = 'noopener';
-    document.body.appendChild(link); link.click(); link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    downloadJsonFile(library, name);
     setBkStatus(`Downloaded ${library.drawings.length} saved drawing${library.drawings.length === 1 ? '' : 's'} as “${name}”.`, 'success');
   } catch(error) { setBkStatus(error.message || 'Could not create the full backup.', 'error'); }
   finally { setBkBusy(false); }
 }
 async function chooseExternalLibrary(file){
-  if (!file) return;
+  if (!file || bkBusy) return;
+  setBkBusy(true); setBkStatus('Reading full backup…');
   try {
     if (file.size > FULL_EXTERNAL_MAX) throw new Error('This file is larger than 25 MB.');
     if (!bkServerAvailable) throw new Error('Connect to the gbot file server before restoring a full backup.');
@@ -8339,6 +8509,7 @@ async function chooseExternalLibrary(file){
     $('bkSec').open = false;
     openBkDialog('restoreAll', file.name);
   } catch(error) { setBkStatus(error.message || 'Could not read that full backup.', 'error'); }
+  finally { setBkBusy(false); setBkDialogBusy(false); }
 }
 async function restoreExternalLibrary(){
   const pending = pendingExternalRestore;
@@ -8357,9 +8528,7 @@ async function restoreExternalLibrary(){
       restored++;
     }
     if (pending.library.currentSnapshot){
-      pushUndo();
-      applyState(pending.library.currentSnapshot);
-      sel = null; bsel.clear(); syncControls(); updateAll();
+      replaceDrawing(pending.library.currentSnapshot);
     }
     const currentRestored = pending.library.currentDrawing &&
       pending.library.drawings.some(item => item.name === pending.library.currentDrawing) &&
@@ -8401,9 +8570,7 @@ async function openBackup(name){
   setBkBusy(true); setBkDialogBusy(true);
   try {
     const o = await bkRequest(bkPath(name), {}, 'Could not open the drawing.');
-    pushUndo();
-    applyState(o);
-    sel = null; bsel.clear(); syncControls(); updateAll();
+    replaceDrawing(o);
     setBkCurrent(name);
     closeBkDialog();
     $('bkSec').open = false;
@@ -8448,6 +8615,24 @@ async function deleteBackup(name){
 $('bkSave').addEventListener('click', () =>
   bkCurrent ? saveBackup(bkCurrent) : openBkDialog('create'));
 $('bkSaveAs').addEventListener('click', () => openBkDialog('create'));
+$('bkExportDrawing').addEventListener('click', downloadDrawing);
+$('bkImportDrawing').addEventListener('click', () => { if (!bkBusy) $('bkDrawingInput').click(); });
+$('bkDrawingInput').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  chooseDrawingFile(file);
+});
+$('bkRetry').addEventListener('click', async () => {
+  if (bkBusy) return;
+  setBkBusy(true); setBkStatus('Checking file server…');
+  try {
+    await refreshBackups();
+    if (bkServerAvailable){
+      setBkStatus('File server connected.', 'success');
+      await refreshShareConfig();
+    }
+  } finally { setBkBusy(false); }
+});
 $('bkDownload').addEventListener('click', downloadExternalLibrary);
 $('bkRestore').addEventListener('click', () => { if (!bkBusy) $('bkRestoreInput').click(); });
 $('bkRestoreInput').addEventListener('change', e => {
@@ -8459,7 +8644,7 @@ $('bkShare').addEventListener('click', () => openShareDialog());
 $('bkShares').addEventListener('click', () => openPicker('shares'));
 $('bkOpen').addEventListener('click', () => openPicker('drawings'));
 $('pickSearch').addEventListener('input', renderPicker);
-$('pickClose').addEventListener('click', closePicker);
+$('pickClose').addEventListener('click', () => { if (!bkBusy) closePicker(); });
 $('pickDialog').addEventListener('close', () => { pickMode = ''; });
 $('pickList').addEventListener('click', async e => {
   const button = e.target.closest('button[data-pick]');
@@ -8488,6 +8673,12 @@ $('pickList').addEventListener('click', async e => {
 });
 $('bkName').addEventListener('input', syncBkDialog);
 $('bkDialogCancel').addEventListener('click', closeBkDialog);
+$('bkDialog').addEventListener('cancel', e => {
+  e.preventDefault();
+  if (!bkBusy) closeBkDialog();
+});
+$('pickDialog').addEventListener('cancel', e => { if (bkBusy) e.preventDefault(); });
+$('shareDialog').addEventListener('cancel', e => { if (shareBusy) e.preventDefault(); });
 $('bkSec').addEventListener('toggle', () => {
   if ($('bkSec').open) {
     setBkStatus('');
@@ -8506,6 +8697,7 @@ $('bkDialogForm').addEventListener('submit', e => {
   if (type === 'create') saveBackup(to, true);
   if (type === 'rename') renameBackup(name, to);
   if (type === 'open') openBackup(name);
+  if (type === 'importDrawing') importDrawing();
   if (type === 'restoreAll') restoreExternalLibrary();
   if (type === 'delete') deleteBackup(name);
 });
@@ -8522,8 +8714,13 @@ $('shareClose').addEventListener('click', () => {
   if (!shareBusy) $('shareDialog').close();
 });
 function setSheet(open){
+  const collapsed = onPhone() && !open;
+  const panels = $('panels'), grip = $('sheetGrip');
+  if (collapsed && panels.contains(document.activeElement) && document.activeElement !== grip)
+    grip.focus({preventScroll:true});
+  for (const panel of panels.children) if (panel !== grip) panel.inert = collapsed;
   document.body.classList.toggle('sheet', open);
-  $('sheetGrip').setAttribute('aria-expanded', String(open));
+  grip.setAttribute('aria-expanded', String(open));
 }
 const sheetOpen = () => document.body.classList.contains('sheet');
 // crossing the phone breakpoint (a rotation, a resized window) changes what the hint should say
@@ -8548,6 +8745,7 @@ async function init(){
            (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   if (readOnly){
     document.body.classList.add('readonly');
+    setSheet(false);
     $('shareState').style.display = 'grid';
     syncControls(); resize(); updateAll();
     try {
@@ -8568,6 +8766,7 @@ async function init(){
   if (hasDrawingContent()) fitView();
   else { view = { x:-2, y:-2, s:24 }; updateAll(); }
   autosaveInitializing = false;
+  setBkCurrent(bkCurrent); syncBkActions(); setSheet(false);
   refreshBackups();
   refreshShareConfig();
 }
