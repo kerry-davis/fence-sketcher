@@ -123,8 +123,9 @@ screens.
   Files stay out of the `⋯ More` menu; deleting is the **✕** beside whatever is
   selected, or the `Delete` key.
 - **Light / dark theme**, remembered.
-- **Autosave** to `localStorage`, plus named server backups managed from the
-  top-right **Files** menu.
+- **Autosave** to `localStorage`, with visible saving/error status and a final
+  synchronous flush when the page is hidden or closed, plus named server backups
+  managed from the top-right **Files** menu.
 - **Undo and redo** (`Ctrl+Z` / `Ctrl+Y` or `Cmd+Shift+Z`), 100 deep.
 - **View-only sharing.** Publish a saved drawing as an expiring, revocable link.
   Viewers can use the plan, 3D controls, labels, units and materials summary,
@@ -516,7 +517,10 @@ or commit that directory when changing branches.
 | `DELETE` | `/shares/<name>` | revoke its active link |
 
 Names are whitelisted to `[a-zA-Z0-9._-]{1,64}`, so path traversal isn't
-possible.
+possible. Backup request bodies are limited by bytes and fully validated before
+the previous drawing is replaced. Successful saves are staged to a private
+temporary file and atomically renamed into place, so an interrupted overwrite
+does not leave a partially written drawing.
 
 ### Full external backup and restore
 

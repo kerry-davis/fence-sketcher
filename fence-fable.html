@@ -218,6 +218,10 @@
   #selbox label{display:flex;align-items:center;gap:8px;padding:6px 0}
   #selbox input[type=checkbox]{width:19px;height:19px;accent-color:var(--accent)}
   #copyBtn{width:100%}
+  #copyStatus{min-height:18px}
+  #copyStatus:empty{display:none}
+  #copyStatus[data-kind="success"],#saveNote[data-kind="success"]{color:var(--accent)}
+  #copyStatus[data-kind="error"],#saveNote[data-kind="error"]{color:var(--danger)}
   #totalsHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
   #totalsHead h2{margin-bottom:0}
   #totalsScopeToggle{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;
@@ -439,6 +443,10 @@
     #orbitctl #bOrbitSpeed{display:flex;font-size:13px}
     #bkMenuPanel{position:fixed;top:66px;right:10px;width:calc(100vw - 20px);max-width:380px}
   }
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+                         scroll-behavior:auto!important;transition-duration:.01ms!important}
+  }
 </style>
 </head>
 <body>
@@ -452,12 +460,12 @@
     </svg>
     View only</span>
   <div class="grp editorOnly">
-    <button id="bUndo" title="Undo">
+    <button id="bUndo" title="Undo" aria-label="Undo">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11"
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
       </svg><span class="lbl">Undo</span></button>
-    <button id="bRedo" title="Redo">
+    <button id="bRedo" title="Redo" aria-label="Redo">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13"
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -472,7 +480,8 @@
               stroke-linecap="round" stroke-linejoin="round"/>
       </svg>Building</button>
     <button id="bClose">Close loop</button>
-    <button id="bDimTool" title="Dimension (D) — click two things on the drawing">
+    <button id="bDimTool" title="Dimension (D) — click two things on the drawing"
+            aria-pressed="false">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M3 12h18M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3M6 5v14M18 5v14"
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -482,15 +491,16 @@
     <button id="bClear" class="danger">Clear all</button>
   </div>
   <div class="grp toolbarEnd">
-    <button id="b3d" title="Plan / 3D view">3D</button>
-    <button id="bSheet" class="editorOnly" title="Drawing sheet — individual plans, elevations and sections on paper">Sheet</button>
+    <button id="b3d" title="Plan / 3D view" aria-label="3D view" aria-pressed="false">3D</button>
+    <button id="bSheet" class="editorOnly" aria-label="Drawing sheet view" aria-pressed="false"
+            title="Drawing sheet — individual plans, elevations and sections on paper">Sheet</button>
     <button id="bPdf" class="editorOnly" title="Save the drawing as a PDF">PDF</button>
     <div class="grp sec units viewTools">
-    <div class="seg2" id="unitTog">
-      <button data-u="m"  class="on">Metres</button>
-      <button data-u="ft">Feet</button>
+    <div class="seg2" id="unitTog" role="group" aria-label="Display units">
+      <button data-u="m" class="on" aria-pressed="true">Metres</button>
+      <button data-u="ft" aria-pressed="false">Feet</button>
     </div>
-    <button id="bTheme" title="Light / dark mode" aria-label="Light / dark mode">
+    <button id="bTheme" title="Switch to dark mode" aria-label="Dark mode" aria-pressed="false">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -565,8 +575,8 @@
 
 <main>
   <div id="wrap">
-    <canvas id="cv"></canvas>
-    <div id="hint"></div>
+    <canvas id="cv" aria-label="Interactive fence drawing" aria-describedby="hint"></canvas>
+    <div id="hint" role="status" aria-live="polite"></div>
     <div id="snapover" class="editorOnly">
       <label class="chk"><input type="checkbox" id="cSnapGrid" checked>
         <span class="chkFull">Snap grid</span><span class="chkShort">Grid</span></label>
@@ -604,16 +614,16 @@
         </svg></button>
     </div>
     <div id="orbitctl">
-      <button id="bOrbit" title="Start orbit" aria-label="Start orbit">▶<span class="orbitWord"> Orbit</span></button>
+      <button id="bOrbit" title="Start orbit" aria-label="Automatic orbit" aria-pressed="false">▶<span class="orbitWord"> Orbit</span></button>
       <button id="bOrbitDir" title="Orbit clockwise" aria-label="Orbit clockwise">↻</button>
       <label>Speed <input id="iOrbitSpeed" type="range" min="5" max="60" step="5" value="15">
         <span id="orbitSpeed">15°/s</span></label>
       <button id="bOrbitSpeed" title="Orbit speed: 15 degrees per second"
               aria-label="Orbit speed: 15 degrees per second">15°</button>
     </div>
-    <button id="fswap" class="editorOnly"
+    <button id="fswap" class="editorOnly" aria-label="Swap which side of the corner moves"
             title="Swap which side of the corner moves">⇄</button>
-    <button id="fdel" class="editorOnly" title="Delete">✕</button>
+    <button id="fdel" class="editorOnly" title="Delete" aria-label="Delete selected item">✕</button>
     <input id="dimin" class="editorOnly" inputmode="text" autocomplete="off"
            aria-label="Dimension value">
     <div id="gridcap" title="Grid spacing adapts automatically as you zoom"></div>
@@ -658,7 +668,8 @@
           <path d="M5 15H4a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 4 3h9A1.5 1.5 0 0 1 14.5 4.5V5"
                 stroke-width="1.8" stroke-linecap="round"/>
         </svg>Copy summary</button>
-      <p class="note" id="saveNote">Saved automatically in this browser.</p>
+      <p class="note" id="copyStatus" role="status" aria-live="polite"></p>
+      <p class="note" id="saveNote" role="status" aria-live="polite">Loading browser autosave…</p>
     </section>
 
     <section id="readOnlyDetails">
@@ -697,9 +708,9 @@
       <div class="accBody">
         <h3 class="subhead">Style</h3>
         <div class="row"><span>Fence style</span>
-          <div class="seg2" id="styleTog">
-            <button data-s="paling" class="on">Palings</button>
-            <button data-s="rail">Rails only</button>
+          <div class="seg2" id="styleTog" role="group" aria-label="Fence style">
+            <button data-s="paling" class="on" aria-pressed="true">Palings</button>
+            <button data-s="rail" aria-pressed="false">Rails only</button>
           </div>
         </div>
         <div class="row onlyRail" title="Left and right are viewed from the first post toward the last post. Between-post rails finish against the actual post faces.">
@@ -3199,9 +3210,13 @@ const PALETTES = {
 let C = PALETTES.light;
 const THEME_KEY = 'fenceFable.theme';
 function setTheme(t){
-  document.body.classList.toggle('dark', t === 'dark');
-  C = PALETTES[t === 'dark' ? 'dark' : 'light'];
+  const dark = t === 'dark';
+  document.body.classList.toggle('dark', dark);
+  C = PALETTES[dark ? 'dark' : 'light'];
   ACCENT = CSSVAR('--accent') || ACCENT;
+  const button = $('bTheme');
+  button.setAttribute('aria-pressed', String(dark));
+  button.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
   paint();
 }
 
@@ -5990,7 +6005,9 @@ function setAutoOrbit(on){
   cancelAnimationFrame(orbitFrame); orbitFrame = 0; orbitTime = 0;
   const b = $('bOrbit');
   b.innerHTML = (autoOrbit ? '⏸' : '▶') + '<span class="orbitWord"> Orbit</span>';
-  b.title = b.ariaLabel = autoOrbit ? 'Pause orbit' : 'Start orbit';
+  b.title = autoOrbit ? 'Pause orbit' : 'Start orbit';
+  b.ariaLabel = 'Automatic orbit';
+  b.setAttribute('aria-pressed', String(autoOrbit));
   if (autoOrbit) orbitFrame = requestAnimationFrame(orbitTick);
 }
 function setOrbitSpeed(speed){
@@ -6096,6 +6113,7 @@ function setSheetView(on){
   modeSheet = on;
   document.body.classList.toggle('sheetview', on);
   $('bSheet').classList.toggle('primary', on);
+  $('bSheet').setAttribute('aria-pressed', String(on));
   $('bSheet').textContent = on ? 'Plan' : 'Sheet';
   if (on){
     planView = {...view}; fitSheet();
@@ -6115,6 +6133,7 @@ function set3d(on){
   if (!on){ setAutoOrbit(false); fenceLabels3 = []; }
   document.body.classList.toggle('d3', on);
   $('b3d').classList.toggle('primary', on);
+  $('b3d').setAttribute('aria-pressed', String(on));
   $('b3d').textContent = on ? 'Plan' : '3D';
   hover = null; scene3 = null;
   updateHint();
@@ -6313,8 +6332,11 @@ function syncMatInputs(){
     $('uBotOff').textContent = $('uTopOff').textContent = (u==='m'?'mm':'in');
   $('matSec').className = 'acc ' + (M.style === 'rail' ? 'rail' : 'paling') +
                           (hr.on ? '' : ' nohr') + ' editorOnly';
-  document.querySelectorAll('#styleTog button').forEach(b =>
-    b.classList.toggle('on', b.dataset.s === (M.style === 'rail' ? 'rail' : 'paling')));
+  document.querySelectorAll('#styleTog button').forEach(b => {
+    const active = b.dataset.s === (M.style === 'rail' ? 'rail' : 'paling');
+    b.classList.toggle('on', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
 }
 let lastSelKey = '';
 function updateSelbox(){
@@ -6532,7 +6554,10 @@ function updateSelbox(){
     }
   }
   // bring the panel into view when the selection changes (it lives at the top of the sidebar)
-  if (key !== lastSelKey) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  if (key !== lastSelKey) box.scrollIntoView({
+    block:'nearest',
+    behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+  });
   lastSelKey = key;
 }
 
@@ -7000,12 +7025,12 @@ function hintText(drawing){
     return dimTool.pend
       ? (phone ? 'Tap to place the dimension' :
          'Move to position the dimension, then click to place it · Esc to back out.')
-      : dimTool.a
-      ? (phone ? 'Now tap what to measure from' :
-         'Now click the post, building corner or wall to measure from · Esc to back out.')
       : dimTool.a && dimTool.a.k === 'seg'
       ? (phone ? 'Place it, or tap the fence it meets for the angle' :
          'Place it for this fence’s length, or click the fence it meets for the corner angle.')
+      : dimTool.a
+      ? (phone ? 'Now tap what to measure from' :
+         'Now click the post, building corner or wall to measure from · Esc to back out.')
       : (phone ? 'Tap a fence, or a post then another point' :
          'Click a fence for its length, two fences for their angle, or a post then a corner, ' +
          'wall or another post · Esc or D to leave the tool, then click a dimension to edit it.');
@@ -7033,7 +7058,10 @@ document.querySelectorAll('#unitTog button').forEach(b =>
     if (state.unit === b.dataset.u) return;
     if (readOnly){
       state.unit = b.dataset.u;
-      document.querySelectorAll('#unitTog button').forEach(x => x.classList.toggle('on', x === b));
+      document.querySelectorAll('#unitTog button').forEach(x => {
+        x.classList.toggle('on', x === b);
+        x.setAttribute('aria-pressed', String(x === b));
+      });
       syncMatInputs(); updateAll();
       return;
     }
@@ -7044,7 +7072,10 @@ document.querySelectorAll('#unitTog button').forEach(b =>
         for (const M of [state.mat, ...state.polys.map(p => p.mat).filter(Boolean)])
           if (!(M.touched || {})[f]) M[f] = DEF[state.unit][f];
     });
-    document.querySelectorAll('#unitTog button').forEach(x => x.classList.toggle('on', x === b));
+    document.querySelectorAll('#unitTog button').forEach(x => {
+      x.classList.toggle('on', x === b);
+      x.setAttribute('aria-pressed', String(x === b));
+    });
     syncMatInputs(); updateAll();
   }));
 
@@ -7664,7 +7695,12 @@ function copyBomTable(rows,u){
 
 // copy summary
 const copyBtnIdleHTML = $('copyBtn').innerHTML;
-$('copyBtn').addEventListener('click', () => {
+let copyResetTimer = 0;
+function setCopyStatus(message, kind=''){
+  $('copyStatus').textContent = message;
+  $('copyStatus').dataset.kind = kind;
+}
+$('copyBtn').addEventListener('click', async () => {
   const m = calcMaterials(state.polys, state.mat), u = state.unit, sc = matScope();
   const t = scopeTotals(m, sc.idx, showAllTotals);
   const entries = showAllTotals || !sc.pl ? m.per : m.per.filter(f => f.i === sc.idx);
@@ -7699,19 +7735,38 @@ $('copyBtn').addEventListener('click', () => {
     }).join('; '));
   if (rows.length) L.push('Note: Quantities are purchase quantities; rail fit and cut details are listed above.');
   const text = L.join('\n');
-  const done = () => {
+  const button = $('copyBtn');
+  clearTimeout(copyResetTimer);
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  button.textContent = 'Copying…';
+  setCopyStatus('Copying bill of materials…');
+  try {
+    await copyText(text, 'Could not copy the bill of materials. Try again in a browser that allows clipboard access.');
+    setCopyStatus('Bill of materials copied to the clipboard.', 'success');
     $('copyBtn').textContent = '✓ Copied';
-    setTimeout(() => $('copyBtn').innerHTML = copyBtnIdleHTML, 1500);
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText)
-    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
-  else fallbackCopy(text, done);
+  } catch(error) {
+    button.textContent = 'Copy failed';
+    setCopyStatus(error.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.setAttribute('aria-busy', 'false');
+    copyResetTimer = setTimeout(() => { button.innerHTML = copyBtnIdleHTML; }, 1500);
+  }
 });
-function fallbackCopy(text, done){
+async function copyText(text, errorMessage){
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    try { await navigator.clipboard.writeText(text); return; } catch(error) {}
+  }
   const ta = document.createElement('textarea');
-  ta.value = text; document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); done(); } catch(e) {}
-  ta.remove();
+  ta.value = text;
+  ta.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(ta);
+  ta.select();
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch(error) {}
+  finally { ta.remove(); }
+  if (!copied) throw new Error(errorMessage);
 }
 
 /* =====================================================================
@@ -7733,20 +7788,59 @@ function applyState(o){
   state.snapGrid = o.snapGrid !== false; state.snapBld = o.snapBld !== false;
   if (o.view && o.view.s) view = o.view;
 }
-let saveTimer = 0;
+let saveTimer = 0, lastSavedPayload = '', lastSavedAt = 0, autosaveInitializing = true;
+function setAutosaveStatus(message, kind=''){
+  $('saveNote').textContent = message;
+  $('saveNote').dataset.kind = kind;
+}
+function autosaveSuccessMessage(){
+  return lastSavedAt
+    ? 'Saved in this browser at ' + new Date(lastSavedAt).toLocaleTimeString([], {
+        hour:'numeric', minute:'2-digit', second:'2-digit',
+      }) + '.'
+    : 'Changes save automatically in this browser.';
+}
+function saveNow(){
+  if (readOnly || autosaveInitializing) return true;
+  clearTimeout(saveTimer); saveTimer = 0;
+  try {
+    const payload = JSON.stringify(statePayload());
+    if (payload !== lastSavedPayload){
+      localStorage.setItem(LS_KEY, payload);
+      lastSavedPayload = payload;
+      lastSavedAt = Date.now();
+    }
+    setAutosaveStatus(autosaveSuccessMessage(), 'success');
+    return true;
+  } catch(error) {
+    setAutosaveStatus('Autosave failed. Changes may be lost if you close this page; use Files if available.', 'error');
+    return false;
+  }
+}
 function saveSoon(){
-  if (readOnly) return;
+  if (readOnly || autosaveInitializing) return;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(statePayload())); } catch(e) {}
-  }, 300);
+  setAutosaveStatus('Saving changes…');
+  saveTimer = setTimeout(saveNow, 300);
 }
 function load(){
   try {
-    const o = JSON.parse(localStorage.getItem(LS_KEY));
-    if (o && (o.v === 1 || o.v === 2)) applyState(o);
-  } catch(e) {}
+    const stored = localStorage.getItem(LS_KEY);
+    if (!stored){ setAutosaveStatus(autosaveSuccessMessage()); return; }
+    const o = JSON.parse(stored);
+    if (!o || (o.v !== 1 && o.v !== 2)) throw new Error('unsupported autosave');
+    applyState(o);
+    lastSavedPayload = stored;
+    setAutosaveStatus('Saved drawing restored from this browser.', 'success');
+  } catch(error) {
+    setAutosaveStatus('Browser autosave could not be loaded. It will remain untouched until you edit.', 'error');
+  }
 }
+const flushAutosave = () => { if (saveTimer) saveNow(); };
+window.addEventListener('pagehide', flushAutosave);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushAutosave();
+});
 async function loadSharedDrawing(){
   const response = await fetch('/api/shares/' + SHARE_ROUTE[1], {
     cache:'no-store',
@@ -7767,9 +7861,14 @@ async function loadSharedDrawing(){
   $('saveNote').textContent = value.expiresAt
     ? 'View-only snapshot · Link expires ' + new Date(value.expiresAt).toLocaleDateString()
     : 'View-only snapshot';
+  $('saveNote').dataset.kind = '';
 }
 function syncControls(){   // push state back into the toolbar/panel widgets after load/restore
-  document.querySelectorAll('#unitTog button').forEach(b => b.classList.toggle('on', b.dataset.u === state.unit));
+  document.querySelectorAll('#unitTog button').forEach(b => {
+    const active = b.dataset.u === state.unit;
+    b.classList.toggle('on', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
   $('cSnapGrid').checked = state.snapGrid;
   $('cSnapBld').checked = state.snapBld;
   updateHint(); syncMatInputs();
@@ -7875,7 +7974,9 @@ async function bkRequest(path, options, fallback){
   if (!r.ok){
     const messages = { exists:'A drawing with that name already exists.',
                        'not found':'That saved drawing no longer exists.',
-                       'bad name':'Use a valid drawing name.' };
+                       'bad name':'Use a valid drawing name.',
+                       'too large':'This drawing is too large for the gbot file server.',
+                       'write failed':'The gbot file server could not write the drawing.' };
     throw new Error(messages[body.err] || fallback);
   }
   return body;
@@ -8093,16 +8194,7 @@ async function copyShareLink(){
   setShareStatus('View-only link copied.', 'success');
 }
 async function copyPublicLink(url){
-  try {
-    if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error();
-    await navigator.clipboard.writeText(url);
-  } catch {
-    const input = document.createElement('textarea');
-    input.value = url; document.body.appendChild(input); input.select();
-    const copied = document.execCommand('copy');
-    input.remove();
-    if (!copied) throw new Error('Could not copy the public link.');
-  }
+  await copyText(url, 'Could not copy the public link.');
 }
 async function stopSharing(){
   if (!currentShare || shareBusy) return;
@@ -8450,7 +8542,9 @@ $('bTheme').addEventListener('click', () => {
 
 /* ---- init ---- */
 async function init(){
-  setTheme(localStorage.getItem(THEME_KEY) ||
+  let storedTheme = '';
+  try { storedTheme = localStorage.getItem(THEME_KEY) || ''; } catch(error) {}
+  setTheme(storedTheme ||
            (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   if (readOnly){
     document.body.classList.add('readonly');
@@ -8473,6 +8567,7 @@ async function init(){
   // the canvas that actually exists now instead of leaving it tiny or stranded in a corner.
   if (hasDrawingContent()) fitView();
   else { view = { x:-2, y:-2, s:24 }; updateAll(); }
+  autosaveInitializing = false;
   refreshBackups();
   refreshShareConfig();
 }

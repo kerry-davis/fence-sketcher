@@ -9,6 +9,7 @@
 //   PATCH  /backups/<name> -> rename; body {"name":"new-name"}
 //   GET/POST/PUT/DELETE /shares/<name> -> manage its public read-only snapshot
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -21,6 +22,7 @@ const APP = path.join(DIR, 'fence-fable.html');
 const SHARE_API = String(process.env.FENCE_SHARE_API_URL || '').replace(/\/+$/, '');
 const SHARE_ADMIN_TOKEN = String(process.env.FENCE_SHARE_ADMIN_TOKEN || '');
 const NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
+const MAX_BACKUP_BYTES = 2_000_000;
 const PORT = +(process.env.FENCE_PORT || 4647);
 fs.mkdirSync(BK, { recursive: true });
 fs.mkdirSync(SH, { recursive: true });
@@ -61,18 +63,31 @@ function shareConfigured(){
 }
 function readJsonBody(req, limit=2_100_000){
   return new Promise((resolve, reject) => {
-    let body = '', tooLarge = false;
+    let chunks = [], size = 0, tooLarge = false;
     req.on('data', data => {
       if (tooLarge) return;
-      body += data;
-      if (body.length > limit){ tooLarge = true; body = ''; }
+      size += data.length;
+      if (size > limit){ tooLarge = true; chunks = []; return; }
+      chunks.push(data);
     });
     req.on('end', () => {
       if (tooLarge) return reject(new Error('too large'));
-      try { resolve(JSON.parse(body)); } catch { reject(new Error('bad body')); }
+      try { resolve(JSON.parse(Buffer.concat(chunks, size).toString('utf8'))); }
+      catch { reject(new Error('bad body')); }
     });
     req.on('error', reject);
   });
+}
+function writeJsonAtomic(file, value){
+  const temp = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temp, JSON.stringify(value), { mode:0o600, flag:'wx' });
+    fs.renameSync(temp, file);
+  } finally {
+    try { fs.unlinkSync(temp); } catch(error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
 }
 async function publicShareRequest(method, token='', body){
   if (!shareConfigured()) throw new Error('not configured');
@@ -178,15 +193,16 @@ http.createServer(async (req, res) => {
       return send(200, fs.readFileSync(file));
     }
     if (req.method === 'PUT' || req.method === 'POST') {
-      let body = '';
-      req.on('data', d => { body += d; if (body.length > 2e6) req.destroy(); });
-      req.on('end', () => {
-        try { JSON.parse(body); } catch { return send(400, '{"err":"not json"}'); }
-        if (req.method === 'POST' && fs.existsSync(file)) return send(409, '{"err":"exists"}');
-        fs.writeFileSync(file, body);
-        send(200, '{"ok":true}');
-      });
-      return;
+      let body;
+      try { body = await readJsonBody(req, MAX_BACKUP_BYTES); }
+      catch(error) {
+        return send(error.message === 'too large' ? 413 : 400,
+                    error.message === 'too large' ? '{"err":"too large"}' : '{"err":"not json"}');
+      }
+      if (req.method === 'POST' && fs.existsSync(file)) return send(409, '{"err":"exists"}');
+      try { writeJsonAtomic(file, body); }
+      catch(error) { return send(500, '{"err":"write failed"}'); }
+      return send(200, '{"ok":true}');
     }
     if (req.method === 'DELETE') {
       if (!fs.existsSync(file)) return send(404, '{"err":"not found"}');
