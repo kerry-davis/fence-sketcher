@@ -217,6 +217,11 @@
   #selbox:not(.skillroof) .skillOnly{display:none}
   #selbox label{display:flex;align-items:center;gap:8px;padding:6px 0}
   #selbox input[type=checkbox]{width:19px;height:19px;accent-color:var(--accent)}
+  #settingsClone{display:none;border-color:var(--accent-soft)}
+  .settingsCloneActions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .settingsCloneActions button{width:100%}
+  #settingsCloneStatus{min-height:18px;margin-top:7px}
+  #settingsCloneStatus[data-kind="success"]{color:var(--accent)}
   #copyBtn{width:100%}
   #copyStatus{min-height:18px}
   #copyStatus:empty{display:none}
@@ -655,6 +660,16 @@
       <span id="sheetSummary">Totals and settings</span>
     </button>
     <section id="selbox" class="editorOnly" style="display:none"></section>
+    <section class="editorOnly" id="settingsClone">
+      <h2>Copy fence settings</h2>
+      <div class="settingsCloneActions">
+        <button type="button" id="copyFenceSettings">Copy settings</button>
+        <button type="button" id="pasteFenceSettings" class="primary" disabled>Paste settings</button>
+      </div>
+      <p class="note" id="settingsCloneStatus" role="status" aria-live="polite">
+        Copy this fence’s settings, select another fence or gate, then paste.
+      </p>
+    </section>
 
     <section>
       <div id="totalsHead">
@@ -6251,6 +6266,60 @@ function matScope(){
   return { mat: state.mat, pl: null, own: false, idx: -1 };
 }
 const curMat = () => matScope().mat;
+let copiedFenceSettings = null, settingsCloneNotice = null;
+function fenceSettingsSnapshot(pl, mat, segmentStart){
+  return {
+    mat:JSON.parse(JSON.stringify(mat)),
+    excludeMaterials:!!pl.excludeMaterials,
+    excludeRails:!!pl.excludeRails,
+    excludePalings:!!pl.excludePalings,
+    hidden3d:!!pl.hidden3d,
+    hiddenSheet:!!pl.hiddenSheet,
+    oneEnd:oneEndOf(mat, pl),
+    gateSide:segmentStart && segmentStart.gateAfter ? gateSideOf(segmentStart, mat) : null,
+  };
+}
+function pasteFenceSettingsSnapshot(pl, copied, segmentStart){
+  pl.mat = JSON.parse(JSON.stringify(copied.mat));
+  for (const key of ['excludeMaterials','excludeRails','excludePalings','hidden3d','hiddenSheet']){
+    if (copied[key]) pl[key] = true;
+    else delete pl[key];
+  }
+  if (copied.oneEnd === 'start' || copied.oneEnd === 'end') pl.oneEnd = copied.oneEnd;
+  else delete pl.oneEnd;
+  // Gate handedness belongs to a segment rather than its fence settings. Carry it only when
+  // both the copied source and currently selected target segments are gates.
+  if (segmentStart && segmentStart.gateAfter && copied.gateSide)
+    segmentStart.gateSideAfter = copied.gateSide;
+}
+function selectedSettingsSegment(sc){
+  return sc.pl && sel && sel.t === 'seg' && sel.p === sc.idx ? sc.pl.pts[sel.i] : null;
+}
+function syncSettingsClone(sc){
+  const wrap = $('settingsClone'), copy = $('copyFenceSettings'), paste = $('pasteFenceSettings');
+  wrap.style.display = sc.pl ? 'block' : 'none';
+  if (!sc.pl) return;
+  const name = fenceName(sc.pl, sc.idx), sameSource = copiedFenceSettings && copiedFenceSettings.source === sc.pl;
+  copy.setAttribute('aria-label', `Copy settings from ${name}`);
+  paste.disabled = !copiedFenceSettings || sameSource;
+  paste.setAttribute('aria-label', copiedFenceSettings
+    ? `Paste settings from ${copiedFenceSettings.sourceName} into ${name}`
+    : `Paste copied settings into ${name}`);
+  const status = $('settingsCloneStatus');
+  if (settingsCloneNotice && settingsCloneNotice.target === sc.pl){
+    status.textContent = settingsCloneNotice.message;
+    status.dataset.kind = 'success';
+  } else if (!copiedFenceSettings){
+    status.textContent = 'Copy this fence’s settings, select another fence or gate, then paste.';
+    status.dataset.kind = '';
+  } else if (sameSource){
+    status.textContent = `Copied from “${copiedFenceSettings.sourceName}”. Select another fence or gate.`;
+    status.dataset.kind = 'success';
+  } else {
+    status.textContent = `Ready to paste settings from “${copiedFenceSettings.sourceName}” into “${name}”.`;
+    status.dataset.kind = '';
+  }
+}
 
 function syncMatInputs(){
   const u = state.unit, sc = matScope(), M = sc.mat;
@@ -6277,6 +6346,7 @@ function syncMatInputs(){
   $('fenceSheetWrap').classList.toggle('off', !!(sc.pl && sc.pl.hiddenSheet));
   $('matOwnWrap').style.display = sc.pl ? 'flex' : 'none';
   $('matOwn').checked = sc.own;
+  syncSettingsClone(sc);
   $('matWho').textContent = !sc.pl ? 'Editing the defaults — used by every fence without its own settings.'
     : sc.own ? `Editing ${fenceName(sc.pl,sc.idx)} only.`
              : `${fenceName(sc.pl,sc.idx)} follows the defaults. Tick above to give it its own settings.`;
@@ -7341,6 +7411,25 @@ $('matOwn').addEventListener('change', e => {
   if (e.target.checked) sc.pl.mat = JSON.parse(JSON.stringify(state.mat));
   else delete sc.pl.mat;
   syncMatInputs(); updateAll();
+});
+$('copyFenceSettings').addEventListener('click', () => {
+  const sc = matScope();
+  if (!sc.pl) return;
+  copiedFenceSettings = {
+    ...fenceSettingsSnapshot(sc.pl, sc.mat, selectedSettingsSegment(sc)),
+    source:sc.pl,
+    sourceName:fenceName(sc.pl, sc.idx),
+  };
+  settingsCloneNotice = null;
+  syncSettingsClone(sc);
+});
+$('pasteFenceSettings').addEventListener('click', () => {
+  const sc = matScope();
+  if (!sc.pl || !copiedFenceSettings || copiedFenceSettings.source === sc.pl) return;
+  const sourceName = copiedFenceSettings.sourceName, targetName = fenceName(sc.pl, sc.idx);
+  commitEdit(() => pasteFenceSettingsSnapshot(sc.pl, copiedFenceSettings, selectedSettingsSegment(sc)));
+  settingsCloneNotice = {target:sc.pl, message:`Applied settings from “${sourceName}” to “${targetName}”.`};
+  updateAll();
 });
 document.querySelectorAll('#styleTog button').forEach(b =>
   b.addEventListener('click', () => {
