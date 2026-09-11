@@ -226,7 +226,7 @@ test('copy summary renders a consolidated store-ready BOM', () => {
   assert.match(html, /\$\('iHRLength'\)\.addEventListener\('change'/);
   assert.match(html, /'hrLength'\]\)/);
   assert.match(html, /id="iPostDepth"/);
-  assert.match(html, />Hole depth<\/span>/);
+  assert.match(html, /<label for="iPostDepth">Hole depth<\/label>/);
   assert.match(html, /id="iAboveGroundHeight"/);
   assert.match(html, /\['iPostDepth','postDepth'\]/);
 });

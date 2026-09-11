@@ -126,6 +126,11 @@ screens.
 - **Autosave** to `localStorage`, with visible saving/error status and a final
   synchronous flush when the page is hidden or closed, plus named server backups
   managed from the top-right **Files** menu.
+- **Offline drawing files.** **Files → Download drawing** keeps the current canvas
+  in a portable JSON file, even when autosave or the file server is unavailable.
+  **Open file** validates it before asking to replace the canvas; the change can
+  be undone. Imported files start as local drawings so saving cannot silently
+  overwrite the previously open server drawing.
 - **Undo and redo** (`Ctrl+Z` / `Ctrl+Y` or `Cmd+Shift+Z`), 100 deep.
 - **View-only sharing.** Publish a saved drawing as an expiring, revocable link.
   Viewers can use the plan, 3D controls, labels, units and materials summary,
@@ -476,8 +481,9 @@ whichever side you drop it on, with no awareness of what is underneath.
 
 ## Running it
 
-**Just the app** — open `fence-fable.html`. That's it. Backups hide themselves
-when there's no server behind the page.
+**Just the app** — open `fence-fable.html`. That's it. **Files → Download drawing**
+and **Open file** work without a server. Server actions stay disabled until a
+connection is available; the Files footer reports the connection and offers a retry.
 
 **With backups:**
 
@@ -517,10 +523,39 @@ or commit that directory when changing branches.
 | `DELETE` | `/shares/<name>` | revoke its active link |
 
 Names are whitelisted to `[a-zA-Z0-9._-]{1,64}`, so path traversal isn't
-possible. Backup request bodies are limited by bytes and fully validated before
+possible. Backup request bodies are limited by bytes and checked for valid JSON before
 the previous drawing is replaced. Successful saves are staged to a private
 temporary file and atomically renamed into place, so an interrupted overwrite
 does not leave a partially written drawing.
+
+File and share requests time out after 15 seconds, including response-body reads.
+An unreadable response produces an error instead of being treated as a successful
+empty response. If a save times out, check the saved drawing before retrying: the
+server may have completed the write even though its acknowledgement did not arrive.
+Save, restore and share dialogs cannot be dismissed with Escape while an operation
+is running; they become dismissible again on success or failure.
+
+### Individual drawing files
+
+**Download drawing** exports the current canvas only, using the existing
+`fence-sketcher` version `1` envelope. **Open file** accepts that envelope and raw
+legacy drawing snapshots (versions `1`, `2`, or unversioned), up to 25 MB. A full
+library file belongs in **Restore all files** instead. Downloading an empty canvas
+is allowed and retains its construction settings.
+Opening a drawing returns to plan, fits the new geometry to the canvas and clears
+any dimension-tool selection from the previous drawing.
+
+The editor validates fences, post coordinates, dimensions, buildings, construction
+numbers and the saved view before loading an autosave, server drawing, shared view
+or imported file. Invalid data leaves the current drawing intact. Legacy building
+groups and gate positions are migrated on a copy. Missing construction fields use
+the loaded drawing's unit defaults, not the previous drawing's settings; saves
+from before post embedment retain their original above-ground height.
+
+Construction fields expose their labels to assistive technology. On phones,
+collapsed settings are removed from the keyboard focus order; opening the bottom
+sheet enables them, and Escape closes it and returns focus to its handle, including
+when a construction field has focus.
 
 ### Full external backup and restore
 
